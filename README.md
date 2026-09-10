@@ -1,14 +1,15 @@
 # ME 193 – AI & Robotics
 
-Course workspace. Each project/assignment lives in its own subfolder.
+Course workspace, one git repo: <https://github.com/rafaeshafi/Me193>
+Each project/assignment lives in its own subfolder.
 
 Open this folder (`~/ME193`) in VS Code to see everything at once.
 
 ## Projects
 
-| Folder | What it is | Git |
-|---|---|---|
-| `lego-single-motor/` | Day 2 – Python script that spins a single LEGO Education motor over BLE (`legoeducation` library) | own repo, ready to push |
+| Folder | What it is |
+|---|---|
+| `lego-single-motor/` | Day 2 – Python script that spins a single LEGO Education motor over BLE (`legoeducation` library) |
 
 ## Notes
 
