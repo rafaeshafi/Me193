@@ -1,0 +1,15 @@
+# Virtual environments (rebuilt from each project's requirements.txt)
+**/my_env/
+**/.venv/
+
+# Python
+**/__pycache__/
+*.pyc
+
+# Tooling scratch
+**/.claude-flow/
+**/.swarm/
+**/.hive-mind/
+
+# macOS
+.DS_Store

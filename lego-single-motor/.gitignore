@@ -1,0 +1,15 @@
+# Virtual environment — never commit this
+my_env/
+.venv/
+
+# Python cruft
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Tooling scratch dirs
+.claude-flow/
+.swarm/
+.hive-mind/
