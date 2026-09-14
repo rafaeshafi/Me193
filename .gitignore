@@ -13,3 +13,6 @@
 
 # macOS
 .DS_Store
+
+# Cloned reference docs (re-pull: git clone https://github.com/LEGO/LEGOEducation.git lego-docs)
+lego-docs/

@@ -1,0 +1,14 @@
+# Versions are pinned because the obvious "just install the latest" combination
+# does not work on macOS (Apple silicon):
+#
+#   * mediapipe 1.x dropped mp.solutions AND its PoseLandmarker graph aborts on
+#     arm64 with "DrishtiMetalHelper ... Service is unavailable".
+#   * mediapipe 0.10.x requires numpy<2, but opencv-python >= 4.11 requires
+#     numpy>=2, so OpenCV has to be held back too.
+#
+# This trio is the combination that actually runs.
+mediapipe==0.10.21
+opencv-python==4.10.0.84
+numpy<2
+
+legoeducation==1.1.1
