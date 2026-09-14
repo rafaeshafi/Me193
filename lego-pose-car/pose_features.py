@@ -53,8 +53,8 @@ MIN_SHOULDER_FRAC = 0.08  # shoulders narrower than this fraction of the frame
 CLASS_SPEEDS = {
     "forward": (70, 70),
     "back": (-70, -70),
-    "left": (-35, 70),    # left wheel back, right wheel forward = spin left
-    "right": (70, -35),
+    "left": (-35, 75),
+    "right": (75, -35),
     "stop": (0, 0),
 }
 DEFAULT_CLASSES = ("forward", "back", "left", "right", "stop")

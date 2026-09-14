@@ -32,10 +32,12 @@ import pose_features as pf
 from pose_features import L_SHOULDER, R_SHOULDER, L_ELBOW, R_ELBOW, L_WRIST, R_WRIST
 
 # --- Tuning ----------------------------------------------------------------
-MAX_SPEED = 70        # motor % at full arm extension; 100 is a lot in a hallway
+MOTOR_DIRECTION = -1  # this car's motors drive it backwards on a positive speed,
+                      # so flip at the wire. +1 if yours is mounted the other way.
+MAX_SPEED = 100       # motor % at full arm extension; 100 is a lot in a hallway
 DEADZONE = 0.15       # arm heights within this of shoulder level read as "stop"
 FULL_SCALE = 0.85     # arm height (in shoulder-widths) that means MAX_SPEED
-SMOOTHING = 0.35      # EMA weight on each new reading; lower = smoother, laggier
+SMOOTHING = 0.55      # EMA weight on each new reading; lower = smoother, laggier
 MIN_CONFIDENCE = 0.6  # --model only: below this the classifier is guessing, so stop
 LOST_POSE_GRACE = 0.4 # seconds a dropped pose is tolerated before stopping
 SEND_INTERVAL = 0.08  # seconds between BLE writes (~12/s)
@@ -189,7 +191,11 @@ class Car:
         if self.motor is None:
             return
         # blocking=False: fire the command and get straight back to the camera.
-        self.motor.movement_move_tank(left, right, blocking=False)
+        # Everything above this line is in the driver's terms — forward is
+        # positive — so the HUD and the rate limiter stay readable. Only the
+        # command on the wire is flipped to match how the motors are mounted.
+        self.motor.movement_move_tank(left * MOTOR_DIRECTION,
+                                      right * MOTOR_DIRECTION, blocking=False)
 
     def stop(self):
         self._last_sent = None  # force the next drive() call through
