@@ -12,3 +12,8 @@ opencv-python==4.10.0.84
 numpy<2
 
 legoeducation==1.1.1
+
+# Training the pose classifier (collect_poses.py / train_poses.py).
+# Not needed just to drive the car with the built-in geometry.
+scikit-learn==1.9.1
+joblib==1.6.0

@@ -10,6 +10,13 @@ sent to the LEGO Double Motor over Bluetooth Low Energy.
 
 Both arms up = drive forward. One up, one down = spin in place.
 
+That mapping is hand-written geometry, and is the default. Passing --model
+instead drives from a classifier you trained yourself on poses you recorded:
+
+    python collect_poses.py                  # record examples of each pose
+    python train_poses.py                    # train on them
+    python pose_car.py --model pose_model.joblib
+
 Run `python pose_car.py --no-motor` to see the vision half work with no
 hardware attached.
 """
@@ -20,27 +27,16 @@ import time
 from pathlib import Path
 
 import cv2
-import mediapipe as mp
-from mediapipe.tasks.python import BaseOptions
-from mediapipe.tasks.python import vision
 
-MODEL_PATH = Path(__file__).parent / "pose_landmarker_lite.task"
-
-# --- Landmark indices we care about (MediaPipe's own numbering) -------------
-# These are ANATOMICAL: LEFT_WRIST is the person's left wrist, whichever way
-# the image is mirrored. The car drives away from the driver, so the driver's
-# left arm and the car's left wheel are on the same side.
-L_SHOULDER, R_SHOULDER = 11, 12
-L_ELBOW, R_ELBOW = 13, 14
-L_WRIST, R_WRIST = 15, 16
+import pose_features as pf
+from pose_features import L_SHOULDER, R_SHOULDER, L_ELBOW, R_ELBOW, L_WRIST, R_WRIST
 
 # --- Tuning ----------------------------------------------------------------
 MAX_SPEED = 70        # motor % at full arm extension; 100 is a lot in a hallway
 DEADZONE = 0.15       # arm heights within this of shoulder level read as "stop"
 FULL_SCALE = 0.85     # arm height (in shoulder-widths) that means MAX_SPEED
 SMOOTHING = 0.35      # EMA weight on each new reading; lower = smoother, laggier
-MIN_VISIBILITY = 0.5  # below this the landmark is a guess, so we stop instead
-MIN_SHOULDER_FRAC = 0.08  # shoulders narrower than this fraction of the frame = bad read
+MIN_CONFIDENCE = 0.6  # --model only: below this the classifier is guessing, so stop
 LOST_POSE_GRACE = 0.4 # seconds a dropped pose is tolerated before stopping
 SEND_INTERVAL = 0.08  # seconds between BLE writes (~12/s)
 SEND_DELTA = 4        # don't spend a BLE write on a change smaller than this
@@ -67,24 +63,62 @@ def arm_speed(shoulder, wrist, shoulder_width):
 
 def read_arms(landmarks, width, height):
     """Return ((left_speed, right_speed), points) or None if the pose is unusable."""
-    needed = (L_SHOULDER, R_SHOULDER, L_ELBOW, R_ELBOW, L_WRIST, R_WRIST)
-    if any(landmarks[i].visibility < MIN_VISIBILITY for i in needed):
-        return None
-
-    # Normalized coords are fractions of width/height, so they must be scaled
-    # back into pixels before any distance between them means anything.
-    pts = {i: (landmarks[i].x * width, landmarks[i].y * height) for i in needed}
-
-    # Every measurement below is divided by this, so a bad value doesn't just
-    # add noise, it amplifies it. A driver standing side-on or far away has
-    # near-overlapping shoulders, which would turn a level arm into full speed.
-    shoulder_width = math.dist(pts[L_SHOULDER], pts[R_SHOULDER])
-    if shoulder_width < MIN_SHOULDER_FRAC * width:
-        return None  # side-on or too far away: refuse to guess
+    geometry = pf.pose_geometry(landmarks, width, height)
+    if geometry is None:
+        return None  # unreadable pose: see the guards in pose_features
+    pts, _midpoint, shoulder_width = geometry
 
     left = arm_speed(pts[L_SHOULDER], pts[L_WRIST], shoulder_width)
     right = arm_speed(pts[R_SHOULDER], pts[R_WRIST], shoulder_width)
     return (left, right), pts
+
+
+class GestureModel:
+    """The classifier trained by train_poses.py, read the same way as read_arms.
+
+    Returns the same ((left, right), points) shape, so the driving loop does not
+    care which of the two is steering.
+    """
+
+    def __init__(self, path, min_confidence=MIN_CONFIDENCE):
+        import joblib
+
+        bundle = joblib.load(path)
+        self.pipeline = bundle["pipeline"]
+        self.min_confidence = min_confidence
+        self.label = None
+        self.confidence = 0.0
+
+        # A model trained on a different feature vector still loads and still
+        # predicts. It just predicts nonsense, so check rather than find out
+        # while the car is moving.
+        if list(bundle["feature_names"]) != list(pf.FEATURE_NAMES):
+            raise SystemExit(f"{path} was trained on a different feature set. Retrain it.")
+        unknown = [name for name in bundle["classes"] if name not in pf.CLASS_SPEEDS]
+        if unknown:
+            raise SystemExit(f"{path} predicts classes with no entry in CLASS_SPEEDS "
+                             f"(pose_features.py): {', '.join(unknown)}")
+
+    def read(self, landmarks, width, height):
+        geometry = pf.pose_geometry(landmarks, width, height)
+        if geometry is None:
+            self.label, self.confidence = None, 0.0
+            return None
+        pts = geometry[0]
+
+        features = pf.features_from_landmarks(landmarks, width, height)
+        probabilities = self.pipeline.predict_proba([features])[0]
+        best = int(probabilities.argmax())
+        self.confidence = float(probabilities[best])
+
+        # An unconfident frame is one that looks like nothing you recorded.
+        # Stopping beats acting on the model's best guess.
+        if self.confidence < self.min_confidence:
+            self.label = None
+            return (0.0, 0.0), pts
+
+        self.label = str(self.pipeline.classes_[best])
+        return pf.CLASS_SPEEDS[self.label], pts
 
 
 class Car:
@@ -172,7 +206,7 @@ class Car:
                 pass  # link may already be gone; keep tearing down regardless
 
 
-def draw_hud(frame, pts, left, right, armed, have_pose):
+def draw_hud(frame, pts, left, right, armed, have_pose, gesture=None):
     height, width = frame.shape[:2]
 
     if pts is not None:
@@ -205,9 +239,19 @@ def draw_hud(frame, pts, left, right, armed, have_pose):
     else:
         status, status_color = "disarmed - press d to drive", (0, 180, 255)
     cv2.putText(frame, status, (24, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
+    if gesture is not None:
+        if gesture.label is None:
+            text, colour = f"? unsure ({gesture.confidence:.0%})", (0, 120, 255)
+        else:
+            text, colour = f"{gesture.label.upper()} ({gesture.confidence:.0%})", (0, 220, 0)
+        cv2.putText(frame, text, (24, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.8, colour, 2)
+
     if not have_pose:
         cv2.putText(frame, "no pose - stopped", (24, height - 24),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 120, 255), 2)
+    elif gesture is not None:
+        cv2.putText(frame, "trained classifier", (24, height - 24),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
     else:
         cv2.putText(frame, "arms up = forward | out = stop | down = reverse",
                     (24, height - 24), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
@@ -223,11 +267,25 @@ def main():
                         help="Connection Card colour, e.g. azure (targets one specific motor)")
     parser.add_argument("--card-serial", metavar="SERIAL",
                         help="Connection Card serial, e.g. 3683")
+    parser.add_argument("--model", nargs="?", metavar="FILE",
+                        const=str(pf.CLASSIFIER_PATH),
+                        help="drive from a classifier trained by train_poses.py "
+                             "instead of the built-in geometry")
+    parser.add_argument("--min-confidence", type=float, default=MIN_CONFIDENCE,
+                        help=f"--model only: stop below this confidence "
+                             f"(default {MIN_CONFIDENCE})")
     args = parser.parse_args()
 
-    if not MODEL_PATH.exists():
-        print(f"Missing pose model: {MODEL_PATH}\nSee README.md for the download command.")
-        return 1
+    gesture = None
+    if args.model:
+        if not Path(args.model).exists():
+            print(f"No trained model at {args.model}. Train one first:\n"
+                  f"  my_env/bin/python collect_poses.py\n"
+                  f"  my_env/bin/python train_poses.py")
+            return 1
+        gesture = GestureModel(args.model, args.min_confidence)
+        print(f"Driving from {Path(args.model).name}: "
+              f"{', '.join(map(str, gesture.pipeline.classes_))}")
 
     car = Car(enabled=not args.no_motor,
               card_color=args.card_color, card_serial=args.card_serial)
@@ -240,12 +298,6 @@ def main():
         car.close()
         return 1
 
-    options = vision.PoseLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=str(MODEL_PATH)),
-        running_mode=vision.RunningMode.VIDEO,  # VIDEO mode tracks between frames
-        num_poses=1,
-    )
-
     armed = False
     left = right = 0.0
     last_pose_time = 0.0
@@ -253,7 +305,7 @@ def main():
 
     print("Press 'd' to arm/disarm the motors, 'q' or Esc to quit.")
     try:
-        with vision.PoseLandmarker.create_from_options(options) as landmarker:
+        with pf.make_landmarker() as landmarker:
             while True:
                 ok, frame = capture.read()
                 if not ok:
@@ -263,15 +315,15 @@ def main():
                 # Mirror so the preview behaves like a mirror for the driver.
                 frame = cv2.flip(frame, 1)
                 height, width = frame.shape[:2]
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-
                 now = time.monotonic()
-                result = landmarker.detect_for_video(image, int((now - start) * 1000))
+                result = landmarker.detect_for_video(pf.to_mp_image(frame),
+                                                     int((now - start) * 1000))
 
                 reading = None
                 if result.pose_landmarks:
-                    reading = read_arms(result.pose_landmarks[0], width, height)
+                    landmarks = result.pose_landmarks[0]
+                    reading = (gesture.read(landmarks, width, height) if gesture
+                               else read_arms(landmarks, width, height))
 
                 pts = None
                 if reading is not None:
@@ -295,7 +347,7 @@ def main():
                     car.drive(left, right)
 
                 have_pose = now - last_pose_time < LOST_POSE_GRACE
-                draw_hud(frame, pts, left, right, armed, have_pose)
+                draw_hud(frame, pts, left, right, armed, have_pose, gesture)
                 cv2.imshow("pose car", frame)
 
                 key = cv2.waitKey(1) & 0xFF
