@@ -1,13 +1,42 @@
-# lego-pose-car
+# P1: Pose Race
 
-Drive a LEGO Education car by moving your arms in front of a webcam.
+**Drive a LEGO Education car by moving your arms in front of a webcam.**
 
-MediaPipe finds your body in the camera image, your arms decide what the car
-should do, and those speeds go to a LEGO Double Motor over Bluetooth Low Energy.
+ME 193 – AI & Robotics, Project 1.
 
-Built for ME 193 – AI & Robotics.
+A webcam watches you. MediaPipe turns each frame into a skeleton of 33 body
+landmarks. Your arm positions become a pair of motor speeds, and those speeds
+go to a LEGO Double Motor over Bluetooth Low Energy — no cable, no custom
+firmware. Raise both arms and the car drives away from you; drop one and it
+spins. The whole loop runs about thirty times a second on a laptop CPU.
 
-There are two ways to steer it, and you can switch between them with a flag:
+The project is deliberately two systems in one, because the interesting
+question in this assignment is *what actually needs to be learned*:
+
+- A **hand-written geometric mapping** — trigonometry on your arm angles, no
+  training data, smooth continuous speed control.
+- A **classifier you train yourself** — you record examples of each pose, it
+  learns to tell them apart, and the car drives from its predictions.
+
+Both drive the same hardware and you switch with one flag, so they can be
+compared directly. The write-up in [Questions](#questions) covers how Python
+reaches the hardware, where the synchronous/asynchronous boundary sits, and
+what was and was not trained.
+
+## Contents
+
+| File | What it is |
+|---|---|
+| [`pose_car.py`](pose_car.py) | The driving program — both control modes, Bluetooth, the preview window |
+| [`pose_features.py`](pose_features.py) | Shared: landmark indices, the feature vector, the pose detector |
+| [`collect_poses.py`](collect_poses.py) | Records labelled pose examples to `pose_data.csv` |
+| [`train_poses.py`](train_poses.py) | Trains on that CSV, reports results, writes `pose_model.joblib` |
+| [`requirements.txt`](requirements.txt) | Pinned dependencies (the pins matter — see the bottom of this file) |
+| `pose_landmarker_lite.task` | Google's pre-trained pose model, committed so a demo needs no internet |
+
+## Two ways to steer it
+
+You can switch between them with a flag:
 
 | Mode | How it decides | Flag |
 |---|---|---|
@@ -49,7 +78,7 @@ python pose_car.py               # connect to a motor and drive
 If you get `ModuleNotFoundError: No module named 'cv2'`, you ran the system
 Python instead of this project's. Either activate the venv as above, or call it
 directly: `my_env/bin/python pose_car.py`. In VS Code: Cmd+Shift+P →
-**Python: Select Interpreter** → `lego-pose-car/my_env/bin/python`.
+**Python: Select Interpreter** → `P1-Pose-Race/my_env/bin/python`.
 
 Keys, in the preview window:
 
@@ -63,7 +92,7 @@ the scan first — possibly someone else's. Use the Connection Card that came wi
 the motor to name yours:
 
 ```bash
-python pose_car.py --card-color azure --card-serial 3683
+python pose_car.py --card-color orange --card-serial 1129
 ```
 
 Other flags: `--camera N` to pick a different camera, `--min-confidence` to make
@@ -71,6 +100,25 @@ the classifier more or less cautious.
 
 On macOS the first run triggers Camera and Bluetooth permission prompts for your
 terminal — allow both.
+
+### If the car drives the wrong way
+
+How the motors sit in the chassis decides whether a positive speed drives the
+car forwards or backwards, and there is no way to detect that from software.
+`MOTOR_DIRECTION` in [`pose_car.py`](pose_car.py) flips it:
+
+```python
+MOTOR_DIRECTION = -1   # this build; use +1 if arms-up already drives forwards
+```
+
+It is applied at the single point where the command goes out over Bluetooth, so
+everything else in the code stays written in the driver's terms — forward is
+positive — and both control modes are corrected at once.
+
+Flipping the sign of both wheels also mirrors turning: a left spin becomes a
+right spin. That is correct when the whole chassis is mounted backwards. If
+driving is now right but turning is mirrored, the two motors are swapped
+left-for-right instead, which is a separate fix.
 
 ## Training your own pose classes
 
@@ -153,7 +201,7 @@ offset = (shoulder_y - wrist_y) / shoulder_width
 Dividing by shoulder width is what makes this work at any distance from the
 camera: standing closer scales every pixel measurement up, but their *ratio*
 holds. A dead zone near zero keeps a level arm from creeping, and the result is
-clamped to ±70%.
+clamped to ±`MAX_SPEED`.
 
 **Classifier mode** builds a feature vector from 9 upper-body landmarks — nose,
 shoulders, elbows, wrists, hips — re-expressed relative to the midpoint of your
@@ -168,15 +216,7 @@ visibility, a driver standing side-on to the camera (their shoulders overlap,
 which would otherwise amplify noise into full throttle), no pose at all for
 0.4s, or — in classifier mode — a prediction the model isn't confident about.
 
-### Files
-
-| File | What it is |
-|---|---|
-| [`pose_car.py`](pose_car.py) | The driving program. Both modes, BLE, the preview window. |
-| [`pose_features.py`](pose_features.py) | Shared: landmark indices, the feature vector, the detector. |
-| [`collect_poses.py`](collect_poses.py) | Records labelled pose examples to `pose_data.csv`. |
-| [`train_poses.py`](train_poses.py) | Trains on that CSV, reports results, writes `pose_model.joblib`. |
-| `pose_landmarker_lite.task` | Google's pre-trained pose model (committed, 5.5 MB). |
+### One definition of a feature vector
 
 The feature vector is defined in exactly one place on purpose. If recording,
 training and driving disagreed about what the 18 numbers mean, the model would

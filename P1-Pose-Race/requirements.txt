@@ -9,6 +9,10 @@
 # This trio is the combination that actually runs.
 mediapipe==0.10.21
 opencv-python==4.10.0.84
+# mediapipe pulls opencv-contrib-python in as a dependency, and ITS cv2 is the
+# one that ends up imported. Left unpinned it resolves to a build that wants
+# numpy>=2, so it has to be held at the same version as opencv-python.
+opencv-contrib-python==4.10.0.84
 numpy<2
 
 legoeducation==1.1.1

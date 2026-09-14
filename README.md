@@ -10,7 +10,7 @@ Open this folder (`~/ME193`) in VS Code to see everything at once.
 | Folder | What it is |
 |---|---|
 | `lego-single-motor/` | Day 2 – Python script that spins a single LEGO Education motor over BLE (`legoeducation` library) |
-| `lego-pose-car/` | Webcam pose control – MediaPipe reads your arms, tank-drives a LEGO Double Motor |
+| `P1-Pose-Race/` | **P1: Pose Race** – drive a LEGO car by moving your arms. MediaPipe pose tracking over BLE, plus a pose classifier trained on your own recordings |
 | `lego-docs/` | Reference clone of <https://github.com/LEGO/LEGOEducation> – API docs + official examples (gitignored) |
 
 ## Notes

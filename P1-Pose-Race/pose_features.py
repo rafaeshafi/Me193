@@ -51,8 +51,8 @@ MIN_SHOULDER_FRAC = 0.08  # shoulders narrower than this fraction of the frame
 
 # What each trained pose class tells the car to do, as (left%, right%).
 CLASS_SPEEDS = {
-    "forward": (70, 70),
-    "back": (-70, -70),
+    "forward": (100, 100),
+    "back": (-100, -100),
     "left": (-35, 75),
     "right": (75, -35),
     "stop": (0, 0),
