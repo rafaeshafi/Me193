@@ -5,8 +5,9 @@ stops. The car waits for "start" on MQTT. As the ball, it dies (publish + death
 song) if the goalie reaches its colour sensor, and scores (publish + victory
 song) on a held top-note whistle.
 
-As the goalie this is the ROBOT laptop: its whistle drives the car, and it also
-owns the glove's Single Motor, which it moves on commands that the GLOVE laptop
+As the goalie this is the ROBOT laptop: its whistle slides the car back and
+forth along the goal line (higher = forward, lower = backward, middle or
+silence = stop; it never turns), and it also owns the glove's Single Motor, which it moves on commands that the GLOVE laptop
 (glove.py) sends over MQTT. It reports the game state back to that laptop.
 
     python whistle_car.py --calibrate         # measure your whistle once
@@ -257,15 +258,31 @@ class Game:
         elif decision.goal:
             self.goal()
         else:
-            self.car.drive(decision.left, decision.right)
+            self.car.drive(*self.wheels(decision))
+
+    def wheels(self, decision):
+        """Left/right motor % for a decision.
+
+        The ball steers like a car. The goalie only slides back and forth
+        along the goal line: above the middle note = forward, below = backward,
+        both wheels always equal so it never turns.
+        """
+        if self.role == "ball":
+            return decision.left, decision.right
+        speed = decision.steer * config.GOALIE_SPEED * config.GOALIE_DIRECTION
+        return speed, speed
 
 
 def status(game, det, decision, muted, now):
     """Headline, its colour, and the status lines for the display."""
+    left, right = game.wheels(decision)
     if game.state == DRIVING:
         headline, colour = decision.label.split("  ")[0], "green"
         if decision.label.startswith("STOP"):
-            colour = "red"
+            headline, colour = "STOP", "red"
+        elif game.role == "goalie":
+            move = "FORWARD" if decision.steer > 0 else "BACKWARD"
+            headline = f"{move} {abs(decision.steer):.0%}" if decision.steer else "HOLD"
         elif decision.goal_progress:
             colour = "purple"
     elif game.state == WAITING:
@@ -275,7 +292,7 @@ def status(game, det, decision, muted, now):
 
     lines = [f"state    {game.state}  {game.result}", *hearing_lines(det, muted),
              f"decision {decision.label}   steer {decision.steer:+.2f}",
-             f"motors   L {decision.left:5.0f}%   R {decision.right:5.0f}%"
+             f"motors   L {left:5.0f}%   R {right:5.0f}%"
              + ("" if game.state == DRIVING else "   (held at 0)")]
     if game.role == "ball":
         lines.append(f"sensor   reflection {game.car.reflection():.0f}  (baseline "
@@ -321,7 +338,9 @@ def main():
             return
         radio.connect()
         floor = measure_floor(mic)
-        display = Display(bands, floor, f"Whistle Soccer ({args.role})")
+        labels = (("BACKWARD", "HOLD", "FORWARD", None) if goalie
+                  else ("RIGHT", "STRAIGHT", "LEFT", "GOAL"))
+        display = Display(bands, floor, f"Whistle Soccer ({args.role})", band_labels=labels)
         keys = queue.Queue()
         display.on_key(keys.put)
         display.close_on_ctrl_c()

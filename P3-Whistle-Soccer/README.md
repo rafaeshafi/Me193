@@ -20,8 +20,9 @@ The **goalie** is one robot run by **two people on two laptops**. Each person
 streams audio from their own microphone, and the two laptops coordinate over
 MQTT:
 
-- **Robot laptop:** its whistle drives the car. It also holds the Bluetooth
-  link to the **glove**, a Single Motor standing upright with a large LEGO
+- **Robot laptop:** its whistle slides the car back and forth along the goal
+  line. Above the middle note it drives forward, below it drives backward, and
+  it never turns. It also holds the Bluetooth link to the **glove**, a Single Motor standing upright with a large LEGO
   piece on it.
 - **Glove laptop:** its whistle aims the glove, using the same pitch system.
   It sends each glove angle to the robot laptop over MQTT.
@@ -206,6 +207,13 @@ the car and play a song. As the ball, the car switches to LOST when the Color
 Sensor's reflection rises 20 above its value at `start` for 0.1 s. That means
 something is right in front of it, which is the goalie. It then publishes
 `ball:caught`. The goalie role switches on the ball's messages instead.
+
+**The goalie robot** only moves along the goal line. The same steering value
+becomes one speed for both wheels: steer × `GOALIE_SPEED` (60 %). Above the
+middle note it drives forward, below it drives backward, faster the further
+from the middle. The middle note or silence stops it, and the goal band is
+ignored. Because both wheels always get the same speed, it cannot turn off the
+line.
 
 **The glove** uses the same hearing and smoothing steps, and the same bands,
 on the second laptop. The steering value −1 … +1 becomes an angle: steer ×

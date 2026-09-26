@@ -51,6 +51,12 @@ TURN_GAIN = 1.0       # 1.0: the inside wheel stops at a full turn; 2.0: it reve
 REFLECT_DELTA = 20    # rise above the reading taken at "start" that counts as caught
 REFLECT_HOLD = 0.1    # s it must stay high, so a single glitchy reading is ignored
 
+# Goalie robot: only slides forward/backward along the goal line, never turns.
+# Above the middle note = forward, below = backward, faster the further from
+# the middle; middle note or silence = stop.
+GOALIE_SPEED = 60     # motor % at your highest / lowest whistle
+GOALIE_DIRECTION = 1  # flip to -1 if a high whistle drives it backwards
+
 # Goalie glove: a Single Motor standing upright with a big LEGO piece on it,
 # plugged into the same kit (same Connection Card). The glove laptop's whistle
 # sets its angle: middle note = centre (0), higher = swing left, lower = swing
