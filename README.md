@@ -11,7 +11,9 @@ Open this folder (`~/ME193`) in VS Code to see everything at once.
 |---|---|
 | `lego-single-motor/` | Day 2 – Python script that spins a single LEGO Education motor over BLE (`legoeducation` library) |
 | `P1-Pose-Race/` | **P1: Pose Race** – drive a LEGO car by moving your arms. MediaPipe pose tracking over BLE, plus a pose classifier trained on your own recordings |
+| `P3-Whistle-Soccer/` | **P3: Whistle Soccer** – steer a LEGO car by whistle pitch (PyAudio + FFT, live spectrum display), play ball/goalie over MQTT with a Color Sensor trip and death/victory songs |
 | `lego-docs/` | Reference clone of <https://github.com/LEGO/LEGOEducation> – API docs + official examples (gitignored) |
+| `me193-robotics/` | Reference clone of <https://github.com/chrisbuerginrogers/ME193-Robotics> – instructor's class code and libraries (gitignored) |
 
 ## Notes
 
@@ -24,4 +26,6 @@ Open this folder (`~/ME193`) in VS Code to see everything at once.
 - `lego-docs/` is a plain clone of LEGO's reference repo, not a dependency. Re-pull it with
   `git clone https://github.com/LEGO/LEGOEducation.git lego-docs` (or `git -C lego-docs pull`).
   The library itself comes from PyPI (`legoeducation`), currently 1.1.1.
+- `me193-robotics/` is a plain clone of the instructor's repo, not a dependency. Re-pull it with
+  `git clone https://github.com/chrisbuerginrogers/ME193-Robotics.git me193-robotics` (or `git -C me193-robotics pull`).
 - Accounts close **Dec 10** — push work to GitHub and keep an md summary current (this file / per-project READMEs).
