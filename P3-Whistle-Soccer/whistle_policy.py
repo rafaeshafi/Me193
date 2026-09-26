@@ -11,15 +11,17 @@ from dataclasses import dataclass
 
 import numpy as np
 
+import config
+
 SAMPLE_RATE = 44100
 BLOCK = 2048                 # samples per analysis block, ~46 ms
-BAND = (700.0, 3500.0)       # whistles live here; everything else is ignored
+BAND = (500.0, 3500.0)       # whistles live here; everything else is ignored
 
-MIN_RMS = 0.005              # absolute loudness gate (float samples, full scale 1.0)
-MIN_SNR_DB = 15.0            # peak must beat the room's own level at that frequency
+MIN_RMS = config.MIN_LOUDNESS      # absolute loudness gate (full scale 1.0)
+MIN_SNR_DB = config.MIN_ABOVE_ROOM_DB  # peak must beat the room's level at that frequency
 MIN_TONALITY_DB = 20.0       # peak must beat the median of the band: one narrow line
 MAX_OUTSIDE_DB = 6.0         # nothing outside the band may be louder than peak + this
-                             # (voices and hum put their strongest line below 700 Hz)
+                             # (voices and hum put their strongest line below 500 Hz)
 SILENCE_TIMEOUT = 0.3        # s without a valid whistle before the car stops
 SMOOTHING = 5                # median over this many recent pitch estimates
 

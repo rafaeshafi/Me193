@@ -14,6 +14,12 @@ MSG_START = "start"         # sent by the instructor: begin driving
 MSG_CAUGHT = "ball:caught"  # ball publishes this when the goalie reaches its sensor
 MSG_GOAL = "ball:goal"      # ball publishes this after the goal whistle
 
+# Goalie team channel: our two laptops talk to each other here. Keep it unique
+# to our team so another goalie pair can't move our glove.
+TEAM_TOPIC = "ME193/Rogers/goalie-0997"
+GLOVE_CMD = "glove"   # glove laptop -> robot laptop: "glove -45" (target angle, degrees)
+STATE_CMD = "state"   # robot laptop -> glove laptop: "state DRIVING" (game state)
+
 # --- Sounds ---------------------------------------------------------------
 # Each song is EITHER a path to a .wav file, e.g. "sounds/sad_trombone.wav"
 # (relative paths are looked up next to this file), OR a list of
@@ -31,11 +37,12 @@ VICTORY_SONG = [  # a quick fanfare
 ]
 
 # --- LEGO hardware --------------------------------------------------------
-# The Connection Card pairs every device in the kit (motor and colour sensor).
+# The Connection Card pairs every device in the kit (motors and colour sensor).
 CARD_COLOR = "green"
 CARD_SERIAL = "0997"
 
 MOTOR_DIRECTION = -1  # flip to 1 if the car drives backwards on "straight"
+SWAP_SIDES = True     # flip if the car turns right when the display says LEFT
 BASE_SPEED = 50       # motor % when whistling the middle note
 TURN_GAIN = 1.0       # 1.0: the inside wheel stops at a full turn; 2.0: it reverses
 
@@ -44,12 +51,35 @@ TURN_GAIN = 1.0       # 1.0: the inside wheel stops at a full turn; 2.0: it reve
 REFLECT_DELTA = 20    # rise above the reading taken at "start" that counts as caught
 REFLECT_HOLD = 0.1    # s it must stay high, so a single glitchy reading is ignored
 
+# Goalie glove: a Single Motor standing upright with a big LEGO piece on it,
+# plugged into the same kit (same Connection Card). The glove laptop's whistle
+# sets its angle: middle note = centre (0), higher = swing left, lower = swing
+# right, silence = hold where it is. It is zeroed wherever it points at launch,
+# so point the glove straight ahead before starting the robot laptop.
+GLOVE_MAX_DEG = 90    # angle at your highest / lowest whistle
+GLOVE_SPEED = 60      # motor % while swinging to a new angle
+GLOVE_DIRECTION = 1   # flip to -1 if the glove swings right when it should go left
+GLOVE_STEP = 5        # degrees; smaller changes are not worth an MQTT message
+
 # --- Whistle bands (Hz) ---------------------------------------------------
 # Defaults only: `python whistle_car.py --calibrate` measures your own whistle
 # and saves the result to calibration.json, which overrides these.
-F_MIN = 1100      # lowest whistle: hardest right turn
-F_CENTER = 1500   # comfortable middle whistle: straight
-F_MAX = 2200      # highest steering whistle: hardest left turn
-F_GOAL = 2800     # hold at or above this to claim a goal
-DEAD_BAND = 80    # +/- Hz around F_CENTER that still counts as straight
+F_MIN = 700       # lowest whistle: hardest right turn
+F_CENTER = 1100   # comfortable middle whistle: straight
+F_MAX = 1800      # highest steering whistle: hardest left turn
+F_GOAL = 2400     # hold at or above this to claim a goal
+DEAD_BAND = 150   # +/- Hz around F_CENTER that still counts as straight
 GOAL_HOLD = 0.75  # seconds the goal whistle must be held
+
+# --- Room noise -----------------------------------------------------------
+# At launch the program listens to the room (stay quiet!) and learns its noise
+# level at every frequency. Longer = a steadier estimate that catches more of
+# the room's hums and fans, at the cost of a longer wait before driving.
+NOISE_SECONDS = 3.0
+
+# Only sounds louder than BOTH of these are read as a whistle; everything
+# quieter is ignored. Raise them to react only to loud, close whistles; lower
+# them if your real whistle shows "too quiet" / "not above room noise" in the
+# window. The window's "gates" line shows the live values to compare against.
+MIN_LOUDNESS = 0.03       # overall block loudness (RMS, 0..1); was 0.005
+MIN_ABOVE_ROOM_DB = 25.0  # dB the whistle must beat the room noise by; was 15
