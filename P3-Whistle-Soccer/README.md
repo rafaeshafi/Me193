@@ -10,7 +10,7 @@ steers a LEGO Double Motor over Bluetooth. Your comfortable middle note drives
 straight. Higher notes turn left and lower notes turn right, harder the further
 you go. Silence stops the car.
 
-On game day the car waits for `start` on the MQTT topic `ME193/Rogers`. As the
+On game day the car waits for `start` on the MQTT topic `ME193`. As the
 **ball**, it tries to reach the goal. If the goalie gets close to the Color
 Sensor on its nose, the car stops, publishes that it was caught, and plays a
 death song. If it reaches the goal, you hold the top **goal whistle**. The car
@@ -22,10 +22,13 @@ MQTT:
 
 - **Robot laptop:** its whistle slides the car back and forth along the goal
   line. Above the middle note it drives forward, below it drives backward, and
-  it never turns. It also holds the Bluetooth link to the **glove**, a Single Motor standing upright with a large LEGO
-  piece on it.
-- **Glove laptop:** its whistle aims the glove, using the same pitch system.
-  It sends each glove angle to the robot laptop over MQTT.
+  it never turns. It connects to the Double Motor over Bluetooth.
+- **Glove laptop:** connects over Bluetooth to the **glove**, a Single Motor
+  standing upright with a large LEGO piece on it. Its whistle aims the glove,
+  using the same pitch system.
+- **MQTT between them:** the robot laptop sends the game state, and the glove
+  may only move while the robot says DRIVING. The glove laptop reports the
+  glove's angle back, and the robot laptop shows it.
 
 When the ball reports that it was caught or scored, the goalie plays the
 opposite song on both laptops.
@@ -34,10 +37,11 @@ opposite song on both laptops.
 
 | File | What it is |
 |---|---|
-| [`whistle_car.py`](whistle_car.py) | Ball car, and the goalie's **robot laptop**: game states, motors, sensor, glove motor, MQTT |
-| [`glove.py`](glove.py) | Goalie's **glove laptop**: whistle to glove angle, sent over MQTT |
+| [`whistle_car.py`](whistle_car.py) | Ball car, and the goalie's **robot laptop**: game states, wheels, sensor, MQTT |
+| [`glove.py`](glove.py) | Goalie's **glove laptop**: whistle to glove angle, glove motor, MQTT |
 | [`live_audio.py`](live_audio.py) | Shared by both laptops: PyAudio microphone stream, live display, calibration |
 | [`whistle_policy.py`](whistle_policy.py) | Whistle detection and the steering policy. Pure numpy, no hardware |
+| [`mqtt_chat.py`](mqtt_chat.py) | MQTT chat window: subscribe to topics, watch and send messages |
 | [`songs.py`](songs.py) | Plays the songs; `python songs.py death` previews one |
 | [`config.py`](config.py) | **Everything you might change:** MQTT topic and messages, songs, card, speeds, bands |
 | [`requirements.txt`](requirements.txt) | Pinned dependencies |
@@ -56,10 +60,16 @@ Every device pairs from the kit's Connection Card, set in `config.py`
 - **Ball:** Double Motor, plus the Color Sensor facing forward, open, at the
   front of the car.
 - **Goalie:** Double Motor, plus the glove, a Single Motor mounted vertically
-  with a large LEGO piece on its hub. Point the glove straight ahead before
-  launching the robot laptop, because wherever it points then becomes 0°.
+  with a large LEGO piece on its hub. The robot laptop connects to the Double
+  Motor and the glove laptop connects to the Single Motor. Point the glove
+  straight ahead before launching `glove.py`, because wherever it points then
+  becomes 0°.
 
-Both goalie laptops need this folder and its setup. Each person calibrates on
+Both goalie laptops need this folder and its setup. On a Windows glove laptop,
+skip `brew`: install Python 3.12 from python.org, then run
+`py -3.12 -m venv my_env` and
+`my_env\Scripts\python -m pip install pyaudio numpy matplotlib paho-mqtt legoeducation`,
+and run the programs with `my_env\Scripts\python`. Each person calibrates on
 their own laptop, because `calibration.json` belongs to one whistle and one
 microphone, and it is gitignored.
 
@@ -74,18 +84,21 @@ my_env/bin/python whistle_car.py --no-motor --no-sensor   # practise with no har
 **Goalie, two laptops:**
 
 ```sh
-# Laptop 1, robot driver: Double Motor + glove motor over Bluetooth
+# Laptop 1, robot driver: Double Motor (wheels) over Bluetooth
 my_env/bin/python whistle_car.py --role goalie
 
-# Laptop 2, glove: no Bluetooth, only a microphone and MQTT
+# Laptop 2, glove: Single Motor (glove) over Bluetooth
 my_env/bin/python glove.py --calibrate     # once
 my_env/bin/python glove.py
 ```
 
-Start the robot laptop first, because it connects to the hardware. The glove
-laptop's headline shows **NO ROBOT** until it hears the robot laptop over MQTT.
-To practise the pair without the car, use
-`whistle_car.py --role goalie --no-motor --no-glove`.
+The glove laptop's headline shows **NO ROBOT** until it hears the robot laptop
+over MQTT, and the glove stays frozen until the robot says DRIVING. To practise:
+
+- **Glove on its own:** `glove.py --solo` moves the glove without waiting for
+  the robot laptop.
+- **Without hardware:** `glove.py --no-motor` and
+  `whistle_car.py --role goalie --no-motor`.
 
 Stay quiet for the first 3 seconds after launch while it measures the room
 (`NOISE_SECONDS` in `config.py`). Keys
@@ -100,6 +113,24 @@ in the plot window:
 
 On the glove laptop, `c` re-centres the glove and `q` quits. Ctrl+C in the
 terminal also quits cleanly on both.
+
+### MQTT chat window
+
+```sh
+my_env/bin/python mqtt_chat.py
+```
+
+Click **Connect**. The window starts subscribed to the game topic and the
+goalie team topic. To add a topic, type it and press **Subscribe**; wildcards
+like `ME193/#` work. Every message on your topics appears live with its time
+and topic, and your own messages are shown in green.
+
+To send, pick a topic in **To**, type, and press Enter. The **send 'start' /
+'caught' / 'goal'** buttons publish the game messages to `ME193`, which
+is handy for testing the robots without the instructor. Messages go out
+exactly as typed, so tick **add my name** only for human chat: `Rafae: start`
+is not a start command. **Hide robot heartbeats** (on by default) hides the
+once-a-second `state` / `glove` messages between the goalie laptops.
 
 ### Changing the messages or the songs
 
@@ -119,38 +150,42 @@ Open [`config.py`](config.py):
 ```
  person 1 whistles                                 person 2 whistles
        |                                                  |
- [robot laptop]  <---- "glove -45" ---------------  [glove laptop]
-  mic -> pitch -> drive      ME193/Rogers/goalie-0997      mic -> pitch -> glove angle
-       |         -------- "state DRIVING" ------------->  (shows robot state,
-       | Bluetooth                                         plays the songs too)
-       v
- Double Motor (wheels) + Single Motor (glove)
+ [robot laptop]  -------- "state DRIVING" ------------>  [glove laptop]
+  mic -> pitch -> drive         ME193/Cucurella            mic -> pitch -> glove angle
+       |         <------- "glove -45" -----------------       |  (plays the songs too)
+       | Bluetooth                                           | Bluetooth
+       v                                                     v
+ Double Motor (wheels)  ====== same goalie robot ======  Single Motor (glove)
        ^
-       |  "start" / "ball:caught" / "ball:goal" on ME193/Rogers
+       |  "start" / "ball:caught" / "ball:goal" on ME193
  instructor + ball
 ```
 
 | Topic | Message | From → to | Meaning |
 |---|---|---|---|
-| `ME193/Rogers` | `start` | instructor → everyone | begin |
-| `ME193/Rogers` | `ball:caught` / `ball:goal` | ball → goalie | goalie won / lost |
-| `ME193/Rogers/goalie-0997` | `glove <deg>` | glove laptop → robot laptop | swing the glove to this angle (−90 … +90) |
-| `ME193/Rogers/goalie-0997` | `state <STATE>` | robot laptop → glove laptop | game state: on every change, plus once a second as a heartbeat |
+| `ME193` | `start` | instructor → everyone | begin |
+| `ME193` | `ball:caught` / `ball:goal` | ball → goalie | goalie won / lost |
+| `ME193` | anything in `HEAR_GOAL` / `HEAR_CAUGHT` | other team's ball → our goalie | their wording also counts (e.g. `goal`, `failed`), any case |
+| `ME193/Cucurella` | `state <STATE>` | robot laptop → glove laptop | game state, on every change plus once a second as a heartbeat. The glove only moves while it is `DRIVING` |
+| `ME193/Cucurella` | `glove <deg>` | glove laptop → robot laptop | where the glove is (−90 … +90), on every change plus once a second |
 
 Design choices:
 
-- **One laptop owns the Bluetooth.** A LEGO device takes one Bluetooth
-  connection at a time, so the robot laptop connects to both motors and the
-  glove laptop sends it commands. Nothing fights over the hardware.
+- **Each laptop owns its own motor.** A LEGO device takes one Bluetooth
+  connection at a time, so each motor has exactly one owner: the robot laptop
+  has the wheels and the glove laptop has the glove. The glove responds to its
+  whistle with no network delay.
 - **Angles, not speeds.** The glove runs in position mode
   (`motor_run_to_relative_position`) with the motor set to hold. A glove
   command means "be at −45°", so a late or repeated message can't make it
   spin away, and silence leaves it where it is.
-- **Traffic is kept low but self-healing.** Angles are rounded to 5° steps and
-  sent only when they change, plus a resend every 0.5 s while whistling, in
-  case a message is lost on the public broker.
-- **The robot enforces the rules.** Glove commands are ignored before `start`
-  and after the game ends, whatever the glove laptop sends.
+- **The robot laptop is the referee.** The glove laptop doesn't listen to the
+  instructor directly. It moves the glove only while the robot laptop reports
+  DRIVING. So both halves of the goalie start and stop together, and if the
+  robot laptop goes quiet for 3 s, the glove freezes.
+- **Traffic stays low but recovers from lost messages.** Each side sends on
+  every change, plus a once-a-second heartbeat, in case a message is lost on
+  the public broker. Glove angles are rounded to 5° steps.
 
 ## The live display
 
@@ -164,12 +199,12 @@ The window has three panels, redrawn continuously:
 3. **Decision:** a big headline (STRAIGHT / LEFT / RIGHT / STOP / WON / LOST),
    plus the pitch, why the block was accepted or rejected, the value of every
    noise gate, steering, both motor speeds, and the sensor reading. On the
-   goalie robot laptop, the last line shows the glove angle and how long ago
-   the glove laptop was last heard.
+   goalie robot laptop, the last line shows the glove angle reported by the
+   glove laptop, and how long ago that report arrived.
 
 The glove laptop shows the same three panels, with the bands relabelled SWING
-RIGHT / CENTRE / SWING LEFT. Its headline is the glove angle it is sending,
-HOLD when silent, or the robot's state.
+RIGHT / CENTRE / SWING LEFT. Its headline is the glove angle, HOLD when
+silent, or the robot's state when the glove is frozen.
 
 ## Questions
 
@@ -188,7 +223,7 @@ Every audio block goes through three steps.
 
    | Pitch | Decision | Motors (base = 50 %) |
    |---|---|---|
-   | within ±150 Hz of your middle note | **STRAIGHT** | both at base |
+   | within ±100 Hz of your middle note | **STRAIGHT** | both at base |
    | above that, up to your high note | **LEFT**, in proportion | left wheel slows, reaching 0 at your high note |
    | below that, down to your low note | **RIGHT**, in proportion | right wheel slows, reaching 0 at your low note |
    | above the goal threshold, held 0.75 s | **GOAL** (ball only) | stop, publish `ball:goal`, victory song |
@@ -233,12 +268,12 @@ stops. Before `start` and after the game ends, the motors are held at 0 whatever
 the microphone hears.
 
 The glove does the opposite: with no whistle it **holds its current angle**.
-Nothing is sent, and the motor's hold mode keeps it where it is. For a
+The motor gets no new command, and its hold mode keeps it where it is. For a
 goalkeeper, staying in position is the safe default, while snapping back to
 the centre would leave a gap. If the glove laptop drops out entirely, the
 robot laptop still drives normally and shows how long ago the glove laptop was
-last heard. The glove laptop shows **NO ROBOT** if the robot laptop's
-heartbeat stops.
+last heard. If the robot laptop's heartbeat stops, the glove laptop shows
+**NO ROBOT** and freezes the glove.
 
 ### How did you try to mask out unwanted noise?
 

@@ -7,13 +7,15 @@ song) on a held top-note whistle.
 
 As the goalie this is the ROBOT laptop: its whistle slides the car back and
 forth along the goal line (higher = forward, lower = backward, middle or
-silence = stop; it never turns), and it also owns the glove's Single Motor, which it moves on commands that the GLOVE laptop
-(glove.py) sends over MQTT. It reports the game state back to that laptop.
+silence = stop; it never turns). The glove is run by a second person on the
+GLOVE laptop (glove.py), which connects to the glove's Single Motor itself.
+This laptop tells it the game state over MQTT (the glove may only move while
+DRIVING) and shows the glove angle it reports back.
 
     python whistle_car.py --calibrate         # measure your whistle once
     python whistle_car.py --role ball         # game day
     python whistle_car.py --role goalie       # robot laptop (+ glove.py on the other)
-    python whistle_car.py --no-motor --no-sensor --no-glove   # audio + display only
+    python whistle_car.py --no-motor --no-sensor   # audio + display only
 
 Keys in the plot window: s = start locally, r = reset, c / g = pretend
 caught / goal (tests the messages and songs), q = quit.
@@ -42,38 +44,42 @@ STATE_EVERY = 1.0     # s between state reports to the glove laptop
 
 # --- LEGO hardware ----------------------------------------------------------
 
+def lego_card(le):
+    """connect() arguments for our kit's Connection Card, or None if misconfigured."""
+    valid = {le.LEGO_COLOR_NAME_MAP[c].removeprefix("LEGO_COLOR_").lower(): c
+             for c in le.CARD_COLORS}
+    color = valid.get(config.CARD_COLOR.lower())
+    if color is None:
+        print(f"Unknown card colour {config.CARD_COLOR!r}. Expected one of: "
+              f"{', '.join(sorted(valid))}")
+        return None
+    print(f"Connecting over BLE to card {config.CARD_COLOR} {config.CARD_SERIAL}...")
+    return dict(card_color=color, card_serial=config.CARD_SERIAL)
+
+
 class Car:
-    """Double Motor, Color Sensor and glove Single Motor, or stand-ins.
+    """Double Motor and Color Sensor, or stand-ins.
 
     Rate-limits BLE writes and sends them non-blocking, so the audio loop never
     waits on Bluetooth. (Same approach as P1-Pose-Race.)
     """
 
-    def __init__(self, *, motor=True, sensor=True, glove=False):
-        self.use_motor, self.use_sensor, self.use_glove = motor, sensor, glove
-        self.motor = self.sensor = self.glove = None
-        self.glove_angle = 0
+    def __init__(self, *, motor=True, sensor=True):
+        self.use_motor, self.use_sensor = motor, sensor
+        self.motor = self.sensor = None
         self._last_sent = None
         self._last_send_time = 0.0
 
     def connect(self):
-        if not (self.use_motor or self.use_sensor or self.use_glove):
+        if not (self.use_motor or self.use_sensor):
             return True
         import legoeducation as le
 
-        valid = {le.LEGO_COLOR_NAME_MAP[c].removeprefix("LEGO_COLOR_").lower(): c
-                 for c in le.CARD_COLORS}
-        color = valid.get(config.CARD_COLOR.lower())
-        if color is None:
-            print(f"Unknown card colour {config.CARD_COLOR!r}. Expected one of: "
-                  f"{', '.join(sorted(valid))}")
+        card = lego_card(le)
+        if card is None:
             return False
-        card = dict(card_color=color, card_serial=config.CARD_SERIAL)
-        print(f"Connecting over BLE to card {config.CARD_COLOR} {config.CARD_SERIAL}...")
-
         for wanted, attr, cls, name in ((self.use_motor, "motor", le.DoubleMotor, "Double Motor"),
-                                        (self.use_sensor, "sensor", le.ColorSensor, "Color Sensor"),
-                                        (self.use_glove, "glove", le.SingleMotor, "glove Single Motor")):
+                                        (self.use_sensor, "sensor", le.ColorSensor, "Color Sensor")):
             if not wanted:
                 continue
             device = cls()
@@ -83,11 +89,6 @@ class Car:
                 return False
             setattr(self, attr, device)
             print(f"  {name} connected.")
-        if self.glove is not None:
-            # Wherever the glove points now is "centre", and it holds its angle
-            # between commands instead of flopping around.
-            self.glove.motor_set_end_state(le.MOTOR_END_STATE_HOLD)
-            self.glove.motor_reset_relative_position()
         return True
 
     def reflection(self):
@@ -113,15 +114,6 @@ class Car:
             self.motor.movement_move_tank(left * config.MOTOR_DIRECTION,
                                           right * config.MOTOR_DIRECTION, blocking=False)
 
-    def move_glove(self, angle):
-        angle = int(np.clip(angle, -config.GLOVE_MAX_DEG, config.GLOVE_MAX_DEG))
-        if angle == self.glove_angle:
-            return
-        self.glove_angle = angle
-        if self.glove is not None:
-            self.glove.motor_run_to_relative_position(angle * config.GLOVE_DIRECTION,
-                                                      speed=config.GLOVE_SPEED, blocking=False)
-
     def stop(self):
         if self.motor is not None:
             self.motor.movement_stop(blocking=False)
@@ -129,7 +121,7 @@ class Car:
 
     def close(self):
         for device, teardown in ((self.motor, "movement_stop"), (self.motor, "disconnect"),
-                                 (self.sensor, "disconnect"), (self.glove, "disconnect")):
+                                 (self.sensor, "disconnect")):
             if device is not None:
                 try:
                     getattr(device, teardown)()
@@ -178,6 +170,11 @@ class Radio:
 WAITING, DRIVING, WON, LOST = "WAITING FOR START", "DRIVING", "WON", "LOST"
 
 
+def heard(text, phrases):
+    """True if an MQTT message is one of the accepted phrases (any case)."""
+    return text.strip().casefold() in {p.strip().casefold() for p in phrases}
+
+
 class Game:
     def __init__(self, role, car, radio, player, policy):
         self.role, self.car, self.radio, self.player, self.policy = role, car, radio, player, policy
@@ -185,7 +182,8 @@ class Game:
         self.result = ""
         self.baseline = 0.0
         self.high_since = None
-        self.glove_heard = None  # time of the last glove command from the glove laptop
+        self.glove_angle = None  # as last reported by the glove laptop
+        self.glove_heard = None  # when that report arrived
 
     def start(self):
         if self.state == DRIVING:
@@ -194,7 +192,6 @@ class Game:
         self.baseline = 0.0 if math.isnan(refl) else refl
         self.high_since = None
         self.state, self.result = DRIVING, ""
-        self.car.move_glove(0)
         print(f"START (sensor baseline reflection {self.baseline:.0f})")
 
     def reset(self):
@@ -218,27 +215,26 @@ class Game:
             self.finish(True, "goal whistle", publish=config.MSG_GOAL)
 
     def on_message(self, text):
-        if text == config.MSG_START:
+        if heard(text, config.HEAR_START):
             self.start()
         elif self.role == "goalie" and self.state not in (WON, LOST):
-            if text == config.MSG_CAUGHT:
-                self.finish(True, "we caught the ball")
-            elif text == config.MSG_GOAL:
-                self.finish(False, "the ball scored")
+            # The other team's ball reports the outcome: either way we stop.
+            if heard(text, config.HEAR_CAUGHT):
+                self.finish(True, f"we caught the ball ({text!r})")
+            elif heard(text, config.HEAR_GOAL):
+                self.finish(False, f"the ball scored ({text!r})")
 
     def on_team_message(self, text, now):
-        """A glove command from our glove laptop: 'glove <degrees>'."""
+        """The glove laptop's report of where it put the glove: 'glove <degrees>'."""
         word, _, value = text.partition(" ")
         if self.role != "goalie" or word != config.GLOVE_CMD:
             return  # includes our own 'state ...' reports echoed back
         try:
-            angle = float(value)
+            self.glove_angle = int(float(value))
         except ValueError:
             print(f"Ignoring bad team message {text!r}")
             return
         self.glove_heard = now
-        if self.state == DRIVING:  # the glove only moves while the game is on
-            self.car.move_glove(angle)
 
     def sensor_tripped(self, now):
         refl = self.car.reflection()
@@ -300,8 +296,8 @@ def status(game, det, decision, muted, now):
     else:
         heard = ("never" if game.glove_heard is None
                  else f"{now - game.glove_heard:.1f} s ago")
-        lines.append(f"glove    {game.car.glove_angle:+4d} deg   last command from glove "
-                     f"laptop: {heard}")
+        angle = "?" if game.glove_angle is None else f"{game.glove_angle:+d}"
+        lines.append(f"glove    {angle} deg   (reported by glove laptop: {heard})")
     lines.append("keys     s start  r reset  c caught  g goal  q quit")
     return headline, colour, lines
 
@@ -314,7 +310,6 @@ def main():
     parser.add_argument("--calibrate", action="store_true", help="measure your whistle and exit")
     parser.add_argument("--no-motor", action="store_true", help="don't connect the Double Motor")
     parser.add_argument("--no-sensor", action="store_true", help="don't connect the Color Sensor")
-    parser.add_argument("--no-glove", action="store_true", help="don't connect the glove motor")
     args = parser.parse_args()
     if args.calibrate:
         run_calibration()
@@ -323,14 +318,14 @@ def main():
     goalie = args.role == "goalie"
     bands = load_bands()
     policy = wp.Policy(bands, config.BASE_SPEED, config.TURN_GAIN, config.GOAL_HOLD)
-    # The ball carries the colour sensor (the goalie has to reach it); the
-    # goalie carries the glove.
-    car = Car(motor=not args.no_motor, sensor=not goalie and not args.no_sensor,
-              glove=goalie and not args.no_glove)
+    # The ball carries the colour sensor (the goalie has to reach it). The
+    # goalie's glove motor belongs to the glove laptop, not this one.
+    car = Car(motor=not args.no_motor, sensor=not goalie and not args.no_sensor)
     pa = pyaudio.PyAudio()
     mic = Mic(pa)
     player = Player(pa)
-    radio = Radio([config.TOPIC, config.TEAM_TOPIC] if goalie else [config.TOPIC])
+    game_topics = list(dict.fromkeys([config.TOPIC, config.OPPONENT_TOPIC]))  # no duplicates
+    radio = Radio(game_topics + [config.TEAM_TOPIC] if goalie else game_topics)
     game = Game(args.role, car, radio, player, policy)
 
     try:
@@ -381,8 +376,8 @@ def main():
             decision = policy.step(None if muted else det.pitch, now)
             game.update(decision, now)
 
-            # Keep the glove laptop's screen in sync: report every change, plus
-            # a heartbeat so it knows we are still alive.
+            # Tell the glove laptop the game state: every change, plus a
+            # heartbeat. It only moves the glove while we say DRIVING.
             if goalie and (game.state != last_state or now - last_report >= STATE_EVERY):
                 radio.publish(f"{config.STATE_CMD} {game.state}", topic=config.TEAM_TOPIC,
                               quiet=game.state == last_state)

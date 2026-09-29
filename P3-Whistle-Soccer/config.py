@@ -8,16 +8,26 @@ Edit a value, save, rerun whistle_car.py. Nothing else needs touching.
 # match on both laptops; any text works.
 BROKER = "test.mosquitto.org"
 PORT = 1883
-TOPIC = "ME193/Rogers"
+TOPIC = "ME193"  # the ball publishes here; keep it unique to your team
 
 MSG_START = "start"         # sent by the instructor: begin driving
 MSG_CAUGHT = "ball:caught"  # ball publishes this when the goalie reaches its sensor
 MSG_GOAL = "ball:goal"      # ball publishes this after the goal whistle
 
+# What we ACCEPT from the other team's code. Their wording may differ from
+# ours, so any phrase in these lists counts (upper/lower case and surrounding
+# spaces ignored). Watch the terminal or mqtt_chat.py to see exactly what they
+# send, then add it here.
+HEAR_START = [MSG_START, "go"]
+HEAR_GOAL = [MSG_GOAL, "goal", "scored", "ball scored", "we scored"]      # goalie stops: LOST
+HEAR_CAUGHT = [MSG_CAUGHT, "caught", "fail", "failed", "ball failed"]    # goalie stops: WON
+# Where the other team's ball publishes, if not on TOPIC (e.g. "ME193/TheirTeam").
+OPPONENT_TOPIC = TOPIC
+
 # Goalie team channel: our two laptops talk to each other here. Keep it unique
 # to our team so another goalie pair can't move our glove.
-TEAM_TOPIC = "ME193/Rogers/goalie-0997"
-GLOVE_CMD = "glove"   # glove laptop -> robot laptop: "glove -45" (target angle, degrees)
+TEAM_TOPIC = "ME193/Cucurella"
+GLOVE_CMD = "glove"   # glove laptop -> robot laptop: "glove -45" (where the glove is, degrees)
 STATE_CMD = "state"   # robot laptop -> glove laptop: "state DRIVING" (game state)
 
 # --- Sounds ---------------------------------------------------------------
@@ -41,7 +51,7 @@ VICTORY_SONG = [  # a quick fanfare
 CARD_COLOR = "green"
 CARD_SERIAL = "0997"
 
-MOTOR_DIRECTION = -1  # flip to 1 if the car drives backwards on "straight"
+MOTOR_DIRECTION = -1  # flip (1 / -1) if the car drives backwards on "straight"
 SWAP_SIDES = True     # flip if the car turns right when the display says LEFT
 BASE_SPEED = 50       # motor % when whistling the middle note
 TURN_GAIN = 1.0       # 1.0: the inside wheel stops at a full turn; 2.0: it reverses
@@ -58,23 +68,23 @@ GOALIE_SPEED = 60     # motor % at your highest / lowest whistle
 GOALIE_DIRECTION = 1  # flip to -1 if a high whistle drives it backwards
 
 # Goalie glove: a Single Motor standing upright with a big LEGO piece on it,
-# plugged into the same kit (same Connection Card). The glove laptop's whistle
-# sets its angle: middle note = centre (0), higher = swing left, lower = swing
+# from the same kit (same Connection Card). The GLOVE laptop connects to it and
+# its whistle sets the angle: middle note = centre (0), higher = swing left, lower = swing
 # right, silence = hold where it is. It is zeroed wherever it points at launch,
-# so point the glove straight ahead before starting the robot laptop.
+# so point the glove straight ahead before starting glove.py.
 GLOVE_MAX_DEG = 90    # angle at your highest / lowest whistle
 GLOVE_SPEED = 60      # motor % while swinging to a new angle
 GLOVE_DIRECTION = 1   # flip to -1 if the glove swings right when it should go left
-GLOVE_STEP = 5        # degrees; smaller changes are not worth an MQTT message
+GLOVE_STEP = 5        # degrees; angles are rounded to this so pitch wobble doesn't twitch it
 
 # --- Whistle bands (Hz) ---------------------------------------------------
 # Defaults only: `python whistle_car.py --calibrate` measures your own whistle
 # and saves the result to calibration.json, which overrides these.
-F_MIN = 700       # lowest whistle: hardest right turn
-F_CENTER = 1100   # comfortable middle whistle: straight
-F_MAX = 1800      # highest steering whistle: hardest left turn
-F_GOAL = 2400     # hold at or above this to claim a goal
-DEAD_BAND = 150   # +/- Hz around F_CENTER that still counts as straight
+F_MIN = 900       # lowest whistle: hardest right turn
+F_CENTER = 1300   # comfortable middle whistle: straight
+F_MAX = 2000      # highest steering whistle: hardest left turn
+F_GOAL = 2600     # hold at or above this to claim a goal
+DEAD_BAND = 100   # +/- Hz around F_CENTER that still counts as straight
 GOAL_HOLD = 0.75  # seconds the goal whistle must be held
 
 # --- Room noise -----------------------------------------------------------
