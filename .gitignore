@@ -16,3 +16,6 @@
 
 # Cloned reference docs (re-pull: git clone https://github.com/LEGO/LEGOEducation.git lego-docs)
 lego-docs/
+
+# Cloned instructor repo (re-pull: git clone https://github.com/chrisbuerginrogers/ME193-Robotics.git me193-robotics)
+me193-robotics/
