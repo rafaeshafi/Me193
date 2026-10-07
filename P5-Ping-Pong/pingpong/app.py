@@ -22,6 +22,8 @@ from pingpong.rules import GameCore
 from pingpong.scoring import ScoreTracker
 
 S = 1_000_000_000
+CPU_SWING_S = 0.3          # how long the computer's paddle takes to hit the ball (the HUD animates it)
+CPU_RECOVER_S = 0.6        # ... and to drift back to the middle after a return
 DEFAULT_BOX = ReachBox(u_min=-1.0, u_max=1.0, v_min=-0.5, v_max=0.5)
 FLASH = {"perfect": ((255, 255, 255), 0.25), "good": ((0, 200, 0), 0.18), "early": ((0, 140, 255), 0.2),
          "late": ((0, 140, 255), 0.2), "fault": ((0, 0, 255), 0.35)}
@@ -45,6 +47,7 @@ class Session:
         self.leaderboard_fn = None               # () -> ((name, score), ...) for the end screen
         self._stats_key, self._stats = object(), {}
         self._flash, self._flash_until = None, 0
+        self._cpu_swing_ns = None
 
     def set_notice(self, text):
         """A standing message for the lobby (e.g. "UNCALIBRATED"); pauses and event banners win over it."""
@@ -137,6 +140,8 @@ class Session:
                 st["faults"] += 1
             elif e.kind in ("game_over", "match_over") and self.on_game_over is not None:
                 self.on_game_over(self._summary(e))
+            if e.kind == "serve":
+                self._cpu_swing_ns = e.t_ns                  # the computer hits the ball: its paddle swings
             if e.kind == "verdict":
                 self._gates = e.data["verdict"].gates
             elif e.kind == "hit":
@@ -180,17 +185,28 @@ class Session:
             flash=self._flash if now < self._flash_until else None, leaderboard=tuple(leaderboard),
             player_name=self.player,
             box_sw=(g.judge.box.u_max - g.judge.box.u_min, g.judge.box.v_max - g.judge.box.v_min),
-            radius_sw=g.level.radius_sw, reach=g.level.reach)
+            radius_sw=g.level.radius_sw, reach=g.level.reach, cpu_swing=self._cpu_swing(now))
 
     def _paused_text(self):
         if not self.game.paused:
             return ""
         return "PAUSED: " + ", ".join(sorted(self.game.pause_reasons)) + " lost"
 
+    def _cpu_swing(self, now):
+        """How far through its stroke the computer's paddle is (0..1), None when it is not hitting."""
+        if self._cpu_swing_ns is None:
+            return None
+        progress = (now - self._cpu_swing_ns) / (CPU_SWING_S * S)
+        return progress if 0.0 <= progress < 1.0 else None
+
     def _cpu_x(self, now):
-        """The computer's paddle while it chases your shot (always arrives in Survival, can fall short in Match)."""
+        """The computer's paddle: after its return it stands where it hit and drifts back to the middle; while it
+        chases your shot it moves to where the ball will land (always arrives in Rally, can fall short in Match)."""
         g, leg = self.game, self.game.outgoing_leg
-        if g.phase != "RALLY" or leg is None or g.incoming is not None:
+        if g.phase == "RALLY" and g.incoming is not None and g.incoming_leg is not None:
+            back = g.incoming_leg
+            return back.x_start * max(0.0, 1.0 - max(0.0, (now - back.t0_ns) / S) / CPU_RECOVER_S)
+        if g.phase != "RALLY" or leg is None:
             return 0.0
         level = g.level
         if g.mode != "match":                          # Survival never misses: the drawn paddle always gets there

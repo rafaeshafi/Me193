@@ -15,13 +15,13 @@ import time
 
 import cv2
 
-from pingpong import canvas
+from pingpong import canvas, pose
 from pingpong.pose import MIN_VISIBILITY
 
 WIDTH = 960
 GREEN, RED, ORANGE = (80, 220, 80), (60, 60, 230), (0, 160, 255)
 PARTS = (("head", (0,)), ("shoulders", (11, 12)), ("hips", (23, 24)))     # what has to be in view to play
-JOINTS = (0, 11, 12, 15, 16, 23, 24)                                      # head, shoulders, wrists, hips
+JOINTS = (0, 11, 12, 23, 24)                                              # head, shoulders, hips (the hands are marked apart)
 WAIT_HINT = "   >> press ENTER when ready"
 ENTER_KEYS = {13: "", 10: "", 32: ""}                                     # Return / Space in the window
 YES_NO_KEYS = {ord("y"): "y", ord("n"): "n"}
@@ -40,7 +40,7 @@ def missing_parts(landmarks, min_visibility=MIN_VISIBILITY):
 
 
 def compose(frame, caption, landmarks, width=WIDTH):
-    """The camera frame as a mirror shows it (moving right moves right), the joints the game reads, a caption on
+    """The camera frame as a mirror shows it (moving right moves right), the joints and hands the game reads, a caption on
     top and at the bottom whether you are in position."""
     h, w = frame.shape[:2]
     image = cv2.flip(cv2.resize(frame, (width, round(h * width / w))), 1)
@@ -50,6 +50,12 @@ def compose(frame, caption, landmarks, width=WIDTH):
             point = landmarks[i]
             color = GREEN if _seen(point, MIN_VISIBILITY) else RED
             cv2.circle(image, (round((1.0 - point.x) * width), round(point.y * ih)), 7, color, -1, cv2.LINE_AA)
+        for hand in ("left", "right"):                       # the point the game tracks: the fist, not the wrist
+            hx, hy = pose.hand_xy(landmarks, hand)
+            color = GREEN if _seen(landmarks[pose.HANDS[hand]["wrist"]], MIN_VISIBILITY) else RED
+            centre = (round((1.0 - hx) * width), round(hy * ih))
+            cv2.circle(image, centre, 13, color, 3, cv2.LINE_AA)
+            cv2.circle(image, centre, 4, color, -1, cv2.LINE_AA)
     canvas.draw_fitted(image, caption, width // 2, 34, width - 40, max_scale=0.9, min_scale=0.6, thickness=2,
                        max_lines=2)
     missing = missing_parts(landmarks)

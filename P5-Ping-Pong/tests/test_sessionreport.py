@@ -2,7 +2,7 @@
 
 import pytest
 
-from pingpong import fakerig, recorder, sessionreport
+from pingpong import fakerig, levels, recorder, sessionreport
 from tools import report as report_tool
 
 
@@ -41,7 +41,8 @@ def test_rejected_swings_are_broken_down_by_the_gate_that_failed(tmp_path):
     rig = fakerig.FakeRig(record_dir=tmp_path / "run")
     rig.run(until=lambda: rig.game.phase == "RALLY")
     now = rig.now_s()
-    rig.pose_blackouts.append((now + 0.45, now + 1.0))                  # hand unseen while the ball arrives
+    flight = 3.0 / levels.LEVELS[1].v_tier
+    rig.pose_blackouts.append((now + flight - 0.4, now + flight + 0.15))        # hand unseen while the ball arrives
     rig.run(until=lambda: rig.game.phase == "MATCH_OVER", max_s=60)
     rig.close()
     s = summarise(tmp_path)

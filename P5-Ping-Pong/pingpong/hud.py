@@ -8,12 +8,17 @@ from dataclasses import dataclass, field
 
 import cv2
 
-from pingpong import canvas
+import math
+
+from pingpong import canvas, levels
 
 GREEN, RED, AMBER, WHITE, GREY = (80, 220, 80), (70, 70, 240), (40, 170, 255), (255, 255, 255), (170, 170, 170)
 LOW_BATTERY = 20                 # percent: the hub's number goes amber below this
 PLANE_CENTRE_Y = 0.60            # the hand plane's middle, as a fraction of the frame height
 PLANE_SW_PX = 0.17               # pixels per shoulder width on the hand plane, as a fraction of the frame height
+TARGET_R = 16                    # px: the ring where the ball will arrive; it must end up inside your paddle's face
+CPU_PADDLE_R = 80                # px at full size: the computer's paddle (shrunk by the court's perspective)
+CPU_PADDLE_LIFT_M = 0.04         # its face is centred this far above the far edge of the table
 
 
 def plane_xy(ab, box_sw, w, h):
@@ -61,6 +66,7 @@ class HudState:
     box_sw: tuple = (2.0, 1.4)       # the reach box's width and height in shoulder widths (sets the hand plane's shape)
     radius_sw: float = 0.55          # the level's hit radius: the target ring is exactly this big
     reach: float = 1.0               # the share of the reach box the balls arrive in
+    cpu_swing: float | None = None   # 0..1 while the computer's paddle is hitting the ball, else None
 
 
 def render(state, size=(1280, 720), background=None):
@@ -82,19 +88,28 @@ def render(state, size=(1280, 720), background=None):
 
 
 def _draw_actors(frame, s, w, h):
-    canvas.draw_ring(frame, s.cpu_x_m, 0.0, 0.0, 40, GREY, 4)                     # the CPU paddle
+    _draw_cpu_paddle(frame, s, w, h)
     if s.phase in ("COUNTDOWN", "RALLY"):
         _draw_arrival_window(frame, s, w, h)
+    if s.paddle_ab is not None:
+        # your paddle: its face is the judge's hit zone (a circle of the level's radius), centred on your hand
+        px, py = plane_xy(s.paddle_ab, s.box_sw, w, h)
+        canvas.draw_paddle(frame, px, py, round(s.radius_sw * PLANE_SW_PX * h))
+        cv2.circle(frame, (px, py), 4, WHITE, -1, cv2.LINE_AA)
     target = None
     if s.arrival_ab is not None and s.phase == "RALLY":
-        target = plane_xy(s.arrival_ab, s.box_sw, w, h)
-        cv2.circle(frame, target, round(s.radius_sw * PLANE_SW_PX * h), AMBER, 3, cv2.LINE_AA)     # the judge's hit zone
+        target = plane_xy(s.arrival_ab, s.box_sw, w, h)             # where the ball will arrive: get the paddle over it
+        cv2.circle(frame, target, TARGET_R, AMBER, 3, cv2.LINE_AA)
+        cv2.circle(frame, target, 3, AMBER, -1, cv2.LINE_AA)
     if s.ball is not None:
         canvas.draw_ball(frame, *s.ball, toward=target)
-    if s.paddle_ab is not None:
-        px, py = plane_xy(s.paddle_ab, s.box_sw, w, h)
-        cv2.circle(frame, (px, py), 17, WHITE, 3, cv2.LINE_AA)
-        cv2.circle(frame, (px, py), 12, GREEN, -1, cv2.LINE_AA)
+
+
+def _draw_cpu_paddle(frame, s, w, h):
+    """The computer's paddle at the far end: it waits where it hit, chases your shot, and flicks when it hits."""
+    px, py, scale = canvas.project(s.cpu_x_m, 0.0, CPU_PADDLE_LIFT_M, w, h)
+    angle = 0.0 if s.cpu_swing is None else 55.0 * math.sin(math.pi * s.cpu_swing)
+    canvas.draw_paddle(frame, px, py, round(CPU_PADDLE_R * scale), rubber=canvas.RUBBER_BLUE, angle_deg=angle)
 
 
 def _draw_arrival_window(frame, s, w, h):
@@ -106,7 +121,7 @@ def _draw_arrival_window(frame, s, w, h):
 
 
 def _draw_top_bar(frame, s, w, h):
-    mode = "SURVIVAL" if s.mode == "survival" else "MATCH"
+    mode = levels.MODE_NAMES.get(s.mode, s.mode.upper())
     canvas.draw_text(frame, f"{mode}  {s.level_name.upper()}", (24, 44), 1.0, WHITE, 2)
     battery = "" if s.hub_battery is None else f" {s.hub_battery}%"
     healthy = (s.mqtt_status, s.hub_status) == ("ok", "ok") and (s.hub_battery is None or s.hub_battery >= LOW_BATTERY)

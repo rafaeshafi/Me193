@@ -4,16 +4,17 @@
 depend on how far the player stands from the camera.  Frames go to MediaPipe
 UNMIRRORED (so left/right are anatomical); u is defined positive toward the PLAYER'S
 RIGHT and v positive UP, so the on-screen paddle moves the way the hand does.
-The paddle point blends wrist (0.5), index (0.25) and pinky (0.25) -- the hub is held
-in the fist, and the wrist is the steadiest landmark.
+The paddle point is the HAND: the index, pinky and thumb points, i.e. the fist that holds the hub (the
+wrist, a few centimetres behind it, is only the fallback when no finger point is seen).  The wrist's visibility
+still decides whether the arm is in view at all.
 """
 
 import math
 
 L_SHOULDER, R_SHOULDER = 11, 12
-HANDS = {"right": {"wrist": 16, "index": 20, "pinky": 18},
-         "left": {"wrist": 15, "index": 19, "pinky": 17}}
-BLEND = {"wrist": 0.5, "index": 0.25, "pinky": 0.25}
+HANDS = {"right": {"wrist": 16, "index": 20, "pinky": 18, "thumb": 22},
+         "left": {"wrist": 15, "index": 19, "pinky": 17, "thumb": 21}}
+HAND_WEIGHTS = {"index": 0.4, "pinky": 0.4, "thumb": 0.2}       # the fist: a knuckle line either side, and the thumb
 MIN_VISIBILITY = 0.5
 MIN_SHOULDER_FRAC = 0.08       # shoulders narrower than this fraction of the frame are rejected
 
@@ -23,6 +24,23 @@ def _shoulders(lm):
     if min(left.visibility, right.visibility) < MIN_VISIBILITY:
         return None
     return left, right
+
+
+def hand_xy(lm, hand):
+    """The centre of the hand as (x, y) in image fractions: the visible ones of the index, pinky and thumb points;
+    the wrist only when none of them is seen."""
+    idx = HANDS[hand]
+    total = px = py = 0.0
+    for part, weight in HAND_WEIGHTS.items():
+        point = lm[idx[part]]
+        if point.visibility >= MIN_VISIBILITY:
+            total += weight
+            px += weight * point.x
+            py += weight * point.y
+    if total == 0.0:
+        wrist = lm[idx["wrist"]]
+        return wrist.x, wrist.y
+    return px / total, py / total
 
 
 def shoulder_width_norm(lm, width, height):
@@ -54,14 +72,8 @@ def paddle_uv(lm, hand, width, height, unit=None):
     wrist = lm[idx["wrist"]]
     if wrist.visibility < MIN_VISIBILITY:
         return None
-    total = px = py = 0.0
-    for part, weight in BLEND.items():
-        point = lm[idx[part]]
-        if point.visibility >= MIN_VISIBILITY:
-            total += weight
-            px += weight * point.x * width
-            py += weight * point.y * height
-    px, py = px / total, py / total
+    hx, hy = hand_xy(lm, hand)
+    px, py = hx * width, hy * height
     cx = (left.x + right.x) / 2 * width
     cy = (left.y + right.y) / 2 * height
     conf = min(wrist.visibility, left.visibility, right.visibility)

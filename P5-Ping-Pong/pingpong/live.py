@@ -38,7 +38,7 @@ from pingpong.vision import VisionWorker
 
 ACTIVE_PHASES = ("COUNTDOWN", "RALLY", "POINT_OVER")
 POSE_STALE_S = 0.6            # no hand reading for this long -> paused ("pose"); shorter than a
-                              # Rookie flight (0.86 s), so a dropout cannot cost the player a ball
+                              # Rookie flight (1.2 s), so a dropout cannot cost the player a ball
 RECONNECT_AFTER_S = 2.0       # hub silent this long (after it went stale) -> try to reconnect
 RECONNECT_COOLDOWN_S = 10.0   # ... then at most one attempt per this
 MAX_RECONNECTS = 3            # per outage; then the HUD says LOST until the player presses R

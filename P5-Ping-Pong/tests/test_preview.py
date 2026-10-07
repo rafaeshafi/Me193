@@ -66,10 +66,18 @@ def test_the_picture_is_mirrored_like_a_mirror_and_resized_to_the_window_width()
 
 
 def test_the_joints_are_drawn_where_the_mirror_shows_them_green_when_seen_and_red_when_not():
-    lm = body({16: (0.2, 0.5, 0.9), 15: (0.8, 0.5, 0.1)})
+    lm = body({0: (0.2, 0.5, 0.9), 11: (0.8, 0.5, 0.1)})        # the head seen at the camera's left, a shoulder hidden
     image = preview.compose(BLACK, "c", lm, width=480)
     assert tuple(image[135, round((1 - 0.2) * 480)]) == preview.GREEN             # camera-left is mirror-right
     assert tuple(image[135, round((1 - 0.8) * 480)]) == preview.RED
+
+
+def test_the_hand_is_marked_where_the_game_tracks_it_not_at_the_wrist():
+    # right wrist at (0.2, 0.5), the fist (index, pinky, thumb) at (0.1, 0.4)
+    lm = body({16: (0.2, 0.5, 0.9), 20: (0.1, 0.4, 0.9), 18: (0.1, 0.4, 0.9), 22: (0.1, 0.4, 0.9)})
+    image = preview.compose(BLACK, "c", lm, width=480)
+    assert tuple(image[108, round((1 - 0.1) * 480)]) == preview.GREEN             # on the hand
+    assert tuple(image[135, round((1 - 0.2) * 480)]) != preview.GREEN             # nothing at the wrist
 
 
 def test_the_status_line_is_green_only_when_you_are_in_position():

@@ -34,7 +34,8 @@ def make_parser():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--fake", action="store_true", help="no hardware: mouse paddle, keyboard swings")
     ap.add_argument("--level", type=int, choices=(1, 2, 3), default=1)
-    ap.add_argument("--mode", choices=("survival", "match"), default="survival")
+    ap.add_argument("--mode", choices=("survival", "rally", "match"), default="survival",
+                    help="rally (= survival): the computer never misses, how long can you keep it going; match: to 7")
     ap.add_argument("--target", type=int, default=7, help="match target points (11 = win by 2)")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--no-publish", action="store_true", help="never touch the MQTT broker")
@@ -63,7 +64,10 @@ def make_parser():
 
 
 def parse_args(argv=None):
-    return make_parser().parse_args(argv)
+    args = make_parser().parse_args(argv)
+    if args.mode == "rally":                       # what the screen calls the survival mode
+        args.mode = "survival"
+    return args
 
 
 def selftest():

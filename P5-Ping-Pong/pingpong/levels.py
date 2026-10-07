@@ -9,6 +9,7 @@ camera lag against a 0.32 s flight and is probably unplayable.
 from dataclasses import dataclass
 
 INF = float("inf")
+MODE_NAMES = {"survival": "RALLY", "match": "MATCH"}       # what the player sees; the stored key stays "survival"
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,7 @@ class Level:
 
 
 LEVELS = {
-    1: Level("Rookie", 1, 3.5, 0.30, 0.18, 0.55, 0.40, 1.2, 0.10, 0.25, INF, 0.0, 5.0, 0.20, 0.60, 0.6),
+    1: Level("Rookie", 1, 2.5, 0.30, 0.18, 0.55, 0.40, 1.2, 0.10, 0.25, INF, 0.0, 5.0, 0.20, 0.60, 0.6),
     2: Level("Club", 2, 5.0, 0.22, 0.14, 0.45, 0.28, 2.2, 0.06, 0.15, 1.0, 0.2, 7.0, 0.35, 0.50, 0.8),
     3: Level("Pro", 3, 7.0, 0.16, 0.10, 0.35, 0.18, 3.5, 0.03, 0.08, 0.4, 0.4, 9.0, 0.50, 0.42),
     4: Level("Insane", 4, 9.5, 0.12, 0.07, 0.28, 0.10, 5.0, 0.01, 0.04, 0.15, 0.7, 11.0, 0.65, 0.35),

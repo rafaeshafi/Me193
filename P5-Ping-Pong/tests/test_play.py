@@ -52,6 +52,11 @@ def test_live_arguments():
     assert play.parse_args([]).player == "rafae"
 
 
+def test_rally_is_what_the_screen_and_the_command_line_call_the_survival_mode():
+    assert play.parse_args(["--mode", "rally"]).mode == "survival"
+    assert play.parse_args([]).mode == "survival" and play.parse_args(["--mode", "match"]).mode == "match"
+
+
 def test_board_prints_the_leaderboard_without_touching_any_hardware(tmp_path, capsys):
     from pingpong import store
 
@@ -61,7 +66,7 @@ def test_board_prints_the_leaderboard_without_touching_any_hardware(tmp_path, ca
     db.close()
     assert play.main(["--board", "--db", str(tmp_path / "pp.db")]) == 0
     out = capsys.readouterr().out
-    assert "SURVIVAL" in out and "rafae" in out and "12" in out
+    assert "RALLY" in out and "rafae" in out and "12" in out
 
 
 def test_board_without_a_database_says_there_are_no_games_and_creates_nothing(tmp_path, capsys):

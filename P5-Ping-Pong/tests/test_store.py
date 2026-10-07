@@ -97,5 +97,5 @@ def test_the_board_text_lists_modes_and_levels(tmp_path):
     db.record_game("rafae", game(streak=12, record=12))
     db.record_game("rafae", game(mode="match", winner="player"))
     text = store.format_board(db)
-    assert "SURVIVAL" in text and "MATCH" in text and "rafae" in text and "12" in text
+    assert "RALLY" in text and "MATCH" in text and "rafae" in text and "12" in text
     assert "no games yet" in store.format_board(store.Store(tmp_path / "empty.db"))

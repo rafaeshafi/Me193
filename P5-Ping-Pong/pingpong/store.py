@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import config
+from pingpong import levels
 
 MODES = ("survival", "match")
 SCHEMA = """
@@ -109,5 +110,5 @@ def format_board(db, limit=5):
     for mode, unit in (("survival", "best streak"), ("match", "wins")):
         rows = db.leaderboard(mode, limit=limit)
         if rows:
-            sections.append(f"{mode.upper()} ({unit})\n" + "\n".join(f"  {i + 1}. {n}  {s}" for i, (n, s) in enumerate(rows)))
+            sections.append(f"{levels.MODE_NAMES.get(mode, mode.upper())} ({unit})\n" + "\n".join(f"  {i + 1}. {n}  {s}" for i, (n, s) in enumerate(rows)))
     return "\n\n".join(sections) if sections else "no games yet: play one with ./pp play"

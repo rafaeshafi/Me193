@@ -89,7 +89,7 @@ def test_start_runs_a_three_second_countdown_then_serves():
     assert game.tick(int(2.9 * S)) == []
     events = game.tick(3 * S)
     assert "serve" in kinds(events) and game.phase == "RALLY"
-    assert game.incoming_leg.flight_s == pytest.approx(3.0 / 3.5, rel=0.01)   # Rookie, s_prev 0.5
+    assert game.incoming_leg.flight_s == pytest.approx(3.0 / levels.LEVELS[1].v_tier, rel=0.01)   # Rookie, s_prev 0.5
 
 
 def test_start_is_ignored_mid_rally_and_level_changes_only_in_the_lobby():
@@ -141,6 +141,28 @@ def test_a_small_arrival_window_still_lets_the_return_use_the_whole_table(seed):
     assert game.outgoing_leg.x_end == pytest.approx(physics.x_of_a(0.5 + shot.aim_from_a(expect) / 1.6))
     if abs(a - 0.5) > 0.2:                                                    # an outer column: a wide return
         assert abs(game.outgoing_leg.x_end) > 0.4
+
+
+@pytest.mark.parametrize("seed", range(1, 7))
+def test_the_computer_returns_the_ball_from_where_it_met_it(seed):
+    # a rally: the ball leaves the paddle that hit it, it does not reappear in the middle of the far end
+    game, _ = make(seed=seed)
+    start_rally(game)
+    assert game.incoming_leg.x_start == 0.0                              # the first serve starts in the middle
+    good_hit(game)
+    met = game.outgoing_leg.x_end
+    next_serve(game)
+    assert game.incoming_leg.x_start == pytest.approx(met)
+
+
+def test_a_new_point_starts_from_the_middle_again():
+    game, _ = make(mode="match", policy=Script([False]))                 # the computer misses the first return
+    start_rally(game)
+    good_hit(game)
+    next_serve(game)                                                     # its miss ends the point
+    assert game.phase == "POINT_OVER"
+    game.tick(game.point_over_until_ns)
+    assert game.incoming_leg.x_start == 0.0
 
 
 def test_five_consecutive_hits_tick_the_score_up_live():

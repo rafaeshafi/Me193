@@ -18,8 +18,9 @@ virtual table over your webcam picture and the computer serves a ball at you.
   hit, an early or late one, a fault, a point and a new record, so you can play without
   looking at the screen.
 
-Two modes: **Survival** (the computer never misses; how long can you rally? the balls speed up)
-and **Match** (first to 7; the computer misses more the harder, spinnier and wider you hit).
+Two modes: **Rally** (called Survival in the code and on `--mode survival`: the computer is a player with its own
+paddle and never misses; how long can you keep the rally going? the balls speed up) and **Match** (first to 7; the
+computer misses more the harder, spinnier and wider you hit).
 
 > Run everything that touches Bluetooth or the camera from **Terminal.app**, not from inside the
 > Claude app (macOS aborts the process there). The tools say so instead of crashing.
@@ -101,13 +102,13 @@ The card is saved in `config_local.json` after `env_check` connects (or pass
 ```
 
 Show the **START card** (or press SPACE): 3-2-1, then the computer serves. Show **card 1, 2 or 3**
-between rallies to change the level; **M** switches Survival/Match; **1–3** also set the level.
+between rallies to change the level; **M** switches Rally/Match; **1–3** also set the level.
 
 | Key | |
 |---|---|
 | SPACE | start (and swing, in `--fake`) |
 | 1 2 3 | level: Rookie, Club, Pro |
-| M | Survival / Match |
+| M | Rally / Match |
 | X | x-ray: why each swing did or did not count |
 | D | disarm the motors (beep and light stay) |
 | S | mute / unmute the sounds |
@@ -117,15 +118,18 @@ between rallies to change the level; **M** switches Survival/Match; **1–3** al
 
 | Level | ball speed | flight (3 m) | hit window early / late | paddle radius | balls arrive in |
 |---|---|---|---|---|---|
-| Rookie | 3.5 m/s | 0.86 s | 0.30 / 0.18 s | 0.55 shoulder widths | the middle 60% of your reach box |
+| Rookie | 2.5 m/s | 1.2 s | 0.30 / 0.18 s | 0.55 shoulder widths | the middle 60% of your reach box |
 | Club | 5.0 m/s | 0.60 s | 0.22 / 0.14 s | 0.45 | the middle 80% |
 | Pro | 7.0 m/s | 0.43 s | 0.16 / 0.10 s | 0.35 | the whole box |
 
-**What the screen shows.** The camera picture is behind everything; on top of it sit your **hand plane**: a green dot is
-your hand, an amber circle is where the ball is about to arrive, and the circle is exactly the level's paddle radius, so
-*the dot inside the circle when the ball gets there* is what the judge calls a hit. The grey rectangle is the part of your
-reach box the balls can come to. One shoulder width is the same number of pixels across and up. `--set level.reach=0.5`
-shrinks that window (0.5 = the middle half of the box) and `--set level.radius_sw=0.8` widens the circle.
+**What the screen shows.** The camera picture is behind everything; on top of it is a table with two table-tennis
+paddles. The **red paddle is yours** and follows your hand (the fist, not the wrist); its round face is exactly the
+level's hit radius, and the small amber ring is where the ball is about to arrive, so *the ring inside the red face
+when the ball gets there* is what the judge calls a hit. The **blue paddle is the computer**: it waits where it hit,
+moves to where your shot will land, and flicks when it hits the ball back from there. The grey rectangle is the part
+of your reach box the balls can come to. One shoulder width is the same number of pixels across and up.
+`--set level.reach=0.5` shrinks that window (0.5 = the middle half of the box) and `--set level.radius_sw=0.8` makes
+your paddle bigger.
 
 **One shot.** The computer's ball arrives at a known instant. You swing; the swing detector reports
 its peak (back-dated to when the gyro really peaked), and the judge checks six gates (below). A valid
@@ -171,7 +175,7 @@ mosquitto_sub -h test.mosquitto.org -t 'ME193/Rogers/#' -v
   the ball will arrive, a ring at your hand, the streak and best, km/h of your last shot and its quality.
   A strip chart shows the **IMU swing rate with the threshold line** ("CAMERA SWING" when the camera is the
   sensor); **X** adds the x-ray gate list.
-- **Leaderboard**: every finished live game is saved to `data/pingpong.db` (Survival by best streak,
+- **Leaderboard**: every finished live game is saved to `data/pingpong.db` (Rally by best streak,
   Match by wins); the end screen shows the top five and highlights you.
 - **Recordings**: each live session writes `recordings/<time>-<player>/` (`session.json`, every raw IMU
   sample, every pose, every game event with all six gate results). `./pp report` turns it into numbers
@@ -211,7 +215,7 @@ haptic with a phone. A crash mid-take: restart with `--resume` so the best so fa
 lobby warns you when the broker holds one). If the broker lost the value: `./pp republish_best --yes`.
 
 **Five-minute live demo:** subscriber window visible; START card, then level cards 1 → 2 (the flight visibly
-shortens); one Survival rally with the x-ray (**X**) and km/h; a Match at Club to 7 (or the first three points); the
+shortens); one Rally with the x-ray (**X**) and km/h; a Match at Club to 7 (or the first three points); the
 haptic on camera; `./pp play --board`. The recorded video is the fallback.
 
 ## When something goes wrong
@@ -270,7 +274,7 @@ threshold) decides net or out faults. **The computer**
 picks a target zone by a softmax over a utility that wrong-foots my tracked hand (plus, if I turn it on,
 what a Q-learning table has learned about where I fail), then moves a speed-limited paddle to the landing
 point with a PD controller after its reaction delay, and in Match misses with a probability that grows with my shot's
-speed, spin and the distance its paddle cannot cover; in Survival it never misses and only the ramp
+speed, spin and the distance its paddle cannot cover; in Rally it never misses and only the ramp
 (speed ×1.03 per hit, up to 1.8, a special ball every tenth) changes. A rules state machine turns hits
 and faults into the score; sensor loss pauses the game rather than scoring against me; the record of
 continuous hits goes to MQTT whenever it improves.
@@ -308,7 +312,7 @@ continuous hits goes to MQTT whenever it improves.
 
 | Algorithm | Where | How it works |
 |---|---|---|
-| MediaPipe BlazePose landmarker (a pre-trained CNN) | `pose_features.py`, `pose.py`, `vision.py` | A convolutional network regresses 33 body landmarks per frame and tracks them between frames. I use the wrist, index and pinky, normalised by shoulder width, as the paddle position. |
+| MediaPipe BlazePose landmarker (a pre-trained CNN) | `pose_features.py`, `pose.py`, `vision.py` | A convolutional network regresses 33 body landmarks per frame and tracks them between frames. I use the hand (the index, pinky and thumb points, not the wrist), normalised by shoulder width, as the paddle position. |
 | AprilTag / ArUco 36h11 detection | `tags.py` | It thresholds the image, finds square quads and decodes a Hamming-protected bit grid into an id and corners. I vote over frames before an id counts as START or LEVEL. |
 | One-Euro filter | `oneeuro.py` | A low-pass filter whose cutoff rises with signal speed. The paddle point is smooth when I am still and nearly lag-free in a swing. |
 | Signed-axis swing detector (a threshold state machine; the axis comes from an SVD) | `swing.py`, `calibration.py`, `posegyro.py` | It projects the gyro onto the forward axis learned from my calibration swings, arms on a threshold, tracks the peak and fires on the falling edge with an oscillation guard. A backswing projects negative, so it never fires; with a slow hub the same detector runs on the camera's hand velocity. |
@@ -317,7 +321,7 @@ continuous hits goes to MQTT whenever it improves.
 | Softmax (Boltzmann) policy | `policy.py` | Each of nine target zones gets a utility and is sampled ∝ exp(utility / temperature). Lower temperature plays sharper at higher levels. |
 | StandardScaler + Logistic Regression | `spin.py`, `spinflow.py` | It standardises 12 swing features (the unit directions of the gyro peak, the net rotation and the linear acceleration, plus peak rate, duration and backswing ratio) and learns a linear softmax boundary between flat, top and back from my own labelled swings. The three probabilities become continuous topspin or backspin, and the model only ships if its cross-validated accuracy is at least 75%. |
 | Tabular Q-learning (opt-in, `--learn`) | `qbandit.py`, `policy.py` | It keeps Q(s,a) for nine states (my hand's third of the reach box × the column of the zone it served last) and nine target zones, and after every ball updates Q += α(r + γ·max Q' − Q) with reward 1 when I miss or fault. The computer adds Q to its softmax utility with a weight that grows with the level, so it learns to serve where I am weakest. |
-| Cross-correlation | `benchstats.py` | Wrist speed from the camera is correlated against gyro magnitude over a hand wave to find how much later the camera sees the same motion. That lag aligns the two sensors. |
+| Cross-correlation | `benchstats.py` | Hand speed from the camera is correlated against gyro magnitude over a hand wave to find how much later the camera sees the same motion. That lag aligns the two sensors. |
 
 Everything in this table is built and tested. The two *learned* pieces, the spin classifier and the Q-learning opponent, are per player and optional: the game plays without either (flat balls, a fixed opponent).
 

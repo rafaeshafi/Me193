@@ -151,10 +151,11 @@ class GameCore:
         return events
 
     # --- the CPU serves / returns ------------------------------------------------------------
-    def _serve(self, t0_ns):
+    def _serve(self, t0_ns, x_start=0.0):
+        """The computer hits a ball at the player: a serve from the middle, or (x_start) a return from where it met yours."""
         survival = self.mode == "survival"
         plan = self.policy.serve(self.level, self.s_prev, self.tracker.streak, self.player_a, survival)
-        leg = physics.plan_leg(t0_ns, plan.v, 0.0, plan.aim_ab, plan.topspin, plan.sidespin)
+        leg = physics.plan_leg(t0_ns, plan.v, x_start, plan.aim_ab, plan.topspin, plan.sidespin)
         self._ball_id += 1
         self.incoming = BallWindow(self._ball_id, leg.arrival_ns, plan.aim_ab, self.level)
         self.incoming_leg, self.outgoing_leg = leg, None
@@ -167,7 +168,7 @@ class GameCore:
         deficit = reach_deficit_m(self.level, leg.x_end, 0.0, leg.flight_s)
         self._cpu_at = None
         if self.policy.returns(self.level, shot.v_out, shot.A, deficit, self.mode == "survival"):
-            return self._serve(t_ns)
+            return self._serve(t_ns, x_start=leg.x_end)
         return self._end_rally("cpu_miss", t_ns)
 
     # --- the player's swing ----------------------------------------------------------------------

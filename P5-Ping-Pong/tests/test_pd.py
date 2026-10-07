@@ -98,6 +98,29 @@ def test_in_survival_the_paddle_always_gets_there_but_in_match_a_hard_shot_beats
     assert abs(match.hud_state().cpu_x_m - leg.x_end) > 0.1                             # a smash it cannot reach
 
 
+def test_after_its_return_the_computers_paddle_is_where_it_hit_and_drifts_back_to_the_middle():
+    session, leg = _wide_shot("survival", 700.0)
+    session.clock.advance_s(max(0.0, (leg.arrival_ns - session.clock.now_ns()) / 1e9) + 0.001)
+    session.tick()                                                       # the computer hits the ball back
+    assert session.game.incoming_leg.x_start == pytest.approx(leg.x_end)
+    assert session.hud_state().cpu_x_m == pytest.approx(leg.x_end, abs=0.03)
+    session.clock.advance_s(0.5)
+    assert abs(session.hud_state().cpu_x_m) < 0.5 * abs(leg.x_end)       # on its way back
+
+
+def test_the_computer_swings_when_it_serves_or_returns_for_about_a_third_of_a_second():
+    session = app.make_session(level=1)
+    assert session.hud_state().cpu_swing is None
+    session.on_start()
+    session.clock.advance_s(3.0)
+    session.tick()                                                       # the first serve
+    assert session.hud_state().cpu_swing == pytest.approx(0.0, abs=0.05)
+    session.clock.advance_s(0.15)
+    assert 0.4 < session.hud_state().cpu_swing < 0.6
+    session.clock.advance_s(0.5)
+    assert session.hud_state().cpu_swing is None
+
+
 def test_the_paddle_is_back_in_the_centre_when_the_computer_serves():
     session = app.make_session(level=1)
     session.on_start()

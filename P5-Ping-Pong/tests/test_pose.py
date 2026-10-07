@@ -8,6 +8,7 @@ from pingpong import pose
 
 W, H = 1280, 720
 L_SH, R_SH, L_PINKY, R_PINKY, L_WRIST, R_WRIST, L_INDEX, R_INDEX = 11, 12, 17, 18, 15, 16, 19, 20
+L_THUMB, R_THUMB = 21, 22
 
 
 def landmarks(sh_x=(0.6, 0.4), sh_y=0.4, vis=0.95, **points):
@@ -34,14 +35,36 @@ def test_right_hand_to_the_players_right_is_positive_u_and_raising_it_is_positiv
     assert v2 == pytest.approx((0.4 - 0.2) * H / (0.2 * W))
 
 
-def test_the_paddle_point_blends_wrist_index_and_pinky():
+def test_the_paddle_point_is_the_hand_not_the_wrist():
+    # the first live games tracked the wrist, a few centimetres behind the fist that holds the hub
     lm = landmarks()
     hand(lm, R_WRIST, 0.30, 0.40)
-    hand(lm, R_INDEX, 0.26, 0.40)
-    hand(lm, R_PINKY, 0.26, 0.40)
-    u, _, _ = pose.paddle_uv(lm, "right", W, H)
-    expected_x = 0.5 * 0.30 + 0.25 * 0.26 + 0.25 * 0.26
-    assert u == pytest.approx((0.5 - expected_x) * W / (0.2 * W))
+    hand(lm, R_INDEX, 0.24, 0.30)
+    hand(lm, R_PINKY, 0.26, 0.34)
+    hand(lm, R_THUMB, 0.25, 0.32)
+    u, v, conf = pose.paddle_uv(lm, "right", W, H)
+    x = 0.4 * 0.24 + 0.4 * 0.26 + 0.2 * 0.25                    # index, pinky and thumb: the fist; the wrist is not in it
+    y = 0.4 * 0.30 + 0.4 * 0.34 + 0.2 * 0.32
+    assert u == pytest.approx((0.5 - x) / 0.2) and v == pytest.approx((0.4 - y) * H / (0.2 * W))
+    assert conf == pytest.approx(0.9)                           # the confidence is still the wrist's and the shoulders'
+
+
+def test_one_visible_finger_point_is_the_hand_and_the_wrist_is_only_the_fallback():
+    lm = landmarks()
+    hand(lm, R_WRIST, 0.30, 0.40)
+    hand(lm, R_INDEX, 0.22, 0.30)
+    hand(lm, R_PINKY, 0.10, 0.10, vis=0.1)
+    assert pose.hand_xy(lm, "right") == pytest.approx((0.22, 0.30))
+    assert pose.hand_xy(landmarks(**{"p16": (0.30, 0.40, 0.9)}), "right") == pytest.approx((0.30, 0.40))   # wrist only
+
+
+def test_the_left_hand_is_the_left_fingers():
+    lm = landmarks()
+    hand(lm, L_WRIST, 0.70, 0.40)
+    hand(lm, L_INDEX, 0.76, 0.30)
+    hand(lm, L_THUMB, 0.74, 0.34)
+    x = (0.4 * 0.76 + 0.2 * 0.74) / 0.6
+    assert pose.hand_xy(lm, "left")[0] == pytest.approx(x)
 
 
 def test_the_wrist_alone_is_enough_when_the_fingers_are_hidden():

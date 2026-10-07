@@ -28,8 +28,14 @@ def test_names_and_tags_line_up_with_the_printed_cards():
     assert levels.level_for_tag(0) is None        # tag 0 is START, not a level
 
 
+def test_rookie_is_slow_enough_to_find_the_ring_and_bring_the_hand_to_it():
+    # the first live game: 0.86 s was not enough to see where the ball was going and get there
+    assert 3.0 / levels.LEVELS[1].v_tier >= 1.1
+    assert levels.MODE_NAMES == {"survival": "RALLY", "match": "MATCH"}
+
+
 def test_flight_times_at_three_metres_match_the_plan_table():
-    assert [round(3.0 / levels.LEVELS[i].v_tier, 2) for i in (1, 2, 3, 4)] == [0.86, 0.60, 0.43, 0.32]
+    assert [round(3.0 / levels.LEVELS[i].v_tier, 2) for i in (1, 2, 3, 4)] == [1.2, 0.60, 0.43, 0.32]
 
 
 @pytest.mark.parametrize("easier, harder", [(1, 2), (2, 3), (3, 4)])

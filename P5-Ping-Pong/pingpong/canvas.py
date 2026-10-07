@@ -1,15 +1,19 @@
 """Drawing primitives and the court projection (numpy BGR frames, no window)."""
 
+import math
+
 import cv2
 import numpy as np
 
 HALF_WIDTH_M = 0.7625
 FONT = cv2.FONT_HERSHEY_SIMPLEX
+RUBBER_RED, RUBBER_BLUE = (35, 35, 200), (190, 85, 30)           # BGR: a table-tennis paddle is red on one side, blue/black on the other
+WOOD, WOOD_DARK, RIM = (100, 165, 220), (45, 85, 140), (25, 25, 25)
 
 
 def project(x_m, depth, h_m, w, h):
     """(lateral metres, depth 0=far/CPU .. 1=near/player, height metres) -> (px, py, scale)."""
-    far_y, near_y = 0.30 * h, 0.86 * h
+    far_y, near_y = 0.34 * h, 0.86 * h              # (the far end sits below the score and the computer's paddle)
     scale = 0.38 + 0.62 * depth
     px = w / 2 + (x_m / HALF_WIDTH_M) * 0.40 * w * scale
     py = far_y + depth * (near_y - far_y) - h_m * 0.55 * h * scale
@@ -116,6 +120,27 @@ def draw_ball(frame, x_m, depth, h_m, color=(40, 160, 255), toward=None):
     cv2.ellipse(frame, (gx, gy), (int(16 * scale), int(6 * scale)), 0, 0, 360, (0, 0, 0), -1, cv2.LINE_AA)
     cv2.circle(frame, (bx, by), int(8 + 14 * scale), color, -1, cv2.LINE_AA)
     cv2.circle(frame, (bx, by), int(8 + 14 * scale), (255, 255, 255), 2, cv2.LINE_AA)
+
+
+def draw_paddle(frame, cx, cy, radius, *, rubber=RUBBER_RED, angle_deg=0.0, handle_up=False):
+    """A table-tennis paddle: a rubber face inside a black rim, on a short wooden handle.
+
+    (cx, cy) is the centre of the FACE, which is the surface that hits the ball; the handle hangs below it (above it
+    for the player at the far end) and swings about the face's centre by angle_deg."""
+    a, sign = math.radians(angle_deg), (-1.0 if handle_up else 1.0)
+    d = (-sign * math.sin(a), sign * math.cos(a))                       # from the face towards the grip
+    n = (-d[1], d[0])
+    near, far = (cx + d[0] * 0.8 * radius, cy + d[1] * 0.8 * radius), (cx + d[0] * 2.5 * radius, cy + d[1] * 2.5 * radius)
+    handle = np.array([(near[0] + n[0] * 0.22 * radius, near[1] + n[1] * 0.22 * radius),
+                       (far[0] + n[0] * 0.19 * radius, far[1] + n[1] * 0.19 * radius),
+                       (far[0] - n[0] * 0.19 * radius, far[1] - n[1] * 0.19 * radius),
+                       (near[0] - n[0] * 0.22 * radius, near[1] - n[1] * 0.22 * radius)], dtype=np.int32)
+    cv2.fillConvexPoly(frame, handle, WOOD, cv2.LINE_AA)
+    cv2.polylines(frame, [handle], True, WOOD_DARK, 2, cv2.LINE_AA)
+    cv2.circle(frame, (cx, cy), radius, RIM, -1, cv2.LINE_AA)
+    cv2.circle(frame, (cx, cy), round(0.9 * radius), rubber, -1, cv2.LINE_AA)
+    shine = tuple(min(255, c + 80) for c in rubber)                     # a glossy arc on the upper left of the rubber
+    cv2.ellipse(frame, (cx, cy), (round(0.72 * radius), round(0.72 * radius)), 0, 190, 245, shine, 2, cv2.LINE_AA)
 
 
 def draw_ring(frame, x_m, depth, h_m, radius, color, thickness=3):

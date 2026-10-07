@@ -256,16 +256,55 @@ def test_a_shoulder_width_is_the_same_number_of_pixels_across_and_up_on_the_hand
     assert hud.plane_xy((0.0, 1.0), BOX_SW, W, H)[1] > 0.25 * H                 # the whole box stays below the score
 
 
-def test_the_target_ring_is_the_judges_hit_zone_a_circle_of_the_levels_radius():
+def test_your_paddle_is_a_table_tennis_paddle_whose_face_is_the_hit_zone():
+    frame = hud.render(state(phase="RALLY", paddle_ab=(0.5, 0.5), box_sw=BOX_SW, radius_sw=0.55), size=(W, H))
+    cx, cy = hud.plane_xy((0.5, 0.5), BOX_SW, W, H)
+    r = round(0.55 * S_PX)
+    assert tuple(frame[cy, cx + round(0.6 * r)]) == canvas.RUBBER_RED             # red rubber inside the face
+    assert tuple(frame[cy - round(0.6 * r), cx]) == canvas.RUBBER_RED
+    assert tuple(frame[cy, cx + round(1.25 * r)]) != canvas.RUBBER_RED            # and not beyond the hit radius
+    assert tuple(frame[cy + round(1.5 * r), cx]) == canvas.WOOD                   # the wooden handle hangs below
+
+
+def test_the_paddle_moves_with_the_hand_on_the_same_plane():
+    frame = hud.render(state(phase="RALLY", paddle_ab=(0.8, 0.3), box_sw=BOX_SW, radius_sw=0.55), size=(W, H))
+    px, py = hud.plane_xy((0.8, 0.3), BOX_SW, W, H)
+    assert tuple(frame[py, px + round(0.4 * 0.55 * S_PX)]) == canvas.RUBBER_RED
+
+
+def test_the_target_is_a_small_ring_the_ball_has_to_land_inside_the_paddle():
     frame = hud.render(state(phase="RALLY", arrival_ab=(0.5, 0.5), box_sw=BOX_SW, radius_sw=0.55), size=(W, H))
     cx, cy = hud.plane_xy((0.5, 0.5), BOX_SW, W, H)
-    assert on_ring(frame, hud.AMBER, cx, cy, round(0.55 * S_PX))
+    assert on_ring(frame, hud.AMBER, cx, cy, hud.TARGET_R)
+    assert not on_ring(frame, hud.AMBER, cx, cy, round(0.55 * S_PX))              # no longer the size of the hit zone
 
 
-def test_the_paddle_is_a_dot_at_the_hand_on_the_same_plane():
-    frame = hud.render(state(phase="RALLY", paddle_ab=(0.8, 0.3), box_sw=BOX_SW), size=(W, H))
-    px, py = hud.plane_xy((0.8, 0.3), BOX_SW, W, H)
-    assert tuple(frame[py, px]) == hud.GREEN
+def test_the_ball_inside_the_paddle_face_is_a_hit_and_outside_it_is_not():
+    # the face is drawn over the target ring's surroundings: the arrival point sits inside the face exactly when the
+    # judge will accept the hand
+    r = 0.55 * S_PX
+    for dist_sw, inside in ((0.3, True), (0.9, False)):
+        ab = (0.5 + dist_sw / BOX_SW[0], 0.5)
+        px, py = hud.plane_xy((0.5, 0.5), BOX_SW, W, H)
+        tx, ty = hud.plane_xy(ab, BOX_SW, W, H)
+        assert (((tx - px) ** 2 + (ty - py) ** 2) ** 0.5 <= r) is inside
+
+
+def test_the_computer_has_its_own_blue_paddle_at_the_far_end_that_swings_when_it_hits():
+    resting = hud.render(state(phase="RALLY", cpu_x_m=0.2), size=(W, H))
+    swinging = hud.render(state(phase="RALLY", cpu_x_m=0.2, cpu_swing=0.25), size=(W, H))
+    px, py, _ = canvas.project(0.2, 0.0, hud.CPU_PADDLE_LIFT_M, W, H)
+    assert tuple(resting[py, px]) == canvas.RUBBER_BLUE                           # a rubber face at the far end
+    assert diff(resting, swinging) > 500                                          # the swing moves the handle
+
+
+def test_the_survival_mode_is_called_rally_on_screen(monkeypatch):
+    seen = drawn_text(monkeypatch)
+    hud.render(state(mode="survival", level_name="Rookie"), size=(W, H))
+    assert any(text.startswith("RALLY") for text in seen) and not any("SURVIVAL" in text for text in seen)
+    seen.clear()
+    hud.render(state(mode="match", level_name="Rookie"), size=(W, H))
+    assert any(text.startswith("MATCH") for text in seen)
 
 
 def test_the_incoming_ball_arrives_on_the_target_ring_not_at_the_edge_of_the_table():
