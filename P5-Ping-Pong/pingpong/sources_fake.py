@@ -211,6 +211,7 @@ class FakeEnv:
         self.clock = FakeClock(start_ns=1_000_000_000)
         self.hz = hz
         self.camera = camera
+        self.cameras = None         # optional {index: kind}: several cameras, e.g. an iPhone via Continuity Camera
         self.mqtt_ok = mqtt_ok
         self.mqtt_rtt_ms = mqtt_rtt_ms
         self.hub_device = FakeDoubleMotor(fail_connect=not hub_found)
@@ -258,6 +259,8 @@ class FakeEnv:
         self.clock.advance_s((target_ns - self.clock.now_ns()) / 1e9)
 
     def open_camera(self, index):
+        if self.cameras is not None:                       # {index: "ok" | "black" | "closed"}; other indices do not exist
+            return FakeCamera(self.cameras.get(index, "closed"))
         return FakeCamera(self.camera)
 
     def mqtt_roundtrip(self, topic, timeout_s=5.0):

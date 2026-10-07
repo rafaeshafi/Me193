@@ -51,7 +51,7 @@ def run_checks(env, *, card_color, card_serial, secs, skip, camera_index, config
     link = None
     try:
         add(*_check_imports())
-        _check_camera(env, camera_index, skip, add)
+        _check_camera(env, camera_index, skip, add, config_path)
         link = _check_hub_connect(env, card_color, card_serial, notify_ms, skip, add, config_path)
         _check_mqtt(env, skip, add)
         _check_hub_rate(env, link, secs, notify_ms, skip, add, prompt, config_path)
@@ -84,7 +84,7 @@ def _check_imports():
     return "imports", "PASS", "mediapipe, cv2 (+aruco 36h11), legoeducation, bleak, paho, sounddevice, sklearn"
 
 
-def _check_camera(env, index, skip, add):
+def _check_camera(env, index, skip, add, config_path=None):
     if "camera" in skip:
         return add("camera", "SKIP", "skipped")
     cap = env.open_camera(index)
@@ -104,10 +104,34 @@ def _check_camera(env, index, skip, add):
             return add("camera", "FAIL", "frames are black: camera permission is missing for this "
                        "terminal -- grant Camera in System Settings > Privacy & Security and restart it")
         h, w = last.shape[:2]
+        if index != config.CAMERA_INDEX and config_path is not None:
+            config.write_local({"CAMERA_INDEX": index}, config_path)               # it works: remember it
+        others = _other_cameras(env, index)
+        hint = (f"; other cameras that open: {', '.join(others)}: if index {index} is your iPhone (Continuity Camera), "
+                "pass --camera-index N (it is remembered)") if others else ""
         return add("camera", "PASS", f"{w}x{h}, mean brightness {float(last.mean()):.0f}/255 "
-                   "(front-light yourself; avoid a window behind you)")
+                   f"(front-light yourself; avoid a window behind you){hint}")
     finally:
         cap.release()
+
+
+def _other_cameras(env, chosen, indices=range(4)):
+    """["index 1 (1920x1080)", ...] for every other camera index that opens and gives a frame."""
+    found = []
+    for index in indices:
+        if index == chosen:
+            continue
+        cap = env.open_camera(index)
+        try:
+            if cap.isOpened():
+                ok, frame = cap.read()
+                if ok and frame is not None:
+                    found.append(f"index {index} ({frame.shape[1]}x{frame.shape[0]})")
+        except Exception:
+            pass
+        finally:
+            cap.release()
+    return found
 
 
 def _check_hub_connect(env, color, serial, notify_ms, skip, add, config_path):

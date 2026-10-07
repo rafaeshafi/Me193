@@ -114,3 +114,39 @@ def test_beep_is_sent_once_non_blocking_on_connect(tmp_path):
 
 def test_selftest_entry_point_passes():
     assert env_check.main(["--selftest"]) == 0
+
+
+# --- which camera is which --------------------------------------------------------------------------------------------------
+def test_the_camera_check_lists_the_other_cameras_that_open_so_a_phone_at_index_0_can_be_told_apart(tmp_path):
+    env = FakeEnv()
+    env.cameras = {0: "ok", 1: "ok", 2: "closed"}
+    results, _ = run(env, tmp_path)
+    detail = by_name(results)["camera"].detail
+    assert "index 1" in detail and "index 2" not in detail and "--camera-index" in detail
+
+
+def test_a_lone_camera_is_not_accompanied_by_a_list_of_nothing(tmp_path):
+    env = FakeEnv()
+    env.cameras = {0: "ok"}
+    results, _ = run(env, tmp_path)
+    assert "other camera" not in by_name(results)["camera"].detail
+
+
+def test_a_camera_index_that_works_and_is_not_the_configured_one_is_remembered(tmp_path):
+    import json
+
+    env = FakeEnv()
+    env.cameras = {0: "closed", 1: "ok"}
+    results, _ = run(env, tmp_path, camera_index=1)
+    assert by_name(results)["camera"].status == "PASS"
+    assert json.loads((tmp_path / "config_local.json").read_text())["CAMERA_INDEX"] == 1
+
+
+def test_a_failing_camera_index_is_never_saved(tmp_path):
+    import json
+
+    env = FakeEnv()
+    env.cameras = {0: "ok", 3: "closed"}
+    run(env, tmp_path, camera_index=3)
+    saved = tmp_path / "config_local.json"
+    assert "CAMERA_INDEX" not in (json.loads(saved.read_text()) if saved.exists() else {})
