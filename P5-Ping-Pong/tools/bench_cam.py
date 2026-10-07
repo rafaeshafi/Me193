@@ -302,10 +302,9 @@ def main(argv=None):
 
     hostcheck.require_host("Camera and Bluetooth")
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    cv2.namedWindow("P5 bench_cam")
 
-    def show(frame):
-        cv2.imshow("P5 bench_cam", frame)
+    def show(frame):                     # imshow creates the window on first use: one made earlier would sit undrawn
+        cv2.imshow("P5 bench_cam", frame)   # through every Enter prompt and keep the Dock icon bouncing
         cv2.waitKey(1)
 
     try:

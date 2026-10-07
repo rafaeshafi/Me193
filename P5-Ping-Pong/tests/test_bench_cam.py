@@ -148,5 +148,26 @@ def test_the_camera_index_is_saved_only_when_the_camera_works(tmp_path):
     assert json.loads(bench.config_path.read_text())["CAMERA_INDEX"] == 1
 
 
+def test_no_window_exists_until_the_hud_step_draws_something(monkeypatch):
+    # an OpenCV window nobody draws into keeps the Python icon bouncing in the Dock for the whole bench, which
+    # looks like Python failing to start while it is only waiting at an Enter prompt
+    calls = []
+    for name in ("namedWindow", "imshow", "waitKey", "destroyAllWindows"):
+        monkeypatch.setattr(bench_cam.cv2, name, lambda *a, _n=name, **k: calls.append(_n) or -1)
+    monkeypatch.setattr("pingpong.hostcheck.require_host", lambda *a: None)
+    monkeypatch.setattr("pingpong.realenv.RealEnv", lambda: object())
+    monkeypatch.setattr(bench_cam.signal, "signal", lambda *a: None)
+    before = []
+
+    def fake_run(env, *, show, **kw):
+        before.extend(calls)
+        show("frame")
+        return [], 0
+
+    monkeypatch.setattr(bench_cam, "run", fake_run)
+    assert bench_cam.main(["--only", "hud"]) == 0
+    assert before == [] and calls[:2] == ["imshow", "waitKey"]
+
+
 def test_the_selftest_is_green():
     assert bench_cam.main(["--selftest"]) == 0
