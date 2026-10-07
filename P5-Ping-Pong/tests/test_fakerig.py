@@ -191,3 +191,23 @@ def test_the_whole_pipeline_plays_with_a_learning_opponent_and_the_learner_learn
     rig = fakerig.FakeRig(level=2, learner=learner)
     rig.run(until=lambda: rig.game.tracker.streak >= 8, max_s=120)
     assert rig.game.tracker.streak >= 8 and float(abs(learner.table).sum()) > 0.0
+
+
+@pytest.mark.parametrize("level", (1, 2, 3))
+def test_a_hand_that_really_swings_through_the_ball_is_still_judged_a_hit_for_an_ordinary_swing(level):
+    # The scripted hand used to sit perfectly still while the gyro swung.  A real hand covers a shoulder width or
+    # more in the 300 ms the pose gate looks at, so the gate has to cope with a moving hand.
+    rig = fakerig.FakeRig(level=level, hand_motion=True, w_pk=600.0)
+    rig.run(until=lambda: rig.game.tracker.streak >= 6, max_s=90)
+    assert rig.game.tracker.streak >= 6
+
+
+def test_the_hardest_swing_carries_the_hand_out_of_the_pro_radius_and_a_wider_radius_fixes_it():
+    # A known limit, not a bug: at ~11 shoulder widths a second the hand leaves Pro's 0.35 radius before the peak.
+    # The tuning knob is --set level.radius_sw, and it is enough.
+    hard = fakerig.FakeRig(level=3, hand_motion=True, w_pk=1100.0)
+    hard.run(until=lambda: hard.game.phase == "MATCH_OVER", max_s=60)
+    assert hard.game.tracker.record == 0
+    wide = fakerig.FakeRig(level=3, hand_motion=True, w_pk=1100.0, overrides={"level": {"radius_sw": 0.9}})
+    wide.run(until=lambda: wide.game.tracker.streak >= 5, max_s=90)
+    assert wide.game.tracker.streak >= 5

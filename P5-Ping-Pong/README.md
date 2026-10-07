@@ -247,7 +247,8 @@ continuous hits goes to MQTT whenever it improves.
 
 - **Camera lag and one camera.** Pose trails the IMU by roughly 70–150 ms [measured: ___ ms] and a
   single webcam gives no depth, so the "paddle is at the ball" test is a 2-D approximation, lenient at
-  Rookie.
+  Rookie. The hand also moves during a swing (a shoulder width or more in the 300 ms the pose gate looks at),
+  so the hardest swings can leave Pro's small radius; `--set level.radius_sw=0.8` is the knob.
 - **The hub IMU.** About 66 Hz over Bluetooth [measured: ___ Hz] (below 25 Hz the camera takes over, see
   below), undocumented units, no timestamps
   (samples are stamped on arrival), so the swing peak is only good to ~15 ms and a swing is reported

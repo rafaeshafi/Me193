@@ -162,13 +162,14 @@ class FakeRig:
     def __init__(self, *, level=1, mode="survival", target=7, seed=1, calibration=None, source="live",
                  scope="record_session", w_pk=600.0, timing_s=0.0, cards=None, hz=66.0, fps=30.0, lag_s=0.10,
                  stale_ms=300.0, vibration=False, no_motor=False, record_dir=None, spin_probs_fn=None, learner=None,
-                 swing_source="imu", no_hub=False, overrides=None):
+                 swing_source="imu", no_hub=False, overrides=None, hand_motion=False):
         self.clock = FakeClock(start_ns=1_000_000_000)
         self.origin_ns = self.clock.now_ns()
         camera = swing_source == "pose"                                # the camera, not the hub's gyro, detects swings
         calibration = calibration or Calibration.default(swing_source)
         cards = [(0.6, 2.4, 0)] if cards is None else cards            # the START card, held 1.8 s
-        self.player = ScriptedPlayer(calibration.box, w_pk=w_pk, timing_s=timing_s, cards=cards, pose_motion=camera)
+        self.player = ScriptedPlayer(calibration.box, w_pk=w_pk, timing_s=timing_s, cards=cards,
+                                     pose_motion=camera or hand_motion)    # hand_motion: a hand that swings, hub gyro too
         self.player.origin_ns = self.origin_ns
         self.dev = None if no_hub else VibratingMotor(self.player, self.clock, vibration)
         self.client = FakeMqttClient()
