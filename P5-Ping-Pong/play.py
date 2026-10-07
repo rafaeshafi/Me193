@@ -27,7 +27,7 @@ W, H = 1280, 720
 TITLE = "P5 Ping-Pong  (Q to quit)"
 
 
-def parse_args(argv=None):
+def make_parser():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--fake", action="store_true", help="no hardware: mouse paddle, keyboard swings")
     ap.add_argument("--level", type=int, choices=(1, 2, 3), default=1)
@@ -46,7 +46,11 @@ def parse_args(argv=None):
     ap.add_argument("--player", default="rafae", help="player profile; 'guest' = no saved calibration, never publishes")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--no-window", action="store_true")
-    return ap.parse_args(argv)
+    return ap
+
+
+def parse_args(argv=None):
+    return make_parser().parse_args(argv)
 
 
 def selftest():
