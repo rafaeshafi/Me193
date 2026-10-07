@@ -219,3 +219,34 @@ def test_the_latest_shoulder_width_is_exposed_for_calibration():
     worker2, clock2, *_ = make(landmarker=nobody)
     tick(worker2, clock2)
     assert worker2.last_shoulder_w is None
+
+
+def test_two_workers_sharing_one_landmarker_never_send_a_timestamp_that_goes_backwards():
+    # MediaPipe's video mode rejects any timestamp at or below the last one it saw.  The worker's
+    # timestamps come from the clock itself, not from its own first frame, so a second worker (or
+    # a restarted one) on the same landmarker keeps counting up.
+    clock = FakeClock(start_ns=1_000_000_000)
+    lmk = FakeLandmarker(clock)
+    first, _, _, _ = make(clock=clock, landmarker=lmk)
+    for _ in range(5):
+        tick(first, clock)
+    second, _, _, _ = make(clock=clock, landmarker=lmk)
+    for _ in range(5):
+        tick(second, clock)
+    assert lmk.calls == sorted(set(lmk.calls)) and len(lmk.calls) == 10
+
+
+def test_a_repeating_error_is_reported_once_with_a_count_not_on_every_frame():
+    class Failing:
+        def detect_for_video(self, image, ts_ms):
+            raise RuntimeError("model blew up")
+
+    printed = []
+    worker = vision.VisionWorker(FakeCapture(), Failing(), to_image=lambda f: f, lag_s=0.1, log=printed.append)
+    worker.start()
+    deadline = time.monotonic() + 3.0
+    while worker.n_errors < 60 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    worker.stop()
+    assert worker.n_errors >= 60 and 1 <= len(printed) <= 3
+    assert "model blew up" in printed[0]

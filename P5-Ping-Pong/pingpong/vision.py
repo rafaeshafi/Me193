@@ -32,7 +32,7 @@ TAG_PHASES = ("LOBBY", "MATCH_OVER")
 
 class VisionWorker:
     def __init__(self, capture, landmarker, *, clock=None, hand="right", lag_s=None, tag_detector=None,
-                 voter=None, phase_fn=None, lock=None, to_image=None, history=64, tag_hz=10.0):
+                 voter=None, phase_fn=None, lock=None, to_image=None, history=64, tag_hz=10.0, log=print):
         self.capture, self.landmarker = capture, landmarker
         self.clock = clock or Clock()
         self.hand = hand
@@ -50,9 +50,9 @@ class VisionWorker:
         self._infer_ms = deque(maxlen=120)
         self._frame_times = deque(maxlen=60)
         self._last_ts_ms = -1
-        self._t_start = None
         self._last_tag_ns = None
-        self.n_no_pose = self.n_locked_out = 0
+        self.n_no_pose = self.n_locked_out = self.n_errors = 0
+        self.log, self._error_counts = log, {}
         self._last_pose_read_ns = None
         self.last_shoulder_w = None
         self._stop = threading.Event()
@@ -96,10 +96,10 @@ class VisionWorker:
         self._last_pose_read_ns = t_read
 
     def _timestamp_ms(self, t_read):
-        if self._t_start is None:
-            self._t_start = t_read
-        ts = int((t_read - self._t_start) / 1e6)
-        self._last_ts_ms = max(self._last_ts_ms + 1, ts)           # MediaPipe needs strictly increasing ms
+        # The clock's own milliseconds, not time since this worker's first frame: MediaPipe rejects a
+        # timestamp at or below the last one the LANDMARKER saw, so a restarted or second worker on
+        # the same landmarker must keep counting up.
+        self._last_ts_ms = max(self._last_ts_ms + 1, int(t_read // 1_000_000))
         return self._last_ts_ms
 
     def _look_for_tags(self, frame, t_read):
@@ -153,8 +153,16 @@ class VisionWorker:
                 if not self.step():
                     time.sleep(0.01)
             except Exception as exc:                 # one bad frame must not kill the camera thread
-                print(f"vision: {exc}")
+                self._report(exc)
                 time.sleep(0.01)
+
+    def _report(self, exc):
+        """Print a new kind of error at once, then only every 100th repeat (a frame loop can fail 30x a second)."""
+        self.n_errors += 1
+        message = f"{type(exc).__name__}: {exc}"
+        count = self._error_counts[message] = self._error_counts.get(message, 0) + 1
+        if count == 1 or count % 100 == 0:
+            self.log(f"vision: {message} ({count} so far)")
 
     def stop(self):
         self._stop.set()
