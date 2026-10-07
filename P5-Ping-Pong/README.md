@@ -66,7 +66,8 @@ not trust are reported and **not** written. Do these from Terminal.app:
 ./pp scan_hubs                 # passive BLE scan: shows the card colour + serial of hubs in range
 ./pp env_check                 # camera frame, hub connect + beep, MQTT round trip, hub IMU rate at the play spot
 ./pp bench_hub --guided        # IMU rate, units (six faces, three turns), clipping, and swing fixtures
-./pp bench_cam                 # pose fps, tag read rate at 1.8 m, camera-vs-IMU lag, hub rate under load
+./pp bench_cam                 # pose fps, tag read rate at 1.8 m, camera-vs-IMU lag, hub rate under load (a live
+                               # window shows whether you are in position; Enter works there and in the terminal)
 ./pp bench_haptics             # which motor pulses you feel, and how long the IMU rings after one
 ./pp calibrate_swing --player rafae   # shoulders, four reach corners, 5 soft + 5 full swings (~3 minutes)
 ./pp train_spin --player rafae        # optional: 12 flat, 12 top, 12 back swings -> your spin model (~3 minutes)

@@ -1,6 +1,7 @@
 """tools/bench_cam.py on a fake environment with a known answer: the camera runs 100 ms behind the IMU."""
 
 import json
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -148,6 +149,17 @@ def test_the_camera_index_is_saved_only_when_the_camera_works(tmp_path):
     assert json.loads(bench.config_path.read_text())["CAMERA_INDEX"] == 1
 
 
+def test_the_camera_worker_is_handed_over_once_the_camera_runs_so_a_window_can_follow_it(tmp_path):
+    bench, seen = Bench(tmp_path), []
+    bench.run(only=("fps",), on_camera=seen.append)
+    assert len(seen) == 1 and callable(seen[0].latest_frame)
+    closed, got = Bench(tmp_path), []
+    closed.env.camera = "closed"
+    closed.run(only=("fps",), on_camera=got.append)
+    Bench(tmp_path).run(only=("mqtt",), on_camera=got.append)
+    assert got == []                                               # no camera running: nothing to show
+
+
 def test_no_window_exists_until_the_hud_step_draws_something(monkeypatch):
     # an OpenCV window nobody draws into keeps the Python icon bouncing in the Dock for the whole bench, which
     # looks like Python failing to start while it is only waiting at an Enter prompt
@@ -155,7 +167,6 @@ def test_no_window_exists_until_the_hud_step_draws_something(monkeypatch):
     for name in ("namedWindow", "imshow", "waitKey", "destroyAllWindows"):
         monkeypatch.setattr(bench_cam.cv2, name, lambda *a, _n=name, **k: calls.append(_n) or -1)
     monkeypatch.setattr("pingpong.hostcheck.require_host", lambda *a: None)
-    monkeypatch.setattr("pingpong.realenv.RealEnv", lambda: object())
     monkeypatch.setattr(bench_cam.signal, "signal", lambda *a: None)
     before = []
 
@@ -167,6 +178,30 @@ def test_no_window_exists_until_the_hud_step_draws_something(monkeypatch):
     monkeypatch.setattr(bench_cam, "run", fake_run)
     assert bench_cam.main(["--only", "hud"]) == 0
     assert before == [] and calls[:2] == ["imshow", "waitKey"]
+
+
+def test_main_wires_the_live_window_to_the_camera_to_every_wait_and_to_the_hud_still(monkeypatch):
+    calls = []
+    for name in ("imshow", "waitKey", "destroyAllWindows"):
+        monkeypatch.setattr(bench_cam.cv2, name, lambda *a, _n=name, **k: calls.append(_n) or -1)
+    monkeypatch.setattr("pingpong.hostcheck.require_host", lambda *a: None)
+    monkeypatch.setattr(bench_cam.signal, "signal", lambda *a: None)
+    vision = SimpleNamespace(latest_frame=lambda: np.zeros((360, 640, 3), np.uint8), last_landmarks=None)
+    seen = {}
+
+    def fake_run(env, *, show, on_camera, **kw):
+        assert calls == []                                    # nothing on screen before the camera runs
+        on_camera(vision)
+        env.sleep(0.12)                                       # a wait inside a step: the window must keep drawing
+        seen["live"] = calls.count("imshow")
+        show("the HUD")                                       # the legibility step's picture
+        env.sleep(0.12)
+        seen["after"] = calls.count("imshow")
+        return [], 0
+
+    monkeypatch.setattr(bench_cam, "run", fake_run)
+    assert bench_cam.main(["--only", "fps"]) == 0
+    assert seen["live"] >= 2 and seen["after"] == seen["live"] + 1       # live frames, then only the HUD still
 
 
 def test_the_selftest_is_green():

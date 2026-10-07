@@ -221,6 +221,17 @@ def test_the_latest_shoulder_width_is_exposed_for_calibration():
     assert worker2.last_shoulder_w is None
 
 
+def test_the_latest_landmarks_are_exposed_for_the_bench_preview():
+    worker, clock, *_ = make()
+    assert worker.last_landmarks is None
+    tick(worker, clock)
+    assert worker.last_landmarks[11].x == pytest.approx(0.6)            # the body of the newest frame
+    nobody = FakeLandmarker(scripted=lambda i: None)
+    worker2, clock2, *_ = make(landmarker=nobody)
+    tick(worker2, clock2)
+    assert worker2.last_landmarks is None
+
+
 def test_two_workers_sharing_one_landmarker_never_send_a_timestamp_that_goes_backwards():
     # MediaPipe's video mode rejects any timestamp at or below the last one it saw.  The worker's
     # timestamps come from the clock itself, not from its own first frame, so a second worker (or

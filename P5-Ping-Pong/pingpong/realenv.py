@@ -28,9 +28,16 @@ class RealEnv:
 
     def __init__(self):
         self.clock = Clock()
+        self.on_idle = None        # a tool's window: called while sleep() waits, so macOS keeps drawing it
 
     def sleep(self, seconds):
-        time.sleep(seconds)
+        if self.on_idle is None:
+            time.sleep(seconds)
+            return
+        end = time.monotonic() + seconds
+        while (left := end - time.monotonic()) > 0:
+            self.on_idle()
+            time.sleep(min(0.02, left))
 
     def make_hub(self, notify_ms, card):
         import legoeducation as le

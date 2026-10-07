@@ -195,7 +195,8 @@ def _hud(show, add, ask):
 
 
 def run(env, *, card, ids=(0, 1, 2, 3), secs=None, only=STEPS, camera_index=0, official=False, mqtt_load=True,
-        config_path, report_path, prompt, ask, out, ready_s=5.0, show=lambda frame: None):
+        config_path, report_path, prompt, ask, out, ready_s=5.0, show=lambda frame: None,
+        on_camera=lambda vision: None):
     secs = {"fps": 10.0, "tag": 5.0, "wave": 12.0, **(secs or {})}
     results = []
 
@@ -222,6 +223,7 @@ def run(env, *, card, ids=(0, 1, 2, 3), secs=None, only=STEPS, camera_index=0, o
                                       to_image=getattr(env, "to_image", None))
                 if env.threaded:
                     vision.start()
+                on_camera(vision)               # a live window can follow the camera from here on
         if vision is not None:
             if "fps" in only:
                 _fps(env, vision, secs["fps"], add, prompt, ready_s)
@@ -297,23 +299,23 @@ def main(argv=None):
         except live.LiveSetupError as exc:
             print(f"cannot run the wave step: {exc}", file=sys.stderr)
             return 2
-    from pingpong import hostcheck
+    from pingpong import hostcheck, preview
     from pingpong.realenv import RealEnv
 
     hostcheck.require_host("Camera and Bluetooth")
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-
-    def show(frame):                     # imshow creates the window on first use: one made earlier would sit undrawn
-        cv2.imshow("P5 bench_cam", frame)   # through every Enter prompt and keep the Dock icon bouncing
-        cv2.waitKey(1)
+    env = RealEnv()
+    window = preview.Preview(lambda image: cv2.imshow("P5 bench_cam", image))      # opens with the first frame
+    env.on_idle = window.update                  # every wait inside a step keeps the window drawing
+    prompt, ask = preview.make_prompts(window)
 
     try:
-        _, code = run(RealEnv(), card=card, ids=tuple(int(x) for x in args.cards.split(",")),
+        _, code = run(env, card=card, ids=tuple(int(x) for x in args.cards.split(",")),
                       secs={"fps": args.secs_fps, "tag": args.secs_tag, "wave": args.secs_wave}, only=only,
                       camera_index=args.camera_index, official=args.official_check, mqtt_load=not args.no_mqtt_load,
                       config_path=config.LOCAL_PATH, report_path=config.HERE / "recordings" / "bench_cam.json",
-                      prompt=lambda text: input(text + "\n> "), ask=lambda text: input(text + "\n> ").strip().lower() == "y",
-                      out=print, ready_s=args.ready_s, show=show)
+                      prompt=prompt, ask=ask, out=print, ready_s=args.ready_s, show=window.show_still,
+                      on_camera=window.attach)
     finally:
         cv2.destroyAllWindows()
     print("\nbench_cam:", "ALL GOOD" if code == 0 else "FIX THE FAIL LINES ABOVE, then re-run those steps (--only ...)")

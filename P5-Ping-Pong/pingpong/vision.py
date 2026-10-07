@@ -55,6 +55,7 @@ class VisionWorker:
         self.log, self._error_counts = log, {}
         self._last_pose_read_ns = None
         self.last_shoulder_w = None
+        self.last_landmarks = None            # the newest frame's body, for a preview window (None: nobody)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="vision", daemon=True)
 
@@ -79,6 +80,7 @@ class VisionWorker:
         result = self.landmarker.detect_for_video(self.to_image(small), self._timestamp_ms(t_read))
         self._infer_ms.append((self.clock.now_ns() - t0) / 1e6)
         landmarks = result.pose_landmarks[0] if result.pose_landmarks else None
+        self.last_landmarks = landmarks
         if landmarks is None:
             self.n_no_pose += 1
             self.last_shoulder_w = None
