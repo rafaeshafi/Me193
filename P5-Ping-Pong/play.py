@@ -106,7 +106,7 @@ def run_loop(rig, *, show, wait_key, fps=60.0):
     while True:
         t0 = time.perf_counter()
         rig.pump()
-        show(hud.render(rig.session.hud_state(), size=(W, H), background=rig.display_frame()))
+        show(hud.render(rig.hud_state(), size=(W, H), background=rig.display_frame()))
         key = wait_key(max(1, int(frame_ms - (time.perf_counter() - t0) * 1000.0))) & 0xFF
         if key == 255:
             continue

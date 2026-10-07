@@ -101,3 +101,45 @@ def test_blank_can_be_called_from_another_thread_while_samples_flow():
     stop.set()
     t.join()
     worker.stop()                                    # reaching here without an exception is the test
+
+
+def test_the_swing_trace_is_readable_while_samples_flow():
+    worker, q = make()
+    feed(q, swing_samples())
+    worker.step()
+    trace = worker.trace(2.0)
+    assert trace and max(v for _, v in trace) > 500.0
+
+
+def _shaking(seconds=3.0, amp=300.0, f=5.0):
+    out = []
+    for i in range(int(seconds * HZ) + 1):
+        t = i / HZ
+        out.append(ImuSample(t_ns=T0 + int(t * 1e9), g=(0, round(amp * math.sin(2 * math.pi * f * t) * GPD), 0),
+                             a=(0, 0, 1000)))
+    return out
+
+
+def test_a_shake_monitor_riding_the_worker_reports_locks_once_polled_and_obeys_blank_windows():
+    from pingpong.shake import ShakeMonitor
+
+    q = queue.SimpleQueue()
+    worker = ImuWorker(q, SwingDetector(params()), shake=ShakeMonitor(gyro_per_dps=GPD))
+    feed(q, _shaking())
+    worker.step()
+    locks = worker.poll_locks()
+    assert locks and locks == sorted(locks) and worker.poll_locks() == []
+
+    q2 = queue.SimpleQueue()
+    blanked = ImuWorker(q2, SwingDetector(params()), shake=ShakeMonitor(gyro_per_dps=GPD))
+    blanked.blank(T0, T0 + 10_000_000_000)                    # one blank() call covers the detector AND the monitor
+    feed(q2, _shaking())
+    blanked.step()
+    assert blanked.poll_locks() == []
+
+
+def test_a_worker_without_a_monitor_has_no_locks():
+    worker, q = make()
+    feed(q, swing_samples())
+    worker.step()
+    assert worker.poll_locks() == []

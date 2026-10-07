@@ -15,6 +15,7 @@ and pump() only polls their results.  Sync mode (tests, the fake rig): pump() dr
 queue itself and runs the actuator's due work, and the caller steps the camera.
 """
 
+import dataclasses
 import threading
 import time
 from collections import deque
@@ -27,6 +28,7 @@ from pingpong.haptics import Actuator, ActuatorCore
 from pingpong.hub import card_kwargs
 from pingpong.imu_worker import ImuWorker
 from pingpong.pose import PoseLock
+from pingpong.shake import ShakeMonitor
 from pingpong.swing import SwingDetector
 from pingpong.vision import VisionWorker
 
@@ -108,6 +110,8 @@ class LiveRig:
         self._maybe_reconnect(now, hub_stale)
         for tag in self.vision.poll_tags():
             self.session.on_tag(tag)
+        for until in self.imu.poll_locks():
+            self.session.game.judge.lock_paddle(until)               # gate J6: the hub is being shaken
         for swing in self.imu.poll():
             if swing.kind == "IMPACT":
                 self.n_impacts += 1
@@ -188,6 +192,13 @@ class LiveRig:
         frame = self.vision.latest_frame()
         return None if frame is None else cv2.flip(frame, 1)
 
+    def hud_state(self):
+        """The session's HUD state plus the IMU trace and the thresholds a swing is judged against."""
+        game = self.session.game
+        trace = tuple(rate for _, rate in self.imu.trace(1.5))
+        return dataclasses.replace(self.session.hud_state(), swing_trace=trace, swing_scale=game.omega_hi,
+                                   swing_threshold=game.judge.t_pk)
+
     def loop_stats(self):
         times = sorted(self._loop_ms)
         if not times:
@@ -207,7 +218,8 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
     apg = config.ACCEL_PER_G if accel_per_g is None else accel_per_g
     fs = config.HUB_FS_RAW if fs_raw is None else fs_raw
     params = calibration.swing_params(gpd, apg, fs)
-    imu = ImuWorker(hub.imu, SwingDetector(params))
+    shake = ShakeMonitor(gyro_per_dps=gpd, rms_min_dps=0.35 * params.t_pk)     # motion smaller than this is tremor
+    imu = ImuWorker(hub.imu, SwingDetector(params), shake=shake)
     core = ActuatorCore(hub.dev, clock=clock, no_motor=no_motor, on_blank=imu.blank)   # the pulse blanks the IMU
     actuator = Actuator(core, log=log) if threaded else core
     publishing = mqtt_client is not None and not no_publish

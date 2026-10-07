@@ -135,3 +135,31 @@ def test_closing_the_rig_stops_the_motors_and_says_offline():
     assert names[-2:] == ["motor_stop", "disconnect"]
     assert ("publish", config.STATUS_TOPIC, "offline") in rig.client.log
     assert rig.client.log[-1] == ("loop_stop",)
+
+
+def test_the_hud_gets_the_imu_trace_of_the_swing_that_was_just_judged():
+    rig = fakerig.FakeRig()
+    rig.run(until=lambda: rig.game.tracker.streak >= 2, max_s=60)
+    state = rig.rig.hud_state()
+    assert max(state.swing_trace) > 0.8 * 600.0
+    assert state.swing_threshold == pytest.approx(0.6 * 300.0)
+
+
+def test_shaking_the_hub_locks_the_paddle_so_the_ball_arriving_meanwhile_is_not_a_hit():
+    # The shake is on the hub's y axis, which the swing detector does not look at: only the FFT
+    # monitor sees it.  A perfectly good swing at the right moment is rejected by gate J6.
+    rig = fakerig.FakeRig()
+    rig.run(until=lambda: rig.game.phase == "COUNTDOWN")
+    rig.shake_windows.append((rig.now_s(), rig.now_s() + 8.0))
+    rig.run(until=lambda: rig.game.phase == "MATCH_OVER", max_s=30)
+    assert rig.game.tracker.record == 0 and payloads(rig) == []
+    j6 = [g for g in rig.session.hud_state().gates if g.name == "J6"]
+    assert j6 and not j6[0].passed and "shak" in j6[0].note
+
+
+def test_after_the_shaking_stops_the_lock_expires_and_hits_count_again():
+    rig = fakerig.FakeRig()
+    rig.run(until=lambda: rig.game.phase == "COUNTDOWN")
+    rig.shake_windows.append((rig.now_s(), rig.now_s() + 1.5))          # over before the first ball arrives
+    rig.run(until=lambda: rig.game.tracker.streak >= 3, max_s=60)
+    assert rig.game.tracker.streak >= 3

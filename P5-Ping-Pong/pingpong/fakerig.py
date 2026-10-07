@@ -24,6 +24,7 @@ S = 1_000_000_000
 GPD = 10.0                    # raw gyro counts per deg/s of the fake hub (passed to assemble explicitly)
 GRAVITY = 1000                # raw accelerometer counts at rest (z)
 VIBRATION_DPS = 700.0         # a motor pulse "shakes" the fake IMU like a swing, unless it is blanked
+SHAKE_DPS = 300.0             # amplitude of a deliberate shake (5 Hz)
 
 
 def _smoothstep(x):
@@ -41,6 +42,7 @@ class ScriptedPlayer:
         self._segments = [(0, 0, rest_uv, rest_uv)]          # (t0, t1, from_uv, to_uv)
         self._peaks = {}                                     # ball_id -> gyro peak time
         self._vibrations = []
+        self.shake_windows = []                              # (start_s, stop_s) since rig start: 5 Hz on the y axis
         self._now = 0
 
     # --- decisions (called every step with the game state) -------------------------------------------
@@ -83,7 +85,12 @@ class ScriptedPlayer:
             gx += self._pulse(t_ns, peak - self.swing_s / 2 * S, self.w_pk)
         for start in self._vibrations:
             gx += self._pulse(t_ns, start + 0.010 * S, VIBRATION_DPS)
-        return 0, 0, GRAVITY, round(gx * GPD), 0, 0
+        gy = 0.0
+        rel = (t_ns - self.origin_ns) / S
+        for a, b in self.shake_windows:
+            if a <= rel < b:
+                gy += SHAKE_DPS * math.sin(2 * math.pi * 5.0 * (rel - a))
+        return 0, 0, GRAVITY, round(gx * GPD), round(gy * GPD), 0
 
     def _pulse(self, t_ns, start_ns, peak_dps):
         x = (t_ns - start_ns) / (self.swing_s * S)
@@ -122,6 +129,7 @@ class FakeRig:
         self.dev = VibratingMotor(self.player, self.clock, vibration)
         self.client = FakeMqttClient()
         self.hub_blackouts, self.pose_blackouts = [], []
+        self.shake_windows = self.player.shake_windows
         self.pause_reasons_seen = set()
         hub = HubLink(self.dev, notify_ms=15, clock=self.clock)
         hub.connect()

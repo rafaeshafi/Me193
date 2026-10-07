@@ -37,6 +37,9 @@ class HudState:
     flash: tuple | None = None       # (BGR colour, alpha)
     keys_hint: str = "SPACE start/swing   1-3 level   M mode   X x-ray   D motors   Q quit"
     leaderboard: tuple = field(default_factory=tuple)   # ((name, score), ...) top rows for the end screen
+    swing_trace: tuple = ()          # recent signed forward gyro rate in dps (the IMU, made visible)
+    swing_scale: float = 1200.0      # dps that fills the trace panel (the player's hard-swing rate)
+    swing_threshold: float = 0.0     # dps below which a swing does not count (T_PK)
 
 
 def render(state, size=(1280, 720), background=None):
@@ -48,6 +51,7 @@ def render(state, size=(1280, 720), background=None):
     _draw_phase(frame, state, w, h)
     if state.show_xray and state.gates:
         _draw_xray(frame, state, w, h)
+    _draw_swing(frame, state, w, h)
     _draw_footer(frame, state, w, h)
     if state.flash:
         canvas.tint(frame, state.flash[0], state.flash[1])
@@ -100,13 +104,21 @@ def _draw_phase(frame, s, w, h):
 
 
 def _draw_xray(frame, s, w, h):
-    x0, y = w - 400, 110
+    x0, y = w - 470, 110
     canvas.draw_text(frame, "X-RAY: why that counted", (x0, y), 0.7, AMBER, 2)
     for gate in s.gates:
         y += 34
         color = GREEN if gate.passed else RED
-        canvas.draw_text(frame, f"{gate.name} {'OK' if gate.passed else 'X '}  {gate.note[:30]}", (x0, y), 0.6,
+        canvas.draw_text(frame, f"{gate.name} {'OK' if gate.passed else 'X '}  {gate.note[:36]}", (x0, y), 0.55,
                          color, 1)
+
+
+def _draw_swing(frame, s, w, h):
+    if not s.swing_trace:
+        return
+    x0, y0, pw, ph = 24, h - 215, 360, 110
+    canvas.draw_trace(frame, x0, y0, pw, ph, s.swing_trace, s.swing_scale, s.swing_threshold, GREY, GREEN)
+    canvas.draw_text(frame, "IMU SWING", (x0 + 8, y0 + 22), 0.55, GREY, 1)
 
 
 def _draw_footer(frame, s, w, h):

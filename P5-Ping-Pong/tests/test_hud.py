@@ -88,3 +88,31 @@ def test_the_flash_overlay_tints_the_frame():
     plain = hud.render(state(phase="RALLY"), size=(W, H))
     flash = hud.render(state(phase="RALLY", flash=((0, 255, 0), 0.5)), size=(W, H))
     assert flash[:, :, 1].mean() > plain[:, :, 1].mean() + 20
+
+
+def test_a_swing_trace_is_drawn_with_its_threshold_and_an_empty_one_changes_nothing():
+    import math
+
+    base = hud.render(state(), size=(W, H))
+    trace = tuple(600.0 * math.sin(math.pi * k / 10) for k in range(11)) + (0.0,) * 20
+    drawn = hud.render(state(swing_trace=trace, swing_scale=1200.0, swing_threshold=180.0), size=(W, H))
+    assert diff(base, drawn) > 3_000
+    assert diff(base, hud.render(state(swing_trace=(), swing_scale=1200.0, swing_threshold=180.0), size=(W, H))) == 0
+    hud.render(state(swing_trace=(5.0,), swing_scale=1200.0), size=(W, H))        # a single point must not crash
+
+
+def test_a_stronger_swing_is_drawn_taller():
+    weak = hud.render(state(swing_trace=(0.0, 200.0, 0.0), swing_scale=1200.0), size=(W, H))
+    strong = hud.render(state(swing_trace=(0.0, 1000.0, 0.0), swing_scale=1200.0), size=(W, H))
+    assert diff(weak, strong) > 500
+
+
+def test_the_longest_xray_notes_stay_inside_the_frame():
+    long_notes = (GateResult("J1", True, "timing -220 ms (window -220/+140)"),
+                  GateResult("J2", True, "hand 0.00 SW from the ball (limit 0.45)"),
+                  GateResult("J3", False, "swing too weak (123 < 180 dps) and then some"),
+                  GateResult("J4", True, "logged-only"), GateResult("J5", False, "refractory: too soon after the last hit"),
+                  GateResult("J6", False, "paddle locked after shaking"))
+    base = hud.render(state(show_xray=False), size=(W, H))
+    shown = hud.render(state(show_xray=True, gates=long_notes), size=(W, H))
+    assert diff(base[:, -6:], shown[:, -6:]) == 0           # no text pixel touches the right edge

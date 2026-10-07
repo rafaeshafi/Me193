@@ -74,7 +74,7 @@ class Vision:
 
 class Imu:
     def __init__(self, log):
-        self.log, self.events, self.steps = log, [], 0
+        self.log, self.events, self.steps, self.locks = log, [], 0, []
 
     def step(self):
         self.steps += 1
@@ -85,6 +85,13 @@ class Imu:
 
     def blank(self, a, b):
         pass
+
+    def trace(self, seconds):
+        return [(0.0, 100.0), (0.1, 450.0)]
+
+    def poll_locks(self):
+        out, self.locks = self.locks, []
+        return out
 
     def start(self):
         self.log.append("imu.start")
@@ -183,6 +190,16 @@ def test_sync_mode_drains_the_imu_queue_itself_and_threaded_mode_leaves_it_to_th
     sync.rig.pump()
     threaded.rig.pump()
     assert (sync.imu.steps, threaded.imu.steps) == (1, 0)
+
+
+def test_a_shake_lock_from_the_imu_worker_reaches_the_judge():
+    r = Rig()
+    locked = []
+    r.game.judge.lock_paddle = locked.append
+    until = r.clock.now_ns() + S
+    r.imu.locks = [until]
+    r.rig.pump()
+    assert locked == [until]
 
 
 def test_the_display_frame_is_the_mirror_image_of_the_camera_frame():
@@ -376,6 +393,14 @@ def test_starting_a_threaded_rig_starts_every_worker_and_a_sync_rig_starts_none(
     sync.rig.start()
     assert sorted(threaded.log) == ["actuator.start", "imu.start", "vision.start"]
     assert sync.log == []
+
+
+def test_the_hud_state_carries_the_imu_trace_and_the_thresholds_it_is_judged_against():
+    r = Rig()
+    state = r.rig.hud_state()
+    assert state.swing_trace == (100.0, 450.0)
+    assert state.swing_threshold == r.game.judge.t_pk and state.swing_scale == r.game.omega_hi
+    assert state.phase == r.session.hud_state().phase
 
 
 def test_pump_timings_are_collected_for_the_report():

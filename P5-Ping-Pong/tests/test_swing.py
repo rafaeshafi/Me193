@@ -181,3 +181,13 @@ def test_off_axis_rotation_is_not_a_forward_swing():
 def test_forward_axis_is_normalised():
     det = new(u_fwd=(2.0, 0.0, 0.0))
     assert len(impacts(run(det, stream(2.0, lambda t: pulse(t, 0.6, 0.15, 800.0))))) == 1
+
+
+def test_the_recent_signed_rate_is_available_for_the_hud_trace():
+    det = new()
+    run(det, stream(2.0, lambda t: pulse(t, 0.6, 0.15, 600.0)))
+    trace = det.trace(2.0)
+    times = [t for t, _ in trace]
+    assert times == sorted(times) and 120 <= len(trace) <= 135                 # ~2 s at 66 Hz
+    assert max(v for _, v in trace) == pytest.approx(600.0, rel=0.05)           # signed rate in dps
+    assert len(det.trace(0.5)) < len(trace) and new().trace(1.0) == []

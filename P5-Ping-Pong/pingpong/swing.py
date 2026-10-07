@@ -107,6 +107,13 @@ class SwingDetector:
         self._blanks = [b for b in self._blanks if b[1] >= t_ns - 5_000_000_000]
         return any(a <= t_ns <= b for a, b in self._blanks)
 
+    def trace(self, seconds):
+        """[(t_seconds, signed forward rate in dps)] for the last `seconds` -- the HUD's swing trace."""
+        if not self._history:
+            return []
+        cutoff = self._history[-1][0] - seconds
+        return [(t, s) for t, s in self._history if t >= cutoff]
+
     # --- main entry ------------------------------------------------------------------
     def feed(self, sample):
         if self._blanked(sample.t_ns):

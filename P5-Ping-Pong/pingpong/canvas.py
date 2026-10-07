@@ -76,3 +76,22 @@ def draw_ring(frame, x_m, depth, h_m, radius, color, thickness=3):
 def tint(frame, color, alpha):
     overlay = np.full_like(frame, color)
     cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0, frame)
+
+
+def draw_trace(frame, x0, y0, w, h, values, scale, threshold=0.0, color=(200, 200, 200), hot=(80, 220, 80)):
+    """A strip chart: values of +-scale fill the panel's height; segments at or above `threshold` are `hot`."""
+    panel = frame[y0:y0 + h, x0:x0 + w]
+    panel[:] = (panel * 0.4).astype(np.uint8)
+    mid = y0 + h // 2
+    cv2.line(frame, (x0, mid), (x0 + w, mid), (110, 110, 110), 1)
+    if threshold > 0:
+        ty = int(mid - min(1.0, threshold / scale) * (h / 2 - 2))
+        cv2.line(frame, (x0, ty), (x0 + w, ty), (40, 170, 255), 1, cv2.LINE_AA)
+    n = len(values)
+    pts = [(x0 + (i * (w - 1)) // max(1, n - 1), int(mid - max(-1.0, min(1.0, v / scale)) * (h / 2 - 2)))
+           for i, v in enumerate(values)]
+    if n == 1:
+        cv2.circle(frame, pts[0], 3, color, -1, cv2.LINE_AA)
+    for (a, va), (b, vb) in zip(zip(pts, values), zip(pts[1:], values[1:])):
+        cv2.line(frame, a, b, hot if max(va, vb) >= threshold > 0 else color, 2, cv2.LINE_AA)
+    cv2.rectangle(frame, (x0, y0), (x0 + w, y0 + h), (170, 170, 170), 1)

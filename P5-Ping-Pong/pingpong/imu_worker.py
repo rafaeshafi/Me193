@@ -1,4 +1,4 @@
-"""ImuWorker: hub IMU samples -> SwingDetector -> SwingEvents, on its own thread.
+"""ImuWorker: hub IMU samples -> SwingDetector (+ ShakeMonitor) -> SwingEvents / shake locks, on its own thread.
 
 It BLOCKS on the sample queue (no 60 Hz polling latency), so an IMPACT is emitted as
 soon as the falling edge arrives.  The detector is not thread-safe, so every touch of it
@@ -13,10 +13,12 @@ from pingpong.swing import SwingDetector
 
 
 class ImuWorker:
-    def __init__(self, samples, detector):
+    def __init__(self, samples, detector, shake=None):
         self.samples = samples                       # queue.SimpleQueue of ImuSample (HubLink.imu)
         self.detector = detector
+        self.shake = shake                           # optional ShakeMonitor (judge gate J6)
         self._events = queue.SimpleQueue()
+        self._locks = queue.SimpleQueue()
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="imu", daemon=True)
@@ -25,10 +27,16 @@ class ImuWorker:
     def blank(self, start_ns, end_ns):
         with self._lock:
             self.detector.blank(start_ns, end_ns)
+            if self.shake is not None:
+                self.shake.blank(start_ns, end_ns)
 
     def set_params(self, params):
         with self._lock:
             self.detector = SwingDetector(params)
+
+    def trace(self, seconds):
+        with self._lock:
+            return self.detector.trace(seconds)
 
     def poll(self):
         events = []
@@ -36,11 +44,22 @@ class ImuWorker:
             events.append(self._events.get_nowait())
         return events
 
+    def poll_locks(self):
+        """Times (ns) the paddle should be locked until, from the shake monitor."""
+        locks = []
+        while not self._locks.empty():
+            locks.append(self._locks.get_nowait())
+        return locks
+
     # --- processing -----------------------------------------------------------------------------
     def _feed(self, sample):
         with self._lock:
             for event in self.detector.feed(sample):
                 self._events.put_nowait(event)
+            if self.shake is not None:
+                until = self.shake.feed(sample)
+                if until is not None:
+                    self._locks.put_nowait(until)
 
     def step(self):
         """Drain whatever is queued right now (synchronous mode for tests / the fake rig)."""
