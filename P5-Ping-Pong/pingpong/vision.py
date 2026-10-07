@@ -51,7 +51,7 @@ class VisionWorker:
         self._frame_times = deque(maxlen=60)
         self._last_ts_ms = -1
         self._last_tag_ns = None
-        self.n_no_pose = self.n_locked_out = self.n_errors = 0
+        self.n_no_pose = self.n_locked_out = self.n_errors = self.n_frames = 0
         self.log, self._error_counts = log, {}
         self._last_pose_read_ns = None
         self.last_shoulder_w = None
@@ -65,6 +65,7 @@ class VisionWorker:
             return False
         t_read = self.clock.now_ns()
         self._frame = frame
+        self.n_frames += 1
         self._frame_times.append(t_read)
         self._pose(frame, t_read)
         self._look_for_tags(frame, t_read)

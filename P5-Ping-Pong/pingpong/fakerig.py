@@ -272,3 +272,14 @@ def drive_calibration(script, flow, *, on_step=None, on_note=None, stop_after_no
     notes()
     if flow.step != last and on_step:
         on_step(flow.step)
+
+
+def wave_u(t):
+    """An irregular hand wave (two sines): the hand's horizontal position in shoulder widths."""
+    return 0.8 * math.sin(2 * math.pi * 1.1 * t) + 0.5 * math.sin(2 * math.pi * 1.9 * t + 0.7)
+
+
+def wave_speed(t):
+    """How fast that hand is moving (what a gyro would feel), in shoulder widths per second."""
+    return abs(0.8 * 2 * math.pi * 1.1 * math.cos(2 * math.pi * 1.1 * t)
+               + 0.5 * 2 * math.pi * 1.9 * math.cos(2 * math.pi * 1.9 * t + 0.7))

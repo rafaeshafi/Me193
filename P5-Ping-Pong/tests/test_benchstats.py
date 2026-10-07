@@ -75,3 +75,49 @@ def test_xcorr_lag_recovers_a_known_delay():
     shifted = [0.0] * delay + base[:-delay]
     lag = benchstats.xcorr_lag_s(base, shifted, fs, max_lag_s=0.5)
     assert lag == pytest.approx(delay / fs, abs=1.5 / fs)
+
+
+def _wave(seconds=12.0):
+    """An irregular hand wave (two sines) -> position u(t) and the speed the gyro would feel."""
+    import numpy as np
+
+    def u(t):
+        return 0.8 * np.sin(2 * np.pi * 1.1 * t) + 0.5 * np.sin(2 * np.pi * 1.9 * t + 0.7)
+
+    def speed(t):
+        du = 0.8 * 2 * np.pi * 1.1 * np.cos(2 * np.pi * 1.1 * t) + 0.5 * 2 * np.pi * 1.9 * np.cos(2 * np.pi * 1.9 * t + 0.7)
+        return np.abs(du)
+
+    return u, speed
+
+
+@pytest.mark.parametrize("tau", [0.04, 0.10, 0.20])
+def test_the_camera_lag_is_recovered_from_a_wave_within_a_frame(tau):
+    import numpy as np
+
+    u, speed = _wave()
+    imu_t = np.arange(0, 12.0, 1 / 66.0)
+    pose_t = np.arange(0.0, 12.0, 1 / 30.0)
+    gyro = np.stack([300.0 * speed(imu_t), np.zeros_like(imu_t), np.zeros_like(imu_t)], axis=1)
+    pose_uv = np.stack([u(pose_t - tau), 0.1 * u(pose_t - tau)], axis=1)       # the camera shows the past
+    lag, quality = benchstats.wave_lag_s((pose_t * 1e9).astype(int), pose_uv, (imu_t * 1e9).astype(int), gyro)
+    assert lag == pytest.approx(tau, abs=0.015) and quality > 0.8
+
+
+def test_unrelated_signals_give_a_low_quality_so_the_tool_will_not_trust_the_lag():
+    import numpy as np
+
+    rng = np.random.default_rng(3)
+    imu_t = np.arange(0, 12.0, 1 / 66.0)
+    pose_t = np.arange(0.0, 12.0, 1 / 30.0)
+    gyro = np.abs(rng.normal(0, 200, (len(imu_t), 3)))
+    pose_uv = rng.normal(0, 0.5, (len(pose_t), 2))
+    _, quality = benchstats.wave_lag_s((pose_t * 1e9).astype(int), pose_uv, (imu_t * 1e9).astype(int), gyro)
+    assert quality < 0.35
+
+
+def test_too_little_data_is_an_error_not_a_made_up_number():
+    import numpy as np
+
+    with pytest.raises(ValueError, match="wave"):
+        benchstats.wave_lag_s(np.arange(10) * 33_000_000, np.zeros((10, 2)), np.arange(20) * 15_000_000, np.zeros((20, 3)))

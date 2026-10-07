@@ -172,6 +172,7 @@ class FakeEnv:
         self.scenario = None        # optional callable(now_ns) -> (ax, ay, az, gx, gy, gz) raw counts
         self.threaded = False       # play.py's live mode is threaded on real hardware, synchronous here
         self.mqtt_client = None
+        self.official_calls = 0     # how often something touched the OFFICIAL score topic
 
     @staticmethod
     def to_image(frame):
@@ -209,6 +210,10 @@ class FakeEnv:
         return FakeCamera(self.camera)
 
     def mqtt_roundtrip(self, topic, timeout_s=5.0):
+        return self.mqtt_rtt_ms if self.mqtt_ok else None
+
+    def official_roundtrip(self, timeout_s=5.0):
+        self.official_calls += 1
         return self.mqtt_rtt_ms if self.mqtt_ok else None
 
 

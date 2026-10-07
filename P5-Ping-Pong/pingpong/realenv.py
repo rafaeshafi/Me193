@@ -80,3 +80,42 @@ class RealEnv:
         finally:
             client.loop_stop()
             client.disconnect()
+
+    def official_roundtrip(self, timeout_s=5.0):
+        """Publish a retained "0.0" to the OFFICIAL score topic, see it come back, then clear it.
+
+        Settles whether the broker accepts a retained QoS 1 publish on the real topic.  Only ever called
+        after the player said yes (bench_cam --official-check): it briefly changes the retained value.
+        """
+        import paho.mqtt.client as mqtt
+
+        topic, got, sent = config.SCORE_TOPIC, threading.Event(), {}
+
+        def on_connect(client, userdata, flags, reason_code, properties=None):
+            client.subscribe(topic, qos=1)
+
+        def on_subscribe(client, userdata, mid, reason_codes, properties=None):
+            sent["t0"] = time.monotonic()
+            client.publish(topic, "0.0", qos=1, retain=True)
+
+        def on_message(client, userdata, msg):
+            if msg.payload == b"0.0" and "rtt_ms" not in sent:
+                sent["rtt_ms"] = (time.monotonic() - sent["t0"]) * 1000.0
+                got.set()
+
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="pp-official-" + uuid.uuid4().hex[:8])
+        client.on_connect, client.on_subscribe, client.on_message = on_connect, on_subscribe, on_message
+        try:
+            client.connect(config.BROKER_HOST, config.BROKER_PORT, config.KEEPALIVE_S)
+        except OSError:
+            return None
+        client.loop_start()
+        try:
+            if not got.wait(timeout_s):
+                return None
+            info = client.publish(topic, b"", qos=1, retain=True)          # an empty retained payload clears it
+            info.wait_for_publish(timeout=timeout_s)
+            return sent["rtt_ms"]
+        finally:
+            client.loop_stop()
+            client.disconnect()

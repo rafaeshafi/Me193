@@ -66,3 +66,38 @@ def xcorr_lag_s(a, b, fs, max_lag_s=0.5):
         if c > best:
             best, best_k = c, k
     return best_k / fs
+
+
+def _smooth(x, n=3):
+    return np.convolve(x, np.ones(n) / n, mode="same") if len(x) >= n else x
+
+
+def wave_lag_s(pose_t_ns, pose_uv, imu_t_ns, imu_g, *, fs=100.0, max_lag_s=0.35):
+    """Camera-vs-IMU lag from a waving take -> (lag_s, quality).
+
+    The wrist's speed in the camera and the gyro's magnitude both peak when the hand is moving
+    fastest; the camera reports each peak later than the IMU does.  lag_s is how much later (the
+    constant CAMERA_LAG_S subtracts from camera stamps), searched only over 0..max_lag_s because the
+    camera cannot see the future.  quality is the correlation at that lag (0..1): below ~0.35 the
+    wave was too small or too regular to trust the number.
+    """
+    pt, it = np.asarray(pose_t_ns, dtype=float) / 1e9, np.asarray(imu_t_ns, dtype=float) / 1e9
+    uv, g = np.asarray(pose_uv, dtype=float), np.asarray(imu_g, dtype=float)
+    if len(pt) < 30 or len(it) < 60:
+        raise ValueError("not enough samples: wave the hub for the whole window")
+    t0, t1 = max(pt[0], it[0]), min(pt[-1], it[-1]) - max_lag_s
+    if t1 - t0 < 3.0:
+        raise ValueError("the pose and IMU streams overlap for under 3 s: wave for the whole window")
+    pose_speed = _smooth(np.hypot(np.gradient(uv[:, 0], pt), np.gradient(uv[:, 1], pt)))
+    gyro_mag = _smooth(np.linalg.norm(g, axis=1), 5)
+    grid = np.arange(t0, t1, 1.0 / fs)
+    reference = np.interp(grid, it, gyro_mag)
+    best_lag, best_r = 0.0, -2.0
+    for lag in np.arange(0.0, max_lag_s + 1e-9, 1.0 / fs):
+        shifted = np.interp(grid + lag, pt, pose_speed)
+        if reference.std() < 1e-9 or shifted.std() < 1e-9:
+            continue
+        r = float(np.corrcoef(reference, shifted)[0, 1])
+        if r > best_r:
+            best_r, best_lag = r, float(lag)
+    return best_lag, max(0.0, best_r)
