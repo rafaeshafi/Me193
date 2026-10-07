@@ -47,6 +47,7 @@ class HubLink:
         self.gestures = queue.SimpleQueue()   # GestureEvent (log-only by plan)
         self.last_rx_ns = None
         self.n_samples = 0
+        self.n_parse_errors = 0
         self._closed = False
 
     @classmethod
@@ -73,7 +74,12 @@ class HubLink:
     def _on_notify(self, data):
         t_ns = self.clock.now_ns()
         self.last_rx_ns = t_ns
-        for item in le.device_notification_parser(data):
+        try:
+            items = le.device_notification_parser(data)
+        except Exception:                                  # a packet we cannot read must not end the stream
+            self.n_parse_errors += 1
+            return
+        for item in items:
             if isinstance(item, le.ImuDeviceNotification):
                 self.n_samples += 1
                 self.imu.put_nowait(ImuSample(

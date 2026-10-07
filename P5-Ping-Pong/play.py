@@ -21,6 +21,7 @@ import argparse
 import signal
 import sys
 import time
+import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -142,15 +143,37 @@ def run_fake(args):
     return 0
 
 
-def run_loop(rig, *, show, wait_key, fps=60.0):
-    """The window loop: pump the rig, draw the HUD, handle keys.  Returns when the player quits."""
+MAX_BAD_FRAMES = 30            # this many frames in a row that raise end the session (with the error)
+
+
+def run_loop(rig, *, show, wait_key, fps=60.0, log=print):
+    """The window loop: pump the rig, draw the HUD, handle keys.  Returns when the player quits.
+
+    One frame that raises (a bug that only shows on the real sensors) is reported once and skipped: the game, the
+    score on the broker and the hub's connection are worth more than that frame.  A loop that fails every frame
+    is not skipped forever: after MAX_BAD_FRAMES in a row the error ends the session (the rig is closed by the
+    caller).  Control-C is a KeyboardInterrupt and is never caught here.
+    """
     from pingpong import hud, keys
 
     frame_ms = 1000.0 / fps
+    bad, seen = 0, {}
     while True:
         t0 = time.perf_counter()
-        rig.pump()
-        show(hud.render(rig.hud_state(), size=(W, H), background=rig.display_frame()))
+        try:
+            rig.pump()
+            show(hud.render(rig.hud_state(), size=(W, H), background=rig.display_frame()))
+            bad = 0
+        except Exception as exc:
+            bad += 1
+            where = traceback.extract_tb(exc.__traceback__)[-1]               # the same bug at the same line is one report
+            key = (type(exc).__name__, where.filename, where.lineno)
+            seen[key] = seen.get(key, 0) + 1
+            if seen[key] == 1 or seen[key] % 100 == 0:
+                log(f"frame skipped ({type(exc).__name__}: {exc} at {Path(where.filename).name}:{where.lineno}, "
+                    f"{seen[key]} so far); the game carries on")
+            if bad >= MAX_BAD_FRAMES:
+                raise
         key = wait_key(max(1, int(frame_ms - (time.perf_counter() - t0) * 1000.0))) & 0xFF
         if key == 255:
             continue

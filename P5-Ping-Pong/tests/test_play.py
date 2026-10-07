@@ -98,3 +98,57 @@ def test_the_fake_window_loop_plays_balls_from_the_mouse_and_the_keys():
     frames = []
     play.fake_loop(session, show=frames.append, wait_key=wait_key, mouse_xy=mouse_xy)
     assert session.game.tracker.streak >= 3 and frames and frames[0].shape == (play.H, play.W, 3)
+
+
+# --- one bad frame must not end the session ------------------------------------------------------------------------------
+class FlakyRig:
+    """A rig whose pump fails on chosen calls (a stand-in for a bug that only shows on hardware)."""
+
+    def __init__(self, fail_on):
+        self.calls, self.fail_on = 0, fail_on
+        self.session = type("S", (), {"game": None})()
+
+    def pump(self):
+        self.calls += 1
+        if self.fail_on(self.calls):
+            raise ValueError(f"bad frame {self.calls}")
+
+    def hud_state(self):
+        from pingpong import hud
+
+        return hud.HudState()
+
+    def display_frame(self):
+        return None
+
+
+def test_a_frame_that_raises_is_reported_once_and_the_loop_carries_on():
+    rig, logs, frames = FlakyRig(lambda n: n in (2, 3, 4)), [], []
+
+    def wait_key(ms):
+        return ord("q") if len(frames) >= 8 else 255
+
+    play.run_loop(rig, show=frames.append, wait_key=wait_key, log=logs.append)
+    assert rig.calls >= 8 and len(frames) >= 6
+    assert len([m for m in logs if "bad frame" in m]) == 1                 # the same error is not printed three times
+
+
+def test_a_loop_that_fails_every_frame_ends_with_the_error_instead_of_spinning_forever():
+    rig = FlakyRig(lambda n: True)
+    try:
+        play.run_loop(rig, show=lambda f: None, wait_key=lambda ms: 255, log=lambda *_: None)
+    except ValueError as exc:
+        assert "bad frame" in str(exc) and rig.calls == play.MAX_BAD_FRAMES
+    else:
+        raise AssertionError("a permanently broken loop must not be swallowed")
+
+
+def test_control_c_is_never_swallowed_by_the_frame_guard():
+    import pytest
+
+    class Impatient(FlakyRig):
+        def pump(self):
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        play.run_loop(Impatient(lambda n: False), show=lambda f: None, wait_key=lambda ms: 255, log=lambda *_: None)

@@ -143,3 +143,13 @@ def test_a_battery_level_of_zero_is_the_librarys_not_yet_known_value_not_an_empt
     assert link.battery_pct() is None
     dev.set_battery(63)
     assert link.battery_pct() == 63
+
+
+def test_a_packet_the_parser_cannot_read_is_counted_and_the_stream_carries_on():
+    link, dev, clock = make()
+    link.connect()
+    clock.advance_s(0.2)
+    link._on_notify(object())                                  # not a notification at all (a library or firmware surprise)
+    assert link.n_parse_errors == 1 and link.last_rx_ns == clock.now_ns()      # the hub is still talking
+    dev.emit(imu=(1, 2, 1000, 3, 4, 5))
+    assert link.imu.get_nowait().g == (3, 4, 5) and link.n_parse_errors == 1
