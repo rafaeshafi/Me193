@@ -191,3 +191,59 @@ def test_the_recent_signed_rate_is_available_for_the_hud_trace():
     assert times == sorted(times) and 120 <= len(trace) <= 135                 # ~2 s at 66 Hz
     assert max(v for _, v in trace) == pytest.approx(600.0, rel=0.05)           # signed rate in dps
     assert len(det.trace(0.5)) < len(trace) and new().trace(1.0) == []
+
+
+def test_the_interpolated_peak_time_stays_between_the_peak_sample_and_its_neighbours_even_after_a_gap():
+    # A Bluetooth hiccup right before the peak sample makes the parabola's vertex land after the NEXT sample;
+    # a peak can never be later than the first sample that already shows it falling.
+    stamps_values = [(0.600, 0.0), (0.615, 300.0), (0.735, 700.0), (0.750, 650.0), (0.765, 100.0), (0.780, 0.0),
+                     (0.795, 0.0), (0.810, 0.0)]
+    warm = [(i * 0.015, 0.0) for i in range(41)]                      # 0.6 s of rest for the warm-up
+    samples = [ImuSample(t_ns=T0 + int(t * 1e9), g=(round(v * GPD), 0, 0), a=(0, 0, 1000))
+               for t, v in warm[:-1] + stamps_values]
+    seen = impacts(run(new(), samples))
+    assert len(seen) == 1
+    t_peak = seen[0][1].t_ns
+    assert T0 + int(0.735 * 1e9) <= t_peak <= T0 + int(0.750 * 1e9)
+
+
+def test_an_event_is_never_dated_after_the_sample_that_produced_it_on_an_irregular_stream():
+    rng = random.Random(11)
+    det, t = new(), T0
+    for i in range(6000):
+        t += rng.choice([15, 15, 16, 30, 100, 250]) * 1_000_000
+        phase = (i // 20) % 4
+        v = [0.0, 700.0, 300.0, -400.0][phase] * rng.uniform(0.5, 1.2)
+        sample = ImuSample(t_ns=t, g=(round(v * GPD), 0, 0), a=(0, 0, 1000))
+        for event in det.feed(sample):
+            assert event.t_ns <= t, (event.kind, event.t_ns - t)
+
+
+def test_fuzz_messy_streams_never_throw_and_every_event_is_finite_and_not_dated_in_the_future():
+    from pingpong.shake import ShakeMonitor
+
+    rng = random.Random(7)
+    for _ in range(4):
+        params = SwingParams(u_fwd=tuple(rng.gauss(0, 1) for _ in range(3)), gyro_per_dps=rng.choice([1.0, 10.0, 16.4, 100.0]),
+                             t_pk=rng.uniform(80, 400))
+        det, shake = SwingDetector(params), ShakeMonitor(gyro_per_dps=params.gyro_per_dps)
+        t, g = T0, [0.0, 0.0, 0.0]
+        for _ in range(6000):
+            t += rng.choice([15, 15, 15, 16, 30, 100, 400]) * 1_000_000          # irregular arrival, BLE gaps
+            roll = rng.random()
+            if roll < 0.02:
+                g = [rng.uniform(-3000, 3000) for _ in range(3)]                  # a spike
+            elif roll < 0.10:
+                g = [v + rng.gauss(0, 400) for v in g]                            # a burst of motion
+            else:
+                g = [0.9 * v + rng.gauss(0, 5) for v in g]
+            raw = tuple(max(-32768, min(32767, round(v * params.gyro_per_dps))) for v in g)      # int16, clipping
+            sample = ImuSample(t_ns=t, g=raw, a=tuple(rng.randint(-2000, 2000) for _ in range(3)))
+            if rng.random() < 0.01:
+                det.blank(t, t + 150_000_000)
+                shake.blank(t, t + 150_000_000)
+            for event in det.feed(sample):
+                assert event.kind in ("SWING_START", "IMPACT") and event.t_ns <= t
+                assert all(math.isfinite(x) for x in (event.w_pk, event.dur_ms, *event.feat))
+            until = shake.feed(sample)
+            assert until is None or until > t

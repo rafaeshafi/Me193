@@ -241,7 +241,9 @@ class SwingDetector:
         h = 0.5 * ((pk["t"] - pk["prev_t"]) + (pk["next_t"] - pk["t"]))
         offset = 0.5 * (y0 - y2) / denom
         offset = max(-1.0, min(1.0, offset))
-        return pk["t"] + offset * h, y1 - 0.25 * (y0 - y2) * offset
+        # the peak lies between its neighbours: with uneven spacing (a Bluetooth gap) the vertex can fall outside
+        t_peak = max(pk["prev_t"], min(pk["next_t"], pk["t"] + offset * h))
+        return t_peak, y1 - 0.25 * (y0 - y2) * offset
 
     def _event(self, kind, t_ns, w_pk, dur_ms, reversals, g, net, a_lin, clipped, feat=None):
         return SwingEvent(kind=kind, t_ns=t_ns, w_pk=float(w_pk), dur_ms=float(dur_ms), n_reversals=reversals,
