@@ -81,9 +81,14 @@ async def scan(seconds):
 
 
 def main(argv=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--secs", type=float, default=8.0, help="how long to listen")
+    ap.add_argument("--selftest", action="store_true")
+    args = ap.parse_args(argv)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    if "--selftest" in argv:
+    if args.selftest:
         from types import SimpleNamespace
 
         data = bytes([0x02, 0x01, 6, 997 & 0xFF, 997 >> 8])
@@ -97,9 +102,8 @@ def main(argv=None):
     from pingpong import hostcheck
 
     hostcheck.require_host("Bluetooth")
-    secs = float(argv[argv.index("--secs") + 1]) if "--secs" in argv else 8.0
-    print(f"scanning {secs:.0f} s (passive; nothing is connected) ...")
-    print(format_rows(asyncio.run(scan(secs))))
+    print(f"scanning {args.secs:.0f} s (passive; nothing is connected) ...")
+    print(format_rows(asyncio.run(scan(args.secs))))
     return 0
 
 

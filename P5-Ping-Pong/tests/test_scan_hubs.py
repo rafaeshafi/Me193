@@ -49,3 +49,19 @@ def test_table_marks_the_nearest_hub_as_probably_yours():
 
 def test_empty_scan_explains_what_to_do():
     assert "wake" in scan_hubs.format_rows([]).lower()
+
+
+def test_help_works_anywhere_without_touching_bluetooth(capsys):
+    import pytest
+
+    with pytest.raises(SystemExit) as stop:
+        scan_hubs.main(["--help"])
+    assert stop.value.code == 0 and "--secs" in capsys.readouterr().out
+
+
+def test_an_unknown_option_is_refused_instead_of_starting_a_scan(capsys):
+    import pytest
+
+    with pytest.raises(SystemExit) as stop:
+        scan_hubs.main(["--sec", "x"])
+    assert stop.value.code == 2
