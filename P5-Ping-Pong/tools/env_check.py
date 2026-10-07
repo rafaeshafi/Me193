@@ -145,9 +145,9 @@ def _check_hub_connect(env, color, serial, notify_ms, skip, add, config_path):
 def _check_mqtt(env, skip, add):
     if "mqtt" in skip:
         return add("mqtt", "SKIP", "skipped")
-    rtt = env.mqtt_roundtrip(config.SELFTEST_TOPIC, 5.0)
+    rtt = env.mqtt_roundtrip(config.SELFTEST_TOPIC, 10.0)
     if rtt is None:
-        return add("mqtt", "FAIL", f"no echo from {config.BROKER_HOST}:{config.BROKER_PORT} within 5 s "
+        return add("mqtt", "FAIL", f"no echo from {config.BROKER_HOST}:{config.BROKER_PORT} within 10 s "
                    "(outbound 1883 blocked? try the iPhone hotspot)")
     status = "PASS" if rtt < 2000 else "WARN"
     return add("mqtt", status, f"round trip {rtt:.0f} ms via {config.BROKER_HOST}:{config.BROKER_PORT} "

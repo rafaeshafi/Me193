@@ -164,9 +164,9 @@ def _wave(env, vision, secs, add, prompt, ready_s, mqtt_load, card, config_path)
 
 
 def _mqtt(env, official, add, ask):
-    rtt = env.mqtt_roundtrip(config.SELFTEST_TOPIC, 5.0)
+    rtt = env.mqtt_roundtrip(config.SELFTEST_TOPIC, 10.0)
     if rtt is None:
-        add("mqtt", "FAIL", f"no echo from {config.BROKER_HOST}:{config.BROKER_PORT} within 5 s (outbound 1883 "
+        add("mqtt", "FAIL", f"no echo from {config.BROKER_HOST}:{config.BROKER_PORT} within 10 s (outbound 1883 "
             "blocked? try the iPhone hotspot)")
     else:
         add("mqtt", "PASS" if rtt < 2000 else "WARN", f"round trip {rtt:.0f} ms via {config.BROKER_HOST} "
@@ -177,7 +177,7 @@ def _mqtt(env, official, add, ask):
                "It briefly changes what the instructor's subscriber sees. [y/N]"):
         add("mqtt_official", "SKIP", "declined; the first real publish will be the first on the official topic")
         return
-    rtt = env.official_roundtrip(5.0)
+    rtt = env.official_roundtrip(10.0)
     add("mqtt_official", "FAIL" if rtt is None else "PASS",
         "the broker did not accept/echo a retained QoS 1 publish on the official topic" if rtt is None
         else f"retained QoS 1 publish accepted and echoed in {rtt:.0f} ms, then cleared")

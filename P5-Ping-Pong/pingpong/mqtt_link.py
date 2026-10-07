@@ -13,7 +13,9 @@ import config
 def make_paho_client():
     import paho.mqtt.client as mqtt
 
-    return mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="pp-rafae-" + uuid.uuid4().hex[:8])
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="pp-rafae-" + uuid.uuid4().hex[:8])
+    client.reconnect_delay_set(1, 5)               # the public broker drops attempts now and then: retry briskly
+    return client
 
 
 def attach(client, publisher, *, host=None, port=None, keepalive=None, status_topic=None):

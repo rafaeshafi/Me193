@@ -12,6 +12,17 @@ import config
 from pingpong.clock import Clock
 
 
+RETRY_MIN_S, RETRY_MAX_S = 0.5, 2.0
+
+
+def _connect_patiently(client):
+    """Connect in the background and keep trying: the public test broker closes a connection attempt without an
+    answer now and then (three of the first four in one probe), and one dropped attempt must not read as 'blocked'."""
+    client.reconnect_delay_set(RETRY_MIN_S, RETRY_MAX_S)
+    client.connect_async(config.BROKER_HOST, config.BROKER_PORT, config.KEEPALIVE_S)
+    client.loop_start()
+
+
 class RealEnv:
     threaded = True            # camera, IMU parser and actuator each get a thread
 
@@ -53,7 +64,7 @@ class RealEnv:
 
         return Audio()                           # the built-in speakers through sounddevice
 
-    def mqtt_roundtrip(self, topic, timeout_s=5.0):
+    def mqtt_roundtrip(self, topic, timeout_s=10.0):
         """Publish a unique token to `topic` and wait for the broker to echo it; -> RTT ms or None."""
         import paho.mqtt.client as mqtt
 
@@ -75,18 +86,14 @@ class RealEnv:
 
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="pp-check-" + uuid.uuid4().hex[:8])
         client.on_connect, client.on_subscribe, client.on_message = on_connect, on_subscribe, on_message
-        try:
-            client.connect(config.BROKER_HOST, config.BROKER_PORT, config.KEEPALIVE_S)
-        except OSError:
-            return None
-        client.loop_start()
+        _connect_patiently(client)
         try:
             return sent.get("rtt_ms") if got.wait(timeout_s) else None
         finally:
             client.loop_stop()
             client.disconnect()
 
-    def official_roundtrip(self, timeout_s=5.0):
+    def official_roundtrip(self, timeout_s=10.0):
         """Publish a retained "0.0" to the OFFICIAL score topic, see it come back, then clear it.
 
         Settles whether the broker accepts a retained QoS 1 publish on the real topic.  Only ever called
@@ -110,11 +117,7 @@ class RealEnv:
 
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="pp-official-" + uuid.uuid4().hex[:8])
         client.on_connect, client.on_subscribe, client.on_message = on_connect, on_subscribe, on_message
-        try:
-            client.connect(config.BROKER_HOST, config.BROKER_PORT, config.KEEPALIVE_S)
-        except OSError:
-            return None
-        client.loop_start()
+        _connect_patiently(client)
         try:
             if not got.wait(timeout_s):
                 return None
