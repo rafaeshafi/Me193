@@ -40,6 +40,9 @@ case "$cmd" in
     cat <<'EOF'
 ./pp env_check [--card-color C --card-serial NNNN] [--skip camera,mqtt,hub]   first contact with the hardware
 ./pp scan_hubs                      find your hub's card colour + serial (passive BLE scan)
+./pp bench_cam                      camera: fps, tag read rate at 1.8 m, camera-vs-IMU lag, hub rate under load
+./pp bench_haptics                  which motor pulses you feel + how long the IMU rings (blanking time)
+./pp reset_hub                      free a hub still 'connected' to a dead run (~24 s ghost)
 ./pp calibrate_swing --player NAME  guided calibration: shoulders, reach corners, 5 soft + 5 full swings
 ./pp report [DIR]                   summarise a recorded session (hits, timing, gate rejections, hub health)
 ./pp replay DIR --set level.late_s=0.4   re-run a recorded session through the real code, with changed settings

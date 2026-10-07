@@ -101,3 +101,37 @@ def wave_lag_s(pose_t_ns, pose_uv, imu_t_ns, imu_g, *, fs=100.0, max_lag_s=0.35)
         if r > best_r:
             best_r, best_lag = r, float(lag)
     return best_lag, max(0.0, best_r)
+
+
+def pulse_response(samples, t_pulse_ns, pulse_ms, *, window_s=1.5):
+    """How the hub's own IMU reacts to one motor pulse: [(t_ns, gyro xyz, accel xyz), ...] -> a dict.
+
+    The baseline is the 0.5 s of quiet before the pulse.  The IMU "felt" it when anything leaves
+    the baseline by more than 4 sigma (and a few counts); ringdown_s is how long after the pulse
+    ENDS the last such sample arrives -- the blanking the swing detector needs.
+    """
+    t = np.array([s[0] for s in samples], dtype=float) / 1e9
+    gyro = np.array([s[1] for s in samples], dtype=float)
+    accel = np.array([s[2] for s in samples], dtype=float)
+    t0 = t_pulse_ns / 1e9
+    quiet = (t >= t0 - 0.6) & (t < t0 - 0.1)
+    after = (t >= t0) & (t <= t0 + window_s)
+    if quiet.sum() < 5 or after.sum() < 5:
+        raise ValueError("not enough samples around the pulse")
+    dev_g = np.linalg.norm(gyro - gyro[quiet].mean(axis=0), axis=1)
+    dev_a = np.linalg.norm(accel - accel[quiet].mean(axis=0), axis=1)
+    thr_g = dev_g[quiet].mean() + 4 * dev_g[quiet].std() + 5.0
+    thr_a = dev_a[quiet].mean() + 4 * dev_a[quiet].std() + 5.0
+    loud = after & ((dev_g > thr_g) | (dev_a > thr_a))
+    out = {"peak_gyro": float(dev_g[after].max()), "peak_accel": float(dev_a[after].max()),
+           "felt_by_imu": bool(loud.any()), "ringdown_s": 0.0}
+    if loud.any():
+        out["ringdown_s"] = max(0.0, float(t[loud].max()) - (t0 + pulse_ms / 1000.0))
+    return out
+
+
+def blank_after_pulse_s(ringdowns, *, margin_s=0.02, floor_s=0.05, ceiling_s=0.5):
+    """BLANK_AFTER_PULSE_S from measured ring-down times: the longest plus a margin, kept in sane bounds."""
+    if not ringdowns:
+        return None
+    return min(ceiling_s, max(floor_s, max(ringdowns) + margin_s))

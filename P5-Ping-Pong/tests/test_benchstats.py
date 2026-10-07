@@ -121,3 +121,45 @@ def test_too_little_data_is_an_error_not_a_made_up_number():
 
     with pytest.raises(ValueError, match="wave"):
         benchstats.wave_lag_s(np.arange(10) * 33_000_000, np.zeros((10, 2)), np.arange(20) * 15_000_000, np.zeros((20, 3)))
+
+
+def _pulse_stream(t_pulse=2.0, pulse_ms=60, ring_s=0.10, amp=800.0, noise=3.0, hz=66.0, seconds=4.0, seed=1):
+    """Raw (t_ns, gyro, accel) samples: quiet noise, then a shake that decays after the pulse ends."""
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    out = []
+    for i in range(int(seconds * hz)):
+        t = i / hz
+        shake = 0.0
+        if t_pulse <= t < t_pulse + pulse_ms / 1000:
+            shake = amp
+        elif t_pulse + pulse_ms / 1000 <= t < t_pulse + pulse_ms / 1000 + ring_s:
+            shake = amp * math.exp(-(t - t_pulse - pulse_ms / 1000) / (ring_s / 3))
+        sign = 1 if i % 2 else -1
+        g = (round(rng.normal(0, noise) + sign * shake), round(rng.normal(0, noise)), round(rng.normal(0, noise)))
+        a = (round(rng.normal(0, noise)), round(rng.normal(0, noise)), round(1000 + rng.normal(0, noise) + sign * shake / 4))
+        out.append((int(t * 1e9), g, a))
+    return out
+
+
+def test_the_hub_ringing_after_a_motor_pulse_is_measured_from_its_own_imu():
+    samples = _pulse_stream(ring_s=0.10)
+    r = benchstats.pulse_response(samples, t_pulse_ns=2_000_000_000, pulse_ms=60)
+    assert r["felt_by_imu"] is True and r["peak_gyro"] > 400.0
+    assert 0.03 < r["ringdown_s"] < 0.18                        # it rings for roughly the 0.10 s we built in
+    longer = benchstats.pulse_response(_pulse_stream(ring_s=0.30), 2_000_000_000, 60)
+    assert longer["ringdown_s"] > r["ringdown_s"] + 0.1
+
+
+def test_a_pulse_the_imu_cannot_feel_is_reported_as_such():
+    samples = _pulse_stream(amp=0.0)
+    r = benchstats.pulse_response(samples, t_pulse_ns=2_000_000_000, pulse_ms=60)
+    assert r["felt_by_imu"] is False and r["ringdown_s"] == 0.0
+
+
+def test_the_blanking_time_is_the_longest_ring_plus_a_margin_and_stays_in_sane_bounds():
+    assert benchstats.blank_after_pulse_s([0.10, 0.14, 0.08]) == pytest.approx(0.16)
+    assert benchstats.blank_after_pulse_s([0.0, 0.0]) == pytest.approx(0.05)         # never below the floor
+    assert benchstats.blank_after_pulse_s([0.9]) == pytest.approx(0.5)               # never absurdly long
+    assert benchstats.blank_after_pulse_s([]) is None
