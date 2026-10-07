@@ -89,6 +89,7 @@ class LiveRig:
         self._closed = True
         steps = [("actuator", self._stop_actuator), ("camera", self.vision.stop), ("imu", self.imu.stop)]
         if self.recorder is not None:                # after the IMU thread stopped: the last samples are in
+            steps.append(("summary", self._record_summary))
             steps.append(("recorder", self.recorder.close))
         if self.mqtt_client is not None and self.session.game.publisher is not None:
             steps.append(("mqtt", lambda: mqtt_link.shutdown(self.mqtt_client, self.session.game.publisher)))
@@ -133,6 +134,11 @@ class LiveRig:
         if self.recorder is not None:
             self.recorder.tick(now)
         self._loop_ms.append((time.perf_counter() - t0) * 1000.0)
+
+    def _record_summary(self):
+        stats = getattr(self.vision, "stats", None)
+        self._record("summary", self.clock.now_ns(), {"loop": self.loop_stats(), "impacts": self.n_impacts,
+                                                      "vision": stats() if stats else None})
 
     # --- recording hooks (no-ops without a recorder) ------------------------------------------------------
     def _record(self, kind, t_ns, data):
