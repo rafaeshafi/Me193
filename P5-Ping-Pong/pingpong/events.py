@@ -27,7 +27,7 @@ class GestureEvent:
 class SwingEvent:
     kind: str            # "SWING_START" | "IMPACT"
     t_ns: int            # back-dated peak time for IMPACT
-    w_pk: float          # peak |gyro - bias| in dps
+    w_pk: float          # peak forward rate (gyro - bias, projected on the swing axis) in dps
     dur_ms: float
     n_reversals: int
     axis_unit: tuple     # unit vector of the gyro peak

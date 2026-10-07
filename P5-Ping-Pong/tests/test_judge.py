@@ -98,8 +98,14 @@ def test_j3_a_weak_swing_is_rejected():
 
 def test_j3_duration_and_oscillation_limits():
     assert not gate(judge().judge(swing(dur_ms=30.0), ball(), poses(T_C), T_C), "J3").passed
-    assert not gate(judge().judge(swing(dur_ms=700.0), ball(), poses(T_C), T_C), "J3").passed
+    assert not gate(judge().judge(swing(dur_ms=2600.0), ball(), poses(T_C), T_C), "J3").passed
     assert not gate(judge().judge(swing(rev=3), ball(), poses(T_C), T_C), "J3").passed
+
+
+def test_j3_accepts_the_swing_durations_measured_on_the_real_hub():
+    # real swings built up for 0.25-0.7 s before their peak, so 2 x (onset -> peak) was 0.5-1.4 s
+    for dur in (300.0, 700.0, 1400.0):
+        assert gate(judge().judge(swing(dur_ms=dur), ball(), poses(T_C), T_C), "J3").passed, dur
 
 
 def test_j4_cross_sensor_is_logged_only_and_never_blocks():

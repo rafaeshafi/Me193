@@ -27,6 +27,7 @@ import config
 from pingpong import app, mqtt_link, posegyro
 from pingpong import overrides as overrides_mod
 from pingpong import recorder as recorder_mod
+from pingpong.calibration import POSE_SHAKE_SETTINGS
 from pingpong.haptics import Actuator, ActuatorCore
 from pingpong.imu_worker import ImuWorker
 from pingpong.livebuild import LiveSetupError, build_live, request_720p, require_card  # noqa: F401  (the setup half)
@@ -323,7 +324,8 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
     if pose_gyro is not None:
         gpd, apg, fs = posegyro.GYRO_PER_DPS, posegyro.ACCEL_PER_G, posegyro.FS_RAW    # the units PoseGyro speaks
     params = calibration.swing_params(gpd, apg, fs)
-    shake = ShakeMonitor(gyro_per_dps=gpd, rms_min_dps=0.35 * params.t_pk)     # motion smaller than this is tremor
+    shake = ShakeMonitor(gyro_per_dps=gpd, rms_min_dps=0.35 * params.t_pk,       # motion smaller than this is tremor
+                         **(POSE_SHAKE_SETTINGS if camera else {}))
     recorder = recorder or _start_recording(
         record_dir, log, source=source, player=player, seed=seed, level=level, mode=mode, target=target,
         scope=scope or config.RECORD_SCOPE, t0_ns=clock.now_ns(), calibration=calibration, gyro_per_dps=gpd,

@@ -10,7 +10,8 @@
 
 Every verdict carries per-gate results with a note, so the x-ray HUD can show WHY.
 A late peak detected after the plane still counts: the miss is only declared at
-t_c + L + D95 (D95 = measured p95 detection lag).
+t_c + L + D95 (D95 = measured p95 detection lag: 150 ms on the real hub, whose swings are slow lobes that
+are only recognised once they have fallen a third from their peak; their duration is 0.5-1.4 s).
 """
 
 import math
@@ -51,7 +52,7 @@ def cross_sensor_offset_ms(samples, t_i_ns):
 
 
 class HitJudge:
-    def __init__(self, box, t_pk=250.0, d95_s=0.12, min_dur_ms=60.0, max_dur_ms=400.0, max_reversals=2,
+    def __init__(self, box, t_pk=250.0, d95_s=0.15, min_dur_ms=60.0, max_dur_ms=2000.0, max_reversals=2,
                  min_conf=0.6, refractory_s=0.35, max_hits_per_s=3):
         self.box, self.t_pk, self.d95_s = box, t_pk, d95_s
         self.min_dur_ms, self.max_dur_ms, self.max_reversals = min_dur_ms, max_dur_ms, max_reversals

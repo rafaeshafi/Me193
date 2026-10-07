@@ -1,17 +1,22 @@
 """Signed forward-axis swing detector (pure; samples in, SwingEvents out).
 
 Why signed: a magnitude-only FSM fires on the BACKSWING (reviewer simulation:
-100% of backswing-only takes).  Here the gyro vector is projected on the learned
-forward axis u_fwd, a backswing projects NEGATIVE and never arms, and a forward
-pulse arms, is tracked to its peak on RAW magnitude (never EMA: smoothing delays
-the peak), and fires on the falling edge:
+100% of backswing-only takes).  Here the gyro vector (minus its rest offset) is
+projected on the learned forward axis u_fwd, so s is the FORWARD rate: a backswing
+projects NEGATIVE and never arms, and a forward lobe arms, is tracked to its peak
+on the raw signed rate (never EMA: smoothing delays the peak), and fires once the
+rate has fallen back from it:
 
-    IDLE --s > ARM and rising--> FWD --peak >= T_PK and (w < 0.9 peak or 2 falling samples)--> COOL
+    IDLE --s > ARM and rising--> FWD --peak >= T_PK and s <= (1 - fire_drop) * peak--> COOL
 
-An oscillation guard (>2 sign reversals of s in the previous 0.8 s at amplitude
->= 0.5 peak) suppresses waving; a spike gate drops one-sample vibration spikes;
-samples inside a haptic blank window are ignored.  Every threshold is in dps via
+("or the peak is confirm_s old and s is below it": a real stroke builds for ~0.5 s with shoulders and
+hesitations, so a one-sample dip is not its peak.)  An oscillation guard (>2 sign reversals of s in the
+previous 0.8 s among lobes >= lobe_fraction * peak) suppresses waving; a spike gate drops one-sample
+vibration spikes; samples inside a haptic blank window are ignored.  Every threshold is in dps via
 gyro_per_dps, so a wrong unit guess is a one-constant fix.
+
+Written for 150 ms scripted pulses, then reworked on the real hub (2026-10-07): real strokes last
+0.5-1.4 s, the backswing is as big as the stroke, and the swing is reported 33-150 ms after its peak.
 """
 
 import math
@@ -26,19 +31,22 @@ class SwingParams:
     u_fwd: tuple = (1.0, 0.0, 0.0)
     gyro_per_dps: float = 10.0       # raw counts per deg/s (bench P2)
     accel_per_g: float = 1000.0
-    t_pk: float = 250.0              # dps: 0.6 * the weakest deliberate swing
+    t_pk: float = 250.0              # dps: 0.7 * the soft-swing strength (calibration.T_PK_FACTOR)
     fs_raw: int = 32767              # raw full scale (bench P3)
     arm_factor: float = 0.4          # ARM = arm_factor * t_pk
     start_factor: float = 0.5        # SWING_START at 0.5 * t_pk
-    max_swing_s: float = 0.45
+    max_swing_s: float = 1.2         # from the forward rate crossing ARM to the impact (real swings ramp up for ~0.5 s)
     min_swing_s: float = 0.04
     min_dur_ms: float = 60.0
-    max_dur_ms: float = 400.0
+    max_dur_ms: float = 2000.0       # 2 x (onset -> peak): real soft swings measured 0.5-1.4 s
+    fire_drop: float = 0.35          # the impact fires once the forward rate has fallen this far below its peak ...
+    confirm_s: float = 0.12          # ... or the peak is this old and the rate is below it (a hesitation is not a peak)
     refractory_s: float = 0.30
     cool_w_dps: float = 100.0
     idle_w_dps: float = 25.0
     reversal_window_s: float = 0.8
     max_reversals: int = 2
+    lobe_fraction: float = 0.25       # a lobe counts toward the oscillation guard from this fraction of the swing's peak
     spike_ratio: float = 0.4
     warmup_s: float = 0.5
 
@@ -59,7 +67,7 @@ def swing_features(g_peak, net_rot, a_lin, w_pk, dur_ms, back_ratio):
 
 
 def count_reversals(history, onset, current_sign, params, peak):
-    """Sign reversals of s among lobes (>= 0.5 * peak) in the window before this swing."""
+    """Sign reversals of s among lobes (>= lobe_fraction * peak) in the window before this swing."""
     lo = onset - params.reversal_window_s
     lobes, sign, best = [], 0, 0.0
     for t, s in history:
@@ -69,11 +77,11 @@ def count_reversals(history, onset, current_sign, params, peak):
         if sg == 0:
             continue
         if sg != sign:
-            if sign != 0 and best >= 0.5 * peak:
+            if sign != 0 and best >= params.lobe_fraction * peak:
                 lobes.append(sign)
             sign, best = sg, 0.0
         best = max(best, abs(s))
-    if sign != 0 and best >= 0.5 * peak:
+    if sign != 0 and best >= params.lobe_fraction * peak:
         lobes.append(sign)
     lobes.append(current_sign)
     return sum(1 for a, b in zip(lobes, lobes[1:]) if a != b)
@@ -179,10 +187,9 @@ class SwingDetector:
         self._onset = self._last_low_t if self._last_low_t is not None else prev[0]
         self._t_arm = t
         self._started = False
-        self._falling = 0
         self._net = [0.0, 0.0, 0.0]
         self._clip_run = self._clip_max = 0
-        self._pk = {"w": w, "t": t, "prev_w": prev[2], "prev_t": prev[0], "next_w": None, "next_t": None,
+        self._pk = {"w": s, "t": t, "prev_w": prev[1], "prev_t": prev[0], "next_w": None, "next_t": None,
                     "g": gu, "a": sample.a}
 
     # --- FWD ---------------------------------------------------------------------------
@@ -192,27 +199,25 @@ class SwingDetector:
         if not first:
             dt = t - prev[0]
             self._net = [self._net[k] + gu[k] * dt for k in range(3)]
-            if w > prev[2]:
-                self._falling = 0
-            elif w < prev[2]:
-                self._falling += 1
         clipped_now = any(abs(v) >= p.fs_raw for v in sample.g)
         self._clip_run = self._clip_run + 1 if clipped_now else 0
         self._clip_max = max(self._clip_max, self._clip_run)
         if not self._started and s > p.start_factor * p.t_pk:
             self._started = True
-            events.append(self._event("SWING_START", sample.t_ns, w, 0.0, 0, gu, (0.0,) * 3, (0.0,) * 3, False))
-        if w >= pk["w"]:
-            self._pk = pk = {"w": w, "t": t, "prev_w": prev[2], "prev_t": prev[0], "next_w": None,
-                             "next_t": None, "g": gu, "a": sample.a}
+            events.append(self._event("SWING_START", sample.t_ns, s, 0.0, 0, gu, (0.0,) * 3, (0.0,) * 3, False))
+        if s >= pk["w"]:                                   # the peak is the FORWARD rate: a wobble about another axis
+            self._pk = pk = {"w": s, "t": t, "prev_w": prev[1], "prev_t": prev[0], "next_w": None,
+                             "next_t": None, "g": gu, "a": sample.a}   # must not look like a swing
         elif pk["next_w"] is None:
-            pk["next_w"], pk["next_t"] = w, t
+            pk["next_w"], pk["next_t"] = s, t
 
         if (t - self._t_arm) > p.max_swing_s or (s < 0.3 * self._arm and pk["w"] < p.t_pk):
             self._state = "IDLE"
             return events
-        falling = w < 0.9 * pk["w"] or self._falling >= 2
-        if pk["w"] >= p.t_pk and falling and (t - self._onset) >= p.min_swing_s:
+        # Fire when the swing is clearly past its peak: the forward rate lost fire_drop of it (a quick hesitation on
+        # the way up, which real swings have, loses far less), or the peak is confirm_s old and the rate is below it.
+        over = s <= (1.0 - p.fire_drop) * pk["w"] or (t - pk["t"] >= p.confirm_s and s < pk["w"])
+        if pk["w"] >= p.t_pk and over and (t - self._onset) >= p.min_swing_s:
             events += self._fire(sample, t)
         return events
 

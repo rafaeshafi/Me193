@@ -108,3 +108,11 @@ def test_the_session_report_works_on_a_camera_session(tmp_path):
     assert summary["hits"] == 5 and summary["swing_source"] == "pose"
     text = sessionreport.format_report(summary)
     assert "camera" in text.lower() and "Hub:" not in text                # the 'hub' rate would be the camera's
+
+
+def test_the_shake_lock_keeps_the_camera_settings_for_a_camera_game_and_the_real_hub_ones_for_a_hub_game():
+    # 1.2-8 Hz over 1.5 s was measured on the hub's real shakes.  A camera's hand-speed signal was never recorded
+    # for real, and its reposition-then-swing rhythm (~2 Hz) locked the paddle for good under the hub's band.
+    camera, hub = camera_rig().rig.imu.shake, fakerig.FakeRig().rig.imu.shake
+    assert (camera.band_hz, camera.window_s) == ((3.0, 8.0), 1.0)
+    assert (hub.band_hz, hub.window_s) == ((1.2, 8.0), 1.5)

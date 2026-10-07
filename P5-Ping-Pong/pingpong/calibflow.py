@@ -3,7 +3,7 @@
     stand    stand still, arms down: shoulder width (feeds the one-player pose lock)
     corners  hold the paddle still at four corners of your comfortable reach (no keyboard: you
              are 1.8 m from the laptop, so a held hand is the "click")
-    soft     5 soft swings   -> omega_lo (and, with T_PK = 0.6 * omega_lo, the weakest swing that counts)
+    soft     5 soft swings   -> omega_lo (and, with T_PK = 0.7 * omega_lo, the weakest swing that counts)
     full     5 full swings   -> omega_hi (a full swing = top speed)
     done     forward axis (SVD of the peak vectors), strengths, reach box -> a Calibration
 
@@ -36,7 +36,7 @@ class CalibrationError(Exception):
 class CalibrationFlow:
     def __init__(self, *, gyro_per_dps, hand="right", accel_per_g=1000.0, fs_raw=32767, n_soft=5, n_full=5,
                  stand_s=1.0, hold_s=0.8, still_sw=0.08, min_corner_gap_sw=0.35, min_span=(0.6, 0.4),
-                 swing_start_dps=80.0, swing_end_dps=40.0, quiet_s=0.25, min_peak_dps=150.0, max_take_s=1.2,
+                 swing_start_dps=80.0, swing_end_dps=40.0, quiet_s=0.25, min_peak_dps=150.0, max_take_s=3.0,
                  lead_s=0.8, max_reversals=3, source="imu"):
         self.gpd, self.hand, self.accel_per_g, self.fs_raw = gyro_per_dps, hand, accel_per_g, fs_raw
         self.source = source                                     # "pose": the samples are the camera's hand speed
@@ -192,15 +192,18 @@ class CalibrationFlow:
             self._finalize()
 
     def _finalize(self):
-        soft_peaks, full_peaks = [p for p, _ in self.soft], [p for p, _ in self.full]
+        takes = [samples for _, samples in self.soft + self.full]
+        axis, _ = cal.fit_forward_axis(takes, self.gpd)
+        # Strength = the FORWARD peak on the learned axis, not the biggest gyro magnitude: a real soft swing's
+        # backswing is about as big as its stroke, so the biggest lobe can be the wrong one.
+        n_soft = len(self.soft)
+        forward = cal.forward_peaks(takes, axis, self.gpd, bias=self._bias)
         try:
-            strengths = cal.swing_strengths(soft_peaks, full_peaks)
+            strengths = cal.swing_strengths(forward[:n_soft], forward[n_soft:])
         except ValueError as exc:
             self._note(f"{exc}; repeat the full swings, harder")
             self.full = []
             return
-        takes = [samples for _, samples in self.soft + self.full]
-        axis, _ = cal.fit_forward_axis(takes, self.gpd)
         calibration = Calibration(
             swing=cal.SwingCalibration(u_fwd=axis, omega_lo=strengths["omega_lo"], omega_hi=strengths["omega_hi"],
                                        source=self.source),

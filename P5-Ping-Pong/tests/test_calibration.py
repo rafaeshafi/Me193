@@ -66,7 +66,7 @@ def test_soft_and_full_peaks_become_omega_lo_and_hi_by_median():
     cal = calibration.swing_strengths(soft=[310, 290, 305, 800, 300], full=[1000, 1100, 1050, 1020, 400])
     assert cal["omega_lo"] == pytest.approx(305)
     assert cal["omega_hi"] == pytest.approx(1020)
-    assert cal["t_pk"] == pytest.approx(0.6 * 305)
+    assert cal["t_pk"] == pytest.approx(calibration.T_PK_FACTOR * 305)
 
 
 def test_soft_and_full_must_be_clearly_separated():
@@ -78,7 +78,7 @@ def test_a_profile_round_trips_through_json_and_validates_its_axis():
     cal = calibration.SwingCalibration(u_fwd=(0.6, -0.3, 0.74), omega_lo=300.0, omega_hi=1100.0)
     back = calibration.SwingCalibration.from_json(cal.to_json())
     assert back.omega_lo == 300.0 and back.omega_hi == 1100.0
-    assert back.t_pk == pytest.approx(180.0)
+    assert back.t_pk == pytest.approx(calibration.T_PK_FACTOR * 300.0)
     assert math.sqrt(sum(c * c for c in back.u_fwd)) == pytest.approx(1.0)
     with pytest.raises(ValueError):
         calibration.SwingCalibration(u_fwd=(0.0, 0.0, 0.0), omega_lo=300.0, omega_hi=1100.0)
@@ -87,7 +87,8 @@ def test_a_profile_round_trips_through_json_and_validates_its_axis():
 def test_detector_params_come_from_the_calibration():
     cal = calibration.SwingCalibration(u_fwd=(1.0, 0.0, 0.0), omega_lo=400.0, omega_hi=1200.0)
     params = cal.swing_params(gyro_per_dps=GPD, accel_per_g=980.0, fs_raw=30000)
-    assert params.t_pk == pytest.approx(240.0) and params.gyro_per_dps == GPD and params.fs_raw == 30000
+    assert params.t_pk == pytest.approx(calibration.T_PK_FACTOR * 400.0) and params.gyro_per_dps == GPD \
+        and params.fs_raw == 30000
 
 
 def test_a_camera_calibration_drops_the_hub_spike_gate_and_asks_for_longer_swings():
@@ -95,7 +96,8 @@ def test_a_camera_calibration_drops_the_hub_spike_gate_and_asks_for_longer_swing
     cam = calibration.SwingCalibration((1.0, 0.0, 0.0), 300.0, 1000.0, source="pose").swing_params(GPD, 1000.0, 32767)
     assert (hub.spike_ratio, hub.min_dur_ms, hub.refractory_s) == (0.4, 60.0, 0.30)
     assert (cam.spike_ratio, cam.min_dur_ms, cam.refractory_s) == (0.0, 100.0, 0.15)
-    assert cam.t_pk == hub.t_pk == pytest.approx(180.0)                      # everything else is shared
+    assert cam.t_pk == hub.t_pk == pytest.approx(calibration.T_PK_FACTOR * 300.0)   # everything else is shared
+    assert (cam.max_dur_ms, hub.max_dur_ms) == (400.0, 2000.0)           # real hub swings last up to ~1.4 s
 
 
 def test_a_swing_source_other_than_imu_or_pose_is_refused():
@@ -108,3 +110,44 @@ def test_the_source_survives_json_and_an_old_file_without_one_is_an_imu_calibrat
     assert calibration.SwingCalibration.from_json(cam.to_json()) == cam
     old = '{"u_fwd": [0.0, 1.0, 0.0], "omega_lo": 250.0, "omega_hi": 800.0}'
     assert calibration.SwingCalibration.from_json(old).source == "imu"
+
+
+# --- strengths measured on the forward rate (real swings: the backswing is often as big as the stroke) -------------------
+def lobes_take(gx_dps, axis_idx=0, off=None, hz=64.0):
+    out = []
+    for i, v in enumerate(gx_dps):
+        g = [0, 0, 0]
+        g[axis_idx] = round(v * GPD)
+        if off:
+            g = [g[k] + round(off[k] * GPD) for k in range(3)]
+        out.append(ImuSample(t_ns=T0 + int(i * 1e9 / hz), g=tuple(g), a=(0, 0, 1000)))
+    return out
+
+
+def test_a_swings_strength_is_its_forward_peak_even_when_the_backswing_is_bigger():
+    # real soft swings: the backswing is about as big as the stroke, so the largest MAGNITUDE can be the wrong lobe
+    take = lobes_take([0] * 12 + [-200, -450, -600, -450, -200, 0, 150, 300, 400, 300, 150, 0])
+    assert calibration.forward_peaks([take], (1.0, 0.0, 0.0), GPD, bias=(0.0, 0.0, 0.0)) == [pytest.approx(400.0)]
+
+
+def test_only_the_part_of_the_motion_along_the_axis_counts_as_forward():
+    take = lobes_take([0] * 12 + [200, 400, 200, 0], axis_idx=1)           # a big rotation about ANOTHER axis
+    assert calibration.forward_peaks([take], (1.0, 0.0, 0.0), GPD, bias=(0.0, 0.0, 0.0)) == [pytest.approx(0.0, abs=1e-6)]
+
+
+def test_a_constant_gyro_offset_is_not_part_of_the_strength():
+    take = lobes_take([0] * 12 + [200, 400, 200, 0], off=(50.0, 0.0, 0.0))
+    assert calibration.forward_peaks([take], (1.0, 0.0, 0.0), GPD, bias=(50.0, 0.0, 0.0)) == [pytest.approx(400.0, abs=1.0)]
+
+
+def test_the_rest_offset_is_always_given_because_real_takes_do_not_start_at_rest():
+    # a person is already into the backswing at the GO beep: the take's first samples are not the hub's rest offset
+    take = lobes_take([300, 250, 200, 100, 0, -300, -600, -300, 0, 150, 300, 400, 300, 150, 0])
+    with pytest.raises(TypeError):
+        calibration.forward_peaks([take], (1.0, 0.0, 0.0), GPD)
+    assert calibration.forward_peaks([take], (1.0, 0.0, 0.0), GPD, bias=(0.0, 0.0, 0.0)) == [pytest.approx(400.0)]
+
+
+def test_the_weakest_counting_swing_is_seven_tenths_of_the_soft_strength():
+    assert calibration.T_PK_FACTOR == 0.7
+    assert calibration.SwingCalibration((1.0, 0.0, 0.0), 440.0, 1150.0).t_pk == pytest.approx(0.7 * 440.0)

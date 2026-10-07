@@ -1,6 +1,8 @@
 # Player data, recordings and per-player calibration stay local (names and
 # videos of classmates must never reach GitHub or Notion).
 data/
+# ... except the real hub recordings the regression tests replay
+!tests/data/
 recordings/
 calibration*.json
 

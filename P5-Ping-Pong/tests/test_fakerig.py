@@ -8,7 +8,7 @@ haptics -> ActuatorCore -> fake hub, score -> fake broker.  Only the hardware an
 import pytest
 
 import config
-from pingpong import fakerig, pose
+from pingpong import calibration, fakerig, pose
 from pingpong.sources_fake import body_landmarks
 
 OFFICIAL = config.SCORE_TOPIC
@@ -116,7 +116,7 @@ def test_a_late_swing_inside_the_window_counts_but_a_very_late_one_is_a_miss_and
 
 
 def test_a_swing_weaker_than_the_threshold_is_never_a_hit():
-    rig = fakerig.FakeRig(w_pk=90.0)                            # T_PK is 0.6 * omega_lo = 180 dps
+    rig = fakerig.FakeRig(w_pk=90.0)                            # T_PK is 0.7 * omega_lo = 210 dps
     rig.run(until=lambda: rig.game.phase == "MATCH_OVER", max_s=60)
     assert rig.game.tracker.record == 0 and payloads(rig) == []
 
@@ -142,7 +142,7 @@ def test_the_hud_gets_the_imu_trace_of_the_swing_that_was_just_judged():
     rig.run(until=lambda: rig.game.tracker.streak >= 2, max_s=60)
     state = rig.rig.hud_state()
     assert max(state.swing_trace) > 0.8 * 600.0
-    assert state.swing_threshold == pytest.approx(0.6 * 300.0)
+    assert state.swing_threshold == pytest.approx(calibration.T_PK_FACTOR * 300.0)
 
 
 def test_shaking_the_hub_locks_the_paddle_so_the_ball_arriving_meanwhile_is_not_a_hit():

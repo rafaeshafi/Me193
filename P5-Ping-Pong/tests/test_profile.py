@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from pingpong import profile
+from pingpong import calibration, profile
 from pingpong.calibration import SwingCalibration
 from pingpong.paddle import ReachBox
 
@@ -66,7 +66,7 @@ def test_a_corrupt_file_is_reported_not_silently_replaced_by_defaults(tmp_path):
 def test_swing_params_come_from_the_calibration_and_the_measured_units():
     params = sample().swing_params(gyro_per_dps=9.7, accel_per_g=980.0, fs_raw=30000)
     assert params.gyro_per_dps == 9.7 and params.accel_per_g == 980.0 and params.fs_raw == 30000
-    assert params.t_pk == pytest.approx(0.6 * 310.0)
+    assert params.t_pk == pytest.approx(calibration.T_PK_FACTOR * 310.0)
     assert params.u_fwd == pytest.approx((0.0, 0.6, 0.8))
 
 

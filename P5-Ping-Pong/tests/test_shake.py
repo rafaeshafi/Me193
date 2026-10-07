@@ -1,9 +1,10 @@
-"""ShakeMonitor (judge gate J6): an FFT of the last second of gyro tells shaking from swinging.
+"""ShakeMonitor (judge gate J6): an FFT of the last 1.5 s of gyro tells shaking from swinging.
 
-A shake is a sustained, narrow-band oscillation between 3 and 8 Hz: the dominant FFT bin lies in
-that band, holds a large share of the power, the motion is big enough to matter, and it has
-several full cycles.  The cycle count matters: a swing plus its backswing also looks periodic
-for a moment, and a false lock would cost the player their next hit.
+A shake is a sustained, narrow-band oscillation of at least 1.2 Hz: the dominant FFT bin lies in the band,
+holds a large share of the power, the motion is big enough to matter, and it has several full cycles.
+Measured on the real hub: a person shaking it or waving it like a fan does so at 1.6-2.4 Hz (not the 3-8 Hz
+first assumed), while real swings repeat at 0.4-0.8 Hz.  The cycle count matters: a swing plus its backswing also
+looks periodic for a moment, and a false lock would cost the player their next hit.
 """
 
 import math
@@ -57,16 +58,16 @@ def new(**kw):
     return ShakeMonitor(gyro_per_dps=kw.pop("gyro_per_dps", GPD), **kw)
 
 
-@pytest.mark.parametrize("freq", [3.0, 4.4, 5.0, 6.5, 8.0])
-def test_sustained_shaking_between_3_and_8_hz_locks_the_paddle_within_about_a_second(freq):
-    seen = locks(new(), stream(sine(freq, 300.0), 3.0))
+@pytest.mark.parametrize("freq", [1.6, 2.0, 2.4, 3.0, 4.4, 5.0, 6.5, 8.0])
+def test_sustained_shaking_from_1_6_to_8_hz_locks_the_paddle_within_about_a_second_and_a_half(freq):
+    seen = locks(new(), stream(sine(freq, 300.0), 3.5))
     assert seen, f"{freq} Hz shaking was not caught"
-    assert (seen[0][0] - T0) / S <= 1.3                            # caught while it is still going on
+    assert (seen[0][0] - T0) / S <= 1.8                            # caught while it is still going on
     assert seen[0][1] - seen[0][0] == pytest.approx(1.0 * S, rel=0.01)       # locked for one second
 
 
-@pytest.mark.parametrize("freq", [1.0, 1.5, 2.0, 12.0, 20.0])
-def test_slow_waving_and_fast_buzz_are_not_a_shake(freq):
+@pytest.mark.parametrize("freq", [0.5, 0.8, 1.0, 12.0, 20.0])
+def test_swing_rate_repetition_and_fast_buzz_are_not_a_shake(freq):
     assert locks(new(), stream(sine(freq, 400.0), 4.0)) == []
 
 

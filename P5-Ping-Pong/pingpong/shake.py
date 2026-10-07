@@ -1,4 +1,4 @@
-"""ShakeMonitor (judge gate J6): an FFT of the last second of gyro tells shaking from swinging.
+"""ShakeMonitor (judge gate J6): an FFT of the last 1.5 s of gyro tells shaking from swinging.
 
 Waving the hub produces swing-like peaks; the swing detector's oscillation guard already rejects
 most of that, and this is the second line of defence: when the last second of rotation is a
@@ -7,7 +7,8 @@ can never score.
 
 A window counts as shaking when ALL of these hold (each one rules out a real swing or a glitch):
   * the motion is big enough to matter (RMS above rms_min_dps),
-  * the dominant FFT bin (not just a bin in the band) lies between 3 and 8 Hz,
+  * the dominant FFT bin (not just a bin in the band) lies between 1.2 and 8 Hz (real shakes and waves measured
+    1.6-2.4 Hz; real swings repeat at 0.4-0.8 Hz),
   * that bin holds a large share of the non-DC power (a narrow peak, not the smooth spectrum of a
     single stroke),
   * the principal-axis signal has several sign reversals (full cycles).  A swing plus its
@@ -25,10 +26,10 @@ import numpy as np
 
 
 class ShakeMonitor:
-    def __init__(self, *, gyro_per_dps, window_s=1.0, n=64, eval_period_s=0.1, band=(3, 8), rms_min_dps=60.0,
+    def __init__(self, *, gyro_per_dps, window_s=1.5, n=96, eval_period_s=0.1, band_hz=(1.2, 8.0), rms_min_dps=60.0,
                  min_peakedness=0.3, min_crossings=4, lock_s=1.0, max_gap_s=0.25):
         self.gpd, self.window_s, self.n, self.eval_period_s = gyro_per_dps, window_s, n, eval_period_s
-        self.band, self.rms_min, self.min_peakedness = band, rms_min_dps, min_peakedness
+        self.band_hz, self.rms_min, self.min_peakedness = band_hz, rms_min_dps, min_peakedness
         self.min_crossings, self.lock_ns, self.max_gap_s = min_crossings, round(lock_s * 1e9), max_gap_s
         self._buf = deque()                   # (t_s, gx, gy, gz) in dps
         self._blanks = []
@@ -77,7 +78,7 @@ class ShakeMonitor:
         if total <= 0.0:
             return False
         k = 1 + int(np.argmax(power[1:]))                  # the dominant bin overall, DC excluded
-        if not self.band[0] <= k <= self.band[1] or power[k] / total < self.min_peakedness:
+        if not self.band_hz[0] <= k / self.window_s <= self.band_hz[1] or power[k] / total < self.min_peakedness:
             return False
         principal = r @ np.linalg.svd(r, full_matrices=False)[2][0]
         return _reversals(principal, 0.25 * float(np.max(np.abs(principal)))) >= self.min_crossings

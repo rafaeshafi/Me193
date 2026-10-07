@@ -72,7 +72,7 @@ not trust are reported and **not** written. Do these from Terminal.app:
 ./pp train_spin --player rafae        # optional: 12 flat, 12 top, 12 back swings -> your spin model (~3 minutes)
 ```
 
-If `env_check` or `bench_hub` measure the hub's IMU **below 25 Hz** (too slow to see a 150 ms swing), `play` and
+If `env_check` or `bench_hub` measure the hub's IMU **below 25 Hz** (too slow to see a quick swing), `play` and
 `calibrate_swing` switch by themselves to the camera's hand speed as the swing sensor (`--swing-source auto` is the
 default; `imu` or `pose` forces one). That needs its own calibration, a separate file that never replaces the hub's:
 
@@ -274,16 +274,19 @@ continuous hits goes to MQTT whenever it improves.
   single webcam gives no depth, so the "paddle is at the ball" test is a 2-D approximation, lenient at
   Rookie. The hand also moves during a swing (a shoulder width or more in the 300 ms the pose gate looks at),
   so the hardest swings can leave Pro's small radius; `--set level.radius_sw=0.8` is the knob.
-- **The hub IMU.** About 66 Hz over Bluetooth [measured: ___ Hz] (below 25 Hz the camera takes over, see
-  below), undocumented units, no timestamps
-  (samples are stamped on arrival), so the swing peak is only good to ~15 ms and a swing is reported
-  35–80 ms after it happened. Shot speed is a calibrated relative measure, not true racket speed.
+- **The hub IMU.** About 64 Hz over Bluetooth [measured: 63.9 Hz, worst gap 93 ms] (below 25 Hz the camera
+  takes over, see below), undocumented units (measured: 0.99 gyro counts per deg/s, about 1017 accelerometer
+  counts per g, and the accelerometer saturates at about 8 g in a hard swing, which clips the spin features),
+  no timestamps (samples are stamped on arrival), so the swing peak is only good to ~15 ms. My real swings
+  build up for about half a second and the detector waits for the rate to fall back from the peak, so a
+  swing is reported 33–150 ms after it happened. Shot speed is a calibrated relative measure, not true racket speed.
 - **The camera as a swing sensor (the fallback).** It sees only the hand's motion across the picture, so a
   swing straight at the camera barely registers, and a quick sideways reposition of the hand can look like a
   swing (the duration limits and the judge's timing and pose gates stop most of those, not all). It runs at 15-30
   Hz, its peak is about 30 ms later than the hub's, the camera lag cannot be measured against an IMU it replaces,
   there is no accelerometer so there is no spin, and a very hard swing carries the hand out of the ball's radius.
-  Best at Rookie and Club.
+  Best at Rookie and Club. The camera detector and its shake lock keep the settings tuned on scripted hand
+  motion; they have never seen a real camera recording.
 - **Haptics.** The motors are weak unless the hub has some inertia on it; their vibration shakes the
   hub's own IMU, so the detector ignores a short window after every pulse [measured: ___ ms]; the felt
   pulse arrives 100–200 ms after the swing peak, so timing cues are dropped at the fastest levels.
@@ -302,7 +305,7 @@ continuous hits goes to MQTT whenever it improves.
 | AprilTag / ArUco 36h11 detection | `tags.py` | It thresholds the image, finds square quads and decodes a Hamming-protected bit grid into an id and corners. I vote over frames before an id counts as START or LEVEL. |
 | One-Euro filter | `oneeuro.py` | A low-pass filter whose cutoff rises with signal speed. The paddle point is smooth when I am still and nearly lag-free in a swing. |
 | Signed-axis swing detector (a threshold state machine; the axis comes from an SVD) | `swing.py`, `calibration.py`, `posegyro.py` | It projects the gyro onto the forward axis learned from my calibration swings, arms on a threshold, tracks the peak and fires on the falling edge with an oscillation guard. A backswing projects negative, so it never fires; with a slow hub the same detector runs on the camera's hand velocity. |
-| FFT shake discriminator | `shake.py` | The last second of gyro is resampled and run through `rfft`; a narrow, strong peak between 3 and 8 Hz with several full cycles is a shake. It locks the paddle for a second, while a single swing's smooth spectrum does not. |
+| FFT shake discriminator | `shake.py` | The last 1.5 seconds of gyro are resampled and run through `rfft`; a narrow, strong peak between 1.2 and 8 Hz (my real shakes and waves were 1.6–2.4 Hz, my swings repeat at 0.4–0.8 Hz) with several full cycles is a shake. It locks the paddle for a second, while a single swing's smooth spectrum does not. |
 | PD controller | `pd.py`, `policy.py` | Its velocity command is Kp·error + Kd·(filtered error rate), saturated at a per-level paddle speed and only starting after a reaction delay. Whether the computer reaches a ball is simulated physics, and the screen draws the paddle chasing (or missing) my shot. |
 | Softmax (Boltzmann) policy | `policy.py` | Each of nine target zones gets a utility and is sampled ∝ exp(utility / temperature). Lower temperature plays sharper at higher levels. |
 | StandardScaler + Logistic Regression | `spin.py`, `spinflow.py` | It standardises 12 swing features (the unit directions of the gyro peak, the net rotation and the linear acceleration, plus peak rate, duration and backswing ratio) and learns a linear softmax boundary between flat, top and back from my own labelled swings. The three probabilities become continuous topspin or backspin, and the model only ships if its cross-validated accuracy is at least 75%. |
