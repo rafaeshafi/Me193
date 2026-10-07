@@ -1,0 +1,34 @@
+# Versions are pinned because the obvious "just install the latest" combination
+# does not work on macOS (Apple silicon) -- same pins as P1-Pose-Race, do not upgrade:
+#
+#   * mediapipe 1.x dropped mp.solutions AND its PoseLandmarker graph aborts on
+#     arm64 with "DrishtiMetalHelper ... Service is unavailable".
+#   * mediapipe 0.10.x requires numpy<2, but opencv-python >= 4.11 requires
+#     numpy>=2, so OpenCV has to be held back too.
+#   * mediapipe 0.10.21 has no cp313 wheel: use Python 3.12.
+#
+# `pip check` prints "mediapipe 0.10.21 is not supported on this platform";
+# that single message is expected and harmless -- gate on the import check in
+# `./pp ready` instead.
+mediapipe==0.10.21
+opencv-python==4.10.0.84
+# mediapipe pulls opencv-contrib-python in as a dependency, and ITS cv2 is the
+# one that ends up imported, so it must be held at the same version.
+opencv-contrib-python==4.10.0.84
+numpy<2
+
+# LEGO Education hub (Double Motor) over BLE.
+legoeducation==1.1.1
+bleak==3.0.2
+
+# Live score to ME193/Rogers/RafaeShafi.
+paho-mqtt==2.1.0
+
+# Spin classifier (LogisticRegression), same stack as P1 train_poses.py.
+scikit-learn==1.9.1
+joblib==1.6.0
+
+# Game audio (numpy-synthesised clips, no assets).
+sounddevice==0.5.6
+
+pytest

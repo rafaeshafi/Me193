@@ -1,0 +1,11 @@
+# Player data, recordings and per-player calibration stay local (names and
+# videos of classmates must never reach GitHub or Notion).
+data/
+recordings/
+calibration*.json
+
+my_env/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store

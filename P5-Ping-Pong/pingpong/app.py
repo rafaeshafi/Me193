@@ -1,0 +1,189 @@
+"""Session: wires GameCore to feedback (haptics), HUD state, tags and the score publisher.
+
+Pure orchestration with injected I/O, so the same code runs on the real sensors,
+in --fake mode and in tests.  run_scripted() is a scripted fake player on a fake
+clock -- the automated version of "play.py --fake reaches 10 hits".
+"""
+
+import math
+import random
+from collections import deque
+
+from pingpong import feedback, levels, physics
+from pingpong.clock import FakeClock
+from pingpong.events import PaddlePose, SwingEvent
+from pingpong.hud import HudState
+from pingpong.judge import HitJudge
+from pingpong.mqtt_pub import ScorePublisher
+from pingpong.paddle import ReachBox
+from pingpong.policy import CpuPolicy
+from pingpong.rules import GameCore
+from pingpong.scoring import ScoreTracker
+
+S = 1_000_000_000
+DEFAULT_BOX = ReachBox(u_min=-1.0, u_max=1.0, v_min=-0.5, v_max=0.5)
+FLASH = {"perfect": ((255, 255, 255), 0.25), "good": ((0, 200, 0), 0.18), "early": ((0, 140, 255), 0.2),
+         "late": ((0, 140, 255), 0.2), "fault": ((0, 0, 255), 0.35)}
+
+
+class Session:
+    def __init__(self, game, clock, actuator=None, mqtt_status=None, hub_status=None):
+        self.game, self.clock, self.actuator = game, clock, actuator
+        self._mqtt_status = mqtt_status or (lambda: "off")
+        self._hub_status = hub_status or (lambda: "ok")
+        self.poses = deque(maxlen=90)
+        self.paddle_ab = None
+        self.xray = False
+        self._gates, self._last_kmh, self._last_label, self._spin = (), None, "", ""
+        self._message, self._message_until = "", 0
+        self._flash, self._flash_until = None, 0
+
+    # --- inputs ------------------------------------------------------------------------------
+    def on_pose(self, pose):
+        self.poses.append(pose)
+        self.paddle_ab = self.game.judge.box.to_ab(pose.u, pose.v)
+
+    def on_start(self):
+        return self.game.start(self.clock.now_ns())
+
+    def on_tag(self, tag):
+        if tag.role == "START":
+            self.on_start()
+        elif tag.role == "LEVEL":
+            level = levels.level_for_tag(tag.value)
+            if level is not None:
+                self.game.set_level(level)
+
+    def on_swing(self, swing):
+        events = self.game.on_swing(swing, list(self.poses), self.clock.now_ns())
+        self._absorb(events)
+        return events
+
+    def tick(self):
+        events = self.game.tick(self.clock.now_ns())
+        self._absorb(events)
+        return events
+
+    # --- events -> feedback + HUD memory ---------------------------------------------------------
+    def _absorb(self, events):
+        now = self.clock.now_ns()
+        if self.actuator is not None:
+            feedback.play(events, self.game.level, self.actuator)
+        for e in events:
+            if e.kind == "verdict":
+                self._gates = e.data["verdict"].gates
+            elif e.kind == "hit":
+                self._last_kmh, self._last_label = e.data["kmh"], e.data["label"]
+                self._spin = _spin_text(e.data["topspin"], e.data["sidespin"])
+                self._set_flash(FLASH.get(e.data["label"]), now)
+            elif e.kind == "record":
+                self._set_message("NEW RECORD", now, 1.5)
+            elif e.kind == "fault":
+                self._last_kmh, self._last_label = e.data["kmh"], "fault " + e.data["fault"]
+                self._set_message(f"FAULT: {e.data['fault'].upper()}", now, 1.5)
+                self._set_flash(FLASH["fault"], now)
+            elif e.kind == "miss":
+                self._set_message("MISSED", now, 1.5)
+                self._set_flash(FLASH["fault"], now)
+
+    def _set_message(self, text, now, seconds):
+        self._message, self._message_until = text, now + round(seconds * S)
+
+    def _set_flash(self, flash, now):
+        if flash:
+            self._flash, self._flash_until = flash, now + round(0.15 * S)
+
+    # --- HUD -------------------------------------------------------------------------------------------
+    def hud_state(self, leaderboard=()):
+        g, now = self.game, self.clock.now_ns()
+        remaining = g.seconds_to_serve(now)
+        return HudState(
+            phase=g.phase, mode=g.mode, level_name=g.level.name, streak=g.tracker.streak,
+            record=g.tracker.record, player_points=g.player_points, cpu_points=g.cpu_points,
+            target=g.target_points, countdown=None if remaining is None else max(1, math.ceil(remaining)),
+            ball=self._ball(now), paddle_ab=self.paddle_ab,
+            arrival_ab=g.incoming.aim_ab if g.incoming is not None else None,
+            last_kmh=self._last_kmh, last_label=self._last_label, spin_text=self._spin,
+            mqtt_status=self._mqtt_status(), hub_status=self._hub_status(),
+            message=self._paused_text() or (self._message if now < self._message_until else ""),
+            gates=self._gates, show_xray=self.xray,
+            flash=self._flash if now < self._flash_until else None, leaderboard=tuple(leaderboard))
+
+    def _paused_text(self):
+        if not self.game.paused:
+            return ""
+        return "PAUSED: " + ", ".join(sorted(self.game.pause_reasons)) + " lost"
+
+    def _ball(self, now):
+        g = self.game
+        if g.phase != "RALLY":
+            return None
+        if g.incoming is not None and g.incoming_leg is not None:
+            x, p, h = g.incoming_leg.position(now)
+            return x, max(0.0, min(1.0, p)), h
+        leg = g.outgoing_leg
+        if leg is not None and now <= leg.end_ns:
+            x, p, h = leg.position(now)
+            return x, max(0.0, min(1.0, 1.0 - p)), h
+        return None
+
+
+def _spin_text(top, side):
+    parts = []
+    if abs(top) > 0.15:
+        parts.append("TOPSPIN" if top > 0 else "BACKSPIN")
+    if abs(side) > 0.15:
+        parts.append("SIDESPIN R" if side > 0 else "SIDESPIN L")
+    return " ".join(parts)
+
+
+def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=None, client=None,
+                 source="live", scope="record_session", no_publish=False, seed=1, box=None,
+                 omega_lo=300.0, omega_hi=1200.0, t_pk=250.0):
+    clock = clock or FakeClock(start_ns=1_000_000_000)
+    box = box or DEFAULT_BOX
+    tracker = ScoreTracker(scope=scope)
+    publisher = ScorePublisher(client, scope=scope, source=source, no_publish=no_publish) if client else None
+    game = GameCore(judge=HitJudge(box, t_pk=t_pk), tracker=tracker, policy=CpuPolicy(random.Random(seed)),
+                    publisher=publisher, level=levels.LEVELS[level], mode=mode, target_points=target,
+                    omega_lo=omega_lo, omega_hi=omega_hi)
+    return Session(game, clock, actuator=actuator,
+                   mqtt_status=(lambda: "ok") if client is not None and not no_publish else None)
+
+
+def play_until_hits(session, n_hits, w_pk=600.0, dt=0.01, max_sim_s=300.0):
+    """A scripted perfect player on the session's (fake) clock; returns simulated seconds used."""
+    game, clock = session.game, session.clock
+    if game.phase in ("LOBBY", "MATCH_OVER"):
+        session.on_start()
+    t_begin, swung, step = clock.now_ns(), None, 0
+    while game.tracker.streak < n_hits and game.phase != "MATCH_OVER":
+        if (clock.now_ns() - t_begin) / S > max_sim_s:
+            raise RuntimeError("scripted player ran out of simulated time")
+        clock.advance_s(dt)
+        step += 1
+        now = clock.now_ns()
+        session.tick()
+        ball = game.incoming
+        if ball is None:
+            continue
+        if ball.t_c_ns - int(0.5 * S) <= now <= ball.t_c_ns + int(0.05 * S) and step % 3 == 0:
+            u, v = game.judge.box.to_uv(*ball.aim_ab)
+            session.on_pose(PaddlePose(t_scene_ns=now, u=u, v=v, conf=0.9, hand="right"))
+        if now >= ball.t_c_ns and swung != ball.ball_id:
+            swung = ball.ball_id
+            session.on_swing(SwingEvent(
+                kind="IMPACT", t_ns=ball.t_c_ns, w_pk=w_pk, dur_ms=150.0, n_reversals=0, axis_unit=(1, 0, 0),
+                net_rot_unit=(1, 0, 0), a_lin_unit=(0, 0, 1), clipped=False, feat=(0.0,) * 12))
+    return (clock.now_ns() - t_begin) / S
+
+
+def run_scripted(n_hits, *, level=1, client=None, source="live", seed=1, mode="survival"):
+    """Headless fake run: a perfect scripted player returns n_hits balls."""
+    from pingpong.sources_fake import FakeMqttClient
+
+    client = client if client is not None else FakeMqttClient()
+    session = make_session(level=level, client=client, source=source, seed=seed, mode=mode)
+    seconds = play_until_hits(session, n_hits)
+    return {"streak": session.game.tracker.streak, "record": session.game.tracker.record,
+            "sim_seconds": seconds, "client": client, "session": session}

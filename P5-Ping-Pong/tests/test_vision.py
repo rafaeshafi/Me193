@@ -1,0 +1,210 @@
+"""VisionWorker: camera frames -> lag-stamped, filtered paddle poses (+ tag events), via fakes."""
+
+import time
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+from pingpong import vision
+from pingpong.clock import FakeClock
+from pingpong.pose import PoseLock
+from pingpong.tags import Tag
+
+MS = 1_000_000
+W, H = 640, 360
+
+
+def body(sh=(0.6, 0.4), wrist=(0.30, 0.40), vis=0.95):
+    lm = [SimpleNamespace(x=0.5, y=0.5, visibility=0.0) for _ in range(33)]
+    lm[11] = SimpleNamespace(x=sh[0], y=0.4, visibility=vis)
+    lm[12] = SimpleNamespace(x=sh[1], y=0.4, visibility=vis)
+    lm[16] = SimpleNamespace(x=wrist[0], y=wrist[1], visibility=vis)
+    return lm
+
+
+class FakeCapture:
+    def __init__(self, ok=True, n=None):
+        self.ok, self.n, self.reads, self.released = ok, n, 0, False
+
+    def isOpened(self):
+        return self.ok
+
+    def read(self):
+        self.reads += 1
+        if not self.ok or (self.n is not None and self.reads > self.n):
+            return False, None
+        return True, np.full((H, W, 3), 90, dtype=np.uint8)
+
+    def release(self):
+        self.released = True
+
+
+class FakeLandmarker:
+    def __init__(self, clock=None, infer_ms=0.0, scripted=None):
+        self.clock, self.infer_ms, self.scripted, self.calls = clock, infer_ms, scripted, []
+
+    def detect_for_video(self, image, ts_ms):
+        self.calls.append(ts_ms)
+        if self.clock is not None and self.infer_ms:
+            self.clock.advance_s(self.infer_ms / 1000.0)
+        lm = self.scripted(len(self.calls) - 1) if self.scripted else body()
+        return SimpleNamespace(pose_landmarks=[lm] if lm is not None else [])
+
+
+class FakeTagDetector:
+    def __init__(self, ids=()):
+        self.ids, self.calls = ids, 0
+
+    def detect(self, frame):
+        self.calls += 1
+        return [Tag(i, ((0, 0),) * 4, (0.0, 0.0), 0.0) for i in self.ids]
+
+
+def make(clock=None, **kw):
+    clock = clock or FakeClock(start_ns=1_000_000_000)
+    cap = kw.pop("capture", FakeCapture())
+    lmk = kw.pop("landmarker", FakeLandmarker(clock))
+    worker = vision.VisionWorker(cap, lmk, clock=clock, to_image=lambda f: f, lag_s=kw.pop("lag_s", 0.10), **kw)
+    return worker, clock, cap, lmk
+
+
+def tick(worker, clock, dt=1 / 30):
+    clock.advance_s(dt)
+    return worker.step()
+
+
+def test_samples_are_stamped_at_capture_time_minus_the_measured_camera_lag():
+    worker, clock, *_ = make(lag_s=0.10)
+    tick(worker, clock)
+    sample = worker.snapshot()[-1]
+    assert sample.t_scene_ns == clock.now_ns() - 100 * MS
+    assert sample.hand == "right" and sample.conf == pytest.approx(0.95)
+    assert sample.u == pytest.approx(1.0)
+
+
+def test_the_snapshot_is_an_immutable_tuple_that_later_frames_do_not_mutate():
+    worker, clock, *_ = make()
+    for _ in range(3):
+        tick(worker, clock)
+    first = worker.snapshot()
+    assert isinstance(first, tuple) and len(first) == 3
+    for _ in range(3):
+        tick(worker, clock)
+    assert len(first) == 3 and len(worker.snapshot()) == 6
+
+
+def test_history_is_bounded():
+    worker, clock, *_ = make(history=8)
+    for _ in range(30):
+        tick(worker, clock)
+    assert len(worker.snapshot()) == 8
+
+
+def test_frames_without_a_person_add_no_samples_and_are_counted():
+    lmk = FakeLandmarker(scripted=lambda i: None)
+    worker, clock, *_ = make(landmarker=lmk)
+    for _ in range(5):
+        tick(worker, clock)
+    assert worker.snapshot() == () and worker.n_no_pose == 5
+
+
+def test_the_pose_lock_keeps_a_spectator_from_moving_the_paddle():
+    lock = PoseLock()
+    lock.calibrate(0.20 * W / W)                      # calibrated shoulder width: 20% of the frame
+    spectator = lambda i: body(sh=(0.675, 0.325))      # 35% of the frame: much closer to the camera  # noqa: E731
+    worker, clock, *_ = make(landmarker=FakeLandmarker(scripted=spectator), lock=lock)
+    for _ in range(4):
+        tick(worker, clock)
+    assert worker.snapshot() == () and worker.n_locked_out == 4
+
+
+def test_the_hand_path_is_smoothed_by_the_one_euro_filter():
+    import random
+    rng = random.Random(2)
+    jitter = lambda i: body(wrist=(0.30 + rng.gauss(0, 0.004), 0.40))        # noqa: E731
+    worker, clock, *_ = make(landmarker=FakeLandmarker(scripted=jitter))
+    for _ in range(120):
+        tick(worker, clock)
+    us = [p.u for p in worker.snapshot()[30:]]
+    assert max(us) - min(us) < 0.12                    # raw jitter would span ~0.3 shoulder widths
+
+
+def test_inference_latency_and_fps_are_reported():
+    clock = FakeClock(start_ns=1_000_000_000)
+    worker, _, *_ = make(clock=clock, landmarker=FakeLandmarker(clock, infer_ms=15.0))
+    for _ in range(40):
+        tick(worker, clock)
+    stats = worker.stats()
+    assert stats["infer_p50_ms"] == pytest.approx(15.0, abs=0.5)
+    assert 20 < stats["fps"] < 40
+
+
+def test_mediapipe_timestamps_strictly_increase_even_if_the_clock_stalls():
+    worker, clock, _, lmk = make()
+    worker.step()
+    worker.step()                                      # no clock advance between frames
+    assert lmk.calls[1] > lmk.calls[0]
+
+
+def test_tags_are_looked_for_only_in_the_lobby_and_at_most_ten_times_a_second():
+    det = FakeTagDetector(ids=())
+    phase = {"v": "RALLY"}
+    worker, clock, *_ = make(tag_detector=det, phase_fn=lambda: phase["v"])
+    for _ in range(30):
+        tick(worker, clock)
+    assert det.calls == 0
+    phase["v"] = "LOBBY"
+    for _ in range(30):                                # one second at 30 fps
+        tick(worker, clock)
+    assert 8 <= det.calls <= 11
+
+
+def test_a_held_start_card_becomes_a_start_event_and_a_flash_does_not():
+    det = FakeTagDetector(ids=(0,))
+    worker, clock, *_ = make(tag_detector=det, phase_fn=lambda: "LOBBY")
+    for _ in range(45):                                # 1.5 s of the card
+        tick(worker, clock)
+    events = worker.poll_tags()
+    assert [e.role for e in events] == ["START"]
+    det2 = FakeTagDetector(ids=(0,))
+    worker2, clock2, *_ = make(tag_detector=det2, phase_fn=lambda: "LOBBY")
+    for _ in range(6):                                 # 0.2 s flash
+        tick(worker2, clock2)
+    det2.ids = ()
+    for _ in range(20):
+        tick(worker2, clock2)
+    assert worker2.poll_tags() == []
+
+
+def test_a_failed_read_is_not_an_error_and_returns_false():
+    worker, clock, *_ = make(capture=FakeCapture(ok=False))
+    assert tick(worker, clock) is False
+
+
+def test_the_latest_frame_is_available_for_display():
+    worker, clock, *_ = make()
+    assert worker.latest_frame() is None
+    tick(worker, clock)
+    assert worker.latest_frame().shape == (H, W, 3)
+
+
+def test_the_thread_runs_and_stops_cleanly_and_releases_the_camera():
+    cap = FakeCapture()
+    worker = vision.VisionWorker(cap, FakeLandmarker(), to_image=lambda f: f, lag_s=0.1)
+    worker.start()
+    deadline = time.monotonic() + 3.0
+    while not worker.snapshot() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    worker.stop()
+    assert worker.snapshot() and cap.released is True
+    assert not worker._thread.is_alive()
+
+
+def test_pose_age_reports_how_stale_the_last_hand_reading_is():
+    worker, clock, *_ = make()
+    assert worker.pose_age_s(clock.now_ns()) is None
+    tick(worker, clock)
+    assert worker.pose_age_s(clock.now_ns()) == pytest.approx(0.0, abs=1e-9)
+    clock.advance_s(2.5)
+    assert worker.pose_age_s(clock.now_ns()) == pytest.approx(2.5)

@@ -1,0 +1,65 @@
+"""The real outside world for env_check and the bench tools (BLE, camera, broker).
+
+Imported lazily by tools so unit tests and --selftest never touch hardware.
+Each method matches pingpong.sources_fake.FakeEnv.
+"""
+
+import threading
+import time
+import uuid
+
+import config
+from pingpong.clock import Clock
+
+
+class RealEnv:
+    def __init__(self):
+        self.clock = Clock()
+
+    def sleep(self, seconds):
+        time.sleep(seconds)
+
+    def make_hub(self, notify_ms, card):
+        import legoeducation as le
+
+        from pingpong.hub import HubLink
+
+        return HubLink(le.DoubleMotor(), notify_ms=notify_ms, clock=self.clock, card=card)
+
+    def open_camera(self, index):
+        import cv2
+
+        return cv2.VideoCapture(index)
+
+    def mqtt_roundtrip(self, topic, timeout_s=5.0):
+        """Publish a unique token to `topic` and wait for the broker to echo it; -> RTT ms or None."""
+        import paho.mqtt.client as mqtt
+
+        token = uuid.uuid4().hex
+        got = threading.Event()
+        sent = {}
+
+        def on_connect(client, userdata, flags, reason_code, properties=None):
+            client.subscribe(topic, qos=1)
+
+        def on_subscribe(client, userdata, mid, reason_codes, properties=None):
+            sent["t0"] = time.monotonic()
+            client.publish(topic, token, qos=1, retain=False)
+
+        def on_message(client, userdata, msg):
+            if msg.payload.decode(errors="replace") == token:
+                sent["rtt_ms"] = (time.monotonic() - sent["t0"]) * 1000.0
+                got.set()
+
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="pp-check-" + uuid.uuid4().hex[:8])
+        client.on_connect, client.on_subscribe, client.on_message = on_connect, on_subscribe, on_message
+        try:
+            client.connect(config.BROKER_HOST, config.BROKER_PORT, config.KEEPALIVE_S)
+        except OSError:
+            return None
+        client.loop_start()
+        try:
+            return sent.get("rtt_ms") if got.wait(timeout_s) else None
+        finally:
+            client.loop_stop()
+            client.disconnect()

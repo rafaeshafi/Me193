@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# ./pp <command> [args]  -- always runs the project's own venv python.
+# Never type bare `python` here: the system python has no cv2/mediapipe/legoeducation.
+set -euo pipefail
+cd "$(dirname "$0")"
+PY=my_env/bin/python
+if [ ! -x "$PY" ]; then
+  echo "my_env is missing. Rebuild it with:" >&2
+  echo "  python3.12 -m venv my_env && my_env/bin/pip install -r requirements.txt" >&2
+  exit 1
+fi
+
+cmd="${1:-help}"
+[ $# -gt 0 ] && shift
+
+case "$cmd" in
+  env_check|scan_hubs|reset_hub|bench_hub|bench_cam|bench_haptics|make_cards|calibrate_swing|watch_score|republish_best|sim|report)
+    if [ ! -f "tools/$cmd.py" ]; then echo "tools/$cmd.py is not built yet" >&2; exit 1; fi
+    exec "$PY" "tools/$cmd.py" "$@"
+    ;;
+  play)
+    if [ ! -f play.py ]; then echo "play.py is not built yet" >&2; exit 1; fi
+    exec caffeinate -dims "$PY" play.py "$@"      # keep the display awake during play/soak
+    ;;
+  ready)
+    # The gate every student block starts from: imports, unit tests, every tool's --selftest.
+    echo "== imports =="
+    "$PY" -c "import mediapipe, cv2, legoeducation, bleak, paho.mqtt.client, sounddevice, sklearn; assert cv2.aruco.DICT_APRILTAG_36h11; print('imports OK')"
+    echo "== pytest =="
+    "$PY" -m pytest -q
+    echo "== tool selftests =="
+    for t in tools/*.py; do
+      if grep -q -- "--selftest" "$t"; then "$PY" "$t" --selftest; fi
+    done
+    "$PY" play.py --selftest
+    echo "READY"
+    ;;
+  help|*)
+    cat <<'EOF'
+./pp env_check [--card-color C --card-serial NNNN] [--skip camera,mqtt,hub]   first contact with the hardware
+./pp scan_hubs                      find your hub's card colour + serial (passive BLE scan)
+./pp make_cards                     (re)generate the printable AprilTag cards in docs/cards/
+./pp ready                          imports + pytest + every tool --selftest (run before each block)
+./pp play [...]                     the game (not built yet)
+Camera and Bluetooth tools must be run from Terminal.app, not from the Claude app.
+EOF
+    ;;
+esac
