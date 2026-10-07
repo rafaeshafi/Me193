@@ -47,6 +47,9 @@ class ReplayHub:
     def is_stale(self, threshold_ms):
         return self.last_rx_ns is None or (self._clock.now_ns() - self.last_rx_ns) / 1e6 > threshold_ms
 
+    def battery_pct(self):
+        return None
+
     def reconnect(self):
         pass                                       # the recording is what it is
 

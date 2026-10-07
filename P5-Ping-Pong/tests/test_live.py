@@ -33,6 +33,9 @@ class Hub:
         age = self.stale_ms()
         return age is None or age > threshold_ms
 
+    def battery_pct(self):
+        return None
+
     def reconnect(self):
         self.reconnects += 1
         self.log.append("hub.reconnect")
