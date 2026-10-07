@@ -13,11 +13,12 @@ from pingpong.swing import SwingDetector
 
 
 class ImuWorker:
-    def __init__(self, samples, detector, shake=None, recorder=None):
+    def __init__(self, samples, detector, shake=None, recorder=None, log=print):
         self.samples = samples                       # queue.SimpleQueue of ImuSample (HubLink.imu)
         self.detector = detector
         self.shake = shake                           # optional ShakeMonitor (judge gate J6)
         self.recorder = recorder                     # optional Recorder: gets every raw sample
+        self.log = log
         self._events = queue.SimpleQueue()
         self._locks = queue.SimpleQueue()
         self._lock = threading.RLock()
@@ -88,7 +89,7 @@ class ImuWorker:
             try:
                 self._feed(sample)
             except Exception as exc:                 # a bad sample must not kill the detector thread
-                print(f"imu worker: {exc}")
+                self.log(f"imu worker: {exc}")
 
     def stop(self):
         self._stop.set()

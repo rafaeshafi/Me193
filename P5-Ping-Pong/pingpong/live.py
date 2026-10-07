@@ -331,7 +331,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         stale_ms=config.STALE_MS if stale_ms is None else stale_ms, no_motor=no_motor, learn=learner is not None,
         overrides=overrides, clock=clock)
     imu = ImuWorker(hub.imu if pose_gyro is None else queue.SimpleQueue(), SwingDetector(params), shake=shake,
-                    recorder=recorder)
+                    recorder=recorder, log=log)
     actuator = None                                      # no hub (--no-hub): no haptics, the sounds carry the cues
     if getattr(hub, "dev", None) is not None:
         # a pulse blanks the hub's gyro (the motors shake it); the camera does not feel the motors
@@ -350,7 +350,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
             lock.calibrate(calibration.shoulder_w)
         vision = VisionWorker(capture, landmarker, clock=clock, hand=calibration.hand, lag_s=lag_s,
                               tag_detector=tag_detector, phase_fn=lambda: session.game.phase, lock=lock,
-                              to_image=to_image)
+                              to_image=to_image, log=log)
     rig = LiveRig(session, hub=hub, imu=imu, vision=vision, actuator=actuator,
                   mqtt_client=mqtt_client if publishing else None, clock=clock, threaded=threaded,
                   stale_ms=stale_ms, recorder=recorder, pose_gyro=pose_gyro,

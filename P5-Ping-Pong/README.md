@@ -203,7 +203,8 @@ swing strength, how often the computer misses a ball, how often you would fault,
 play.py  config.py  pp  requirements.txt  README.md
 pingpong/   the game: sensing (hub, imu_worker, swing, shake, vision, pose, tags), game (judge, shot, physics,
             rules, policy, pd, qbandit, levels, spin), output (haptics, feedback, audio, hud, canvas), glue (live, app, profile,
-            spinflow, store, recorder, replay, sessionreport, fakerig, sources_fake)
+            spinflow, store, recorder, replay, sessionreport, overrides, livebuild, posegyro, fakerig, threadrig,
+            sources_fake)
 tools/      scan_hubs  env_check  bench_hub  bench_cam  bench_haptics  calibrate_swing  reset_hub
             report  replay  train_spin  sim  watch_score  republish_best  make_cards
 tests/      one file per module; the whole pipeline also runs on fake hardware (test_fakerig.py)
@@ -213,7 +214,9 @@ data/ recordings/ calibration*.json config_local.json   (never committed: player
 
 `./pp ready` runs the import check, every test and every tool's `--selftest`, all without hardware.
 The same scripted player that tests the game also plays through the *real* HubLink parser, swing
-detector, vision worker, tag voter and haptics on a simulated clock (`./pp play --selftest`).
+detector, vision worker, tag voter and haptics on a simulated clock (`./pp play --selftest`), and
+`tests/test_threadrig.py` plays it again in real time with the real threads (a notifier thread at 66 Hz, a camera
+thread blocking at 30 fps, the IMU and actuator workers), which is what finds deadlocks and races.
 
 ## Questions
 

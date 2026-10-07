@@ -13,6 +13,7 @@ the hub or hide the player to exercise the pause logic.
 
 import math
 import random
+import threading
 
 from pingpong import live, posegyro
 from pingpong.clock import FakeClock
@@ -61,6 +62,7 @@ class ScriptedPlayer:
         self.box, self.w_pk, self.swing_s, self.timing_s = box, w_pk, swing_s, timing_s
         self.pose_motion, self.swing_dir = pose_motion, swing_dir    # camera mode: the hand itself makes the stroke
         self.wave_windows = []                                       # (start_s, stop_s) since rig start: a 5 Hz hand wave
+        self._lock = threading.RLock()                               # the real-time rig has a thread per sensor
         self.cards = [(round(a * S), round(b * S), tag) for a, b, tag in cards]    # relative to rig start
         self.origin_ns = 0
         self._segments = [(0, 0, rest_uv, rest_uv)]          # (t0, t1, from_uv, to_uv)
@@ -71,19 +73,20 @@ class ScriptedPlayer:
 
     # --- decisions (called every step with the game state) -------------------------------------------
     def watch(self, game, now_ns):
-        self._now = now_ns
-        ball = game.incoming
-        if ball is None or game.paused:
-            return
-        peak = ball.t_c_ns + round(self.timing_s * S)
-        planned = self._peaks.get(ball.ball_id)
-        if planned == peak:
-            return
-        if planned is None:                                  # first sight of this ball: head for its arrival point
-            glide = min(0.43, 0.5 * max(0.0, (ball.t_c_ns - now_ns) / S))
-            self._segments.append((now_ns, now_ns + round(glide * S), self._base_uv(now_ns),
-                                   self.box.to_uv(*ball.aim_ab)))
-        self._peaks[ball.ball_id] = peak                     # (re)plan the swing: a pause moves t_c
+        with self._lock:
+            self._now = now_ns
+            ball = game.incoming
+            if ball is None or game.paused:
+                return
+            peak = ball.t_c_ns + round(self.timing_s * S)
+            planned = self._peaks.get(ball.ball_id)
+            if planned == peak:
+                return
+            if planned is None:                              # first sight of this ball: head for its arrival point
+                glide = min(0.43, 0.5 * max(0.0, (ball.t_c_ns - now_ns) / S))
+                self._segments.append((now_ns, now_ns + round(glide * S), self._base_uv(now_ns),
+                                       self.box.to_uv(*ball.aim_ab)))
+            self._peaks[ball.ball_id] = peak                 # (re)plan the swing: a pause moves t_c
 
     @property
     def n_swings(self):
@@ -91,8 +94,9 @@ class ScriptedPlayer:
         return sum(1 for peak in self._peaks.values() if peak <= self._now)
 
     def add_vibration(self, start_ns):
-        if all(abs(start_ns - v) > 1_000_000 for v in self._vibrations):    # both motors of one pulse: once
-            self._vibrations.append(start_ns)
+        with self._lock:
+            if all(abs(start_ns - v) > 1_000_000 for v in self._vibrations):    # both motors of one pulse: once
+                self._vibrations.append(start_ns)
 
     # --- what the sensors see ------------------------------------------------------------------------
     def _base_uv(self, t_ns):
@@ -103,11 +107,12 @@ class ScriptedPlayer:
         return self._segments[0][2]
 
     def hand_uv(self, t_ns):
-        u, v = self._base_uv(t_ns)
-        if not self.pose_motion:
-            return u, v
-        travel = self._travel(t_ns)
-        return u + travel * self.swing_dir[0], v + travel * self.swing_dir[1]
+        with self._lock:
+            u, v = self._base_uv(t_ns)
+            if not self.pose_motion:
+                return u, v
+            travel = self._travel(t_ns)
+            return u + travel * self.swing_dir[0], v + travel * self.swing_dir[1]
 
     def _travel(self, t_ns):
         """Camera mode: how far along the swing direction the hand is off its glide (strokes, then waves)."""
@@ -122,17 +127,18 @@ class ScriptedPlayer:
 
     def imu(self, t_ns):
         """Raw hub reading (ax, ay, az, gx, gy, gz): half-sine pulses on the forward (x) gyro axis."""
-        gx = 0.0
-        for peak in self._peaks.values():
-            gx += self._pulse(t_ns, peak - self.swing_s / 2 * S, self.w_pk)
-        for start in self._vibrations:
-            gx += self._pulse(t_ns, start + 0.010 * S, VIBRATION_DPS)
-        gy = 0.0
-        rel = (t_ns - self.origin_ns) / S
-        for a, b in self.shake_windows:
-            if a <= rel < b:
-                gy += SHAKE_DPS * math.sin(2 * math.pi * 5.0 * (rel - a))
-        return 0, 0, GRAVITY, round(gx * GPD), round(gy * GPD), 0
+        with self._lock:
+            gx = 0.0
+            for peak in self._peaks.values():
+                gx += self._pulse(t_ns, peak - self.swing_s / 2 * S, self.w_pk)
+            for start in self._vibrations:
+                gx += self._pulse(t_ns, start + 0.010 * S, VIBRATION_DPS)
+            gy = 0.0
+            rel = (t_ns - self.origin_ns) / S
+            for a, b in self.shake_windows:
+                if a <= rel < b:
+                    gy += SHAKE_DPS * math.sin(2 * math.pi * 5.0 * (rel - a))
+            return 0, 0, GRAVITY, round(gx * GPD), round(gy * GPD), 0
 
     def _pulse(self, t_ns, start_ns, peak_dps):
         x = (t_ns - start_ns) / (self.swing_s * S)
