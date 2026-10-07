@@ -99,6 +99,47 @@ def _longest_run(values, target):
     return best
 
 
+def _clip_stats(max_takes, channel):
+    """Largest raw value on the gyro ("g") or accelerometer ("a") in the max-effort takes, and whether it plateaus."""
+    peaks = [(int(np.max(np.abs([getattr(s, channel)[k] for s in take]))), k, take)
+             for take in max_takes for k in range(3)]
+    top = max(p[0] for p in peaks)
+    run = 0
+    for value, k, take in peaks:
+        if value == top:
+            run = max(run, _longest_run([abs(getattr(s, channel)[k]) for s in take], top))
+    return {"max_raw": top, "plateau": run >= 3, "fs_raw": top if run >= 3 else None}
+
+
+def _quiet_accel(takes, quiet_dps=12.0, min_s=0.3, min_windows=6):
+    """Counts per g from every moment the hub lay still (gyro quiet for 0.3 s) in ANY take: at rest |a| = 1 g."""
+    magnitudes = []
+    for label_takes in takes.values():
+        for take in label_takes:
+            g = np.array([s.g for s in take], dtype=float)
+            a = np.array([s.a for s in take], dtype=float)
+            t = np.array([s.t_ns for s in take], dtype=float) / 1e9
+            if len(t) < 3:
+                continue
+            still = np.linalg.norm(g, axis=1) < quiet_dps            # the gyro's rest offset is a few counts at most
+            i = 0
+            while i < len(t):
+                if not still[i]:
+                    i += 1
+                    continue
+                j = i
+                while j + 1 < len(t) and still[j + 1]:
+                    j += 1
+                if t[j] - t[i] >= min_s:
+                    magnitudes.append(float(np.linalg.norm(a[i:j + 1].mean(axis=0))))
+                i = j + 1
+    if len(magnitudes) < min_windows:
+        return None
+    mean = float(np.median(magnitudes))
+    cv = float(np.std(magnitudes) / mean) if mean else float("inf")
+    return {"accel_per_g": mean, "cv": cv, "ok": cv <= 0.03, "source": f"{len(magnitudes)} quiet moments"}
+
+
 def analyse(takes):
     """Pure analysis of recorded takes -> measurements (only for the labels present)."""
     m = {}
@@ -106,7 +147,11 @@ def analyse(takes):
         m["rate"] = benchstats.rate_stats([s.t_ns for s in takes["rate"][0]])
     if takes.get("faces"):
         means = [tuple(float(np.mean([s.a[k] for s in take])) for k in range(3)) for take in takes["faces"]]
-        m["accel"] = benchstats.accel_scale_from_faces(means)
+        m["accel"] = dict(benchstats.accel_scale_from_faces(means), source="the six faces")
+        if not m["accel"]["ok"]:                             # the faces were not still (it is hard to flip a hub in 1 s)
+            quiet = _quiet_accel(takes)
+            if quiet is not None and quiet["ok"]:
+                m["accel"] = quiet
     if takes.get("turns"):
         scales = []
         for take in takes["turns"]:
@@ -118,14 +163,10 @@ def analyse(takes):
         spread = (max(scales) - min(scales)) / mean if mean else float("inf")
         m["gyro"] = {"gyro_per_dps": mean, "spread": spread, "ok": len(scales) >= 2 and spread <= 0.05}
     if takes.get("max"):
-        peaks = [(int(np.max(np.abs([s.g[k] for s in take]))), k, take, "g") for take in takes["max"] for k in range(3)]
-        peaks += [(int(np.max(np.abs([s.a[k] for s in take]))), k, take, "a") for take in takes["max"] for k in range(3)]
-        top = max(p[0] for p in peaks)
-        run = 0
-        for value, k, take, kind in peaks:
-            if value == top:
-                run = max(run, _longest_run([abs(getattr(s, kind)[k]) for s in take], top))
-        m["clip"] = {"max_raw": top, "plateau": run >= 3, "fs_raw": top if run >= 3 else None}
+        # HUB_FS_RAW is the GYRO's full scale (the swing detector's clip flag): the real hub's accelerometer
+        # saturates at 8011 (~8 g) in a hard swing, which says nothing about the gyro, so they are judged apart.
+        m["clip"] = _clip_stats(takes["max"], "g")
+        m["accel_clip"] = _clip_stats(takes["max"], "a")
     return m
 
 
@@ -154,7 +195,7 @@ def report(m):
                      f"-> {benchstats.rate_verdict(r['hz'])}")
     if "accel" in m:
         a = m["accel"]
-        lines.append(f"accel  : {a['accel_per_g']:.1f} counts/g, face spread {a['cv'] * 100:.1f}% "
+        lines.append(f"accel  : {a['accel_per_g']:.1f} counts/g from {a.get('source', 'the six faces')}, spread {a['cv'] * 100:.1f}% "
                      f"-> {'OK' if a['ok'] else 'NOT TRUSTED (>3%): rest the hub flat and still, re-run --only faces'}")
     if "gyro" in m:
         g = m["gyro"]
@@ -162,7 +203,9 @@ def report(m):
                      f"-> {'OK' if g['ok'] else 'NOT TRUSTED (>5%): turn smoothly and exactly 360 degrees, re-run --only turns'}")
     if "clip" in m:
         c = m["clip"]
-        lines.append(f"clip   : max raw {c['max_raw']}, plateau {'YES -> HUB_FS_RAW saved' if c['plateau'] else 'no (no clipping seen)'}")
+        lines.append(f"clip   : gyro max raw {c['max_raw']}, plateau {'YES -> HUB_FS_RAW saved' if c['plateau'] else 'no (the gyro did not clip)'}")
+    if m.get("accel_clip", {}).get("plateau"):
+        lines.append(f"         the accelerometer saturates at {m['accel_clip']['max_raw']} (about 8 g): fine, nothing uses that range")
     return lines
 
 

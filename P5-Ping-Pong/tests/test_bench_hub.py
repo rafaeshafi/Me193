@@ -113,3 +113,49 @@ def test_a_new_step_gives_time_to_get_into_position_and_later_takes_only_a_breat
     assert waits[2] == pytest.approx(1.0, abs=0.01)          # the next take of the same step: just a breath
     assert any("rate" in line for line in said) and any("get into position" in line for line in said)
     assert [c[0] for c in link.dev.calls].count("beep") == 3  # one GO beep per take
+
+
+# --- found on the first real run -----------------------------------------------------------------------------------------------
+def test_an_accelerometer_that_saturates_does_not_make_the_gyro_look_clipped():
+    # the real hub's accelerometer tops out at 8011 (about 8 g) in a max-effort swing; its gyro never came near full scale
+    takes = good_takes()
+    takes["max"] = [stream(64, 2.5, lambda t, k=k: (0, 0, 8011 if 1.0 <= t < 1.2 else 1000,
+                                                    (900 + 40 * k) if 1.0 <= t < 1.02 else 0, 0, 0)) for k in range(10)]
+    m = bench_hub.analyse(takes)
+    assert m["clip"]["plateau"] is False and m["clip"]["fs_raw"] is None       # the gyro did not clip
+    assert m["accel_clip"]["plateau"] is True and m["accel_clip"]["max_raw"] == 8011
+    assert any("accel" in line and "8011" in line for line in bench_hub.report(m))
+
+
+def test_the_gyro_is_still_reported_clipped_when_the_gyro_really_plateaus():
+    m = bench_hub.analyse(good_takes(peak=2000))                               # gx flat at 2000 for several samples
+    assert m["clip"]["plateau"] is True and m["clip"]["fs_raw"] == 2000
+
+
+def rest_take(a_magnitude, still_s=0.8, hz=64):
+    """A swing take as recorded for real: at rest for the first moments, then moving."""
+    return stream(hz, 2.5, lambda t: (0, 0, round(a_magnitude), 0, 0, 0) if t < still_s else
+                  (round(500 * (t % 0.3)), round(300 * (t % 0.2)), 900, 400 + round(200 * (t % 0.1)), -300, 200))
+
+
+def moving_faces():
+    """Six face takes of a hub that was being flipped: every face reads a different |a|."""
+    scales = (0.55, 0.8, 1.0, 1.3, 0.7, 1.1)
+    return [stream(60, 1.5, lambda t, v=v, k=k: (round(v[0] * k), round(v[1] * k), round(v[2] * k), 90, 80, 70))
+            for v, k in zip(FACES, scales)]
+
+
+def test_the_accelerometer_scale_comes_from_quiet_moments_when_the_face_takes_were_not_still():
+    m = bench_hub.analyse({"faces": moving_faces(), "soft": [rest_take(1017.0 + 6 * i) for i in range(8)]})
+    assert m["accel"]["ok"] and m["accel"]["accel_per_g"] == pytest.approx(1035.0, abs=25.0)
+    assert "quiet" in m["accel"]["source"]
+
+
+def test_too_few_quiet_moments_leave_the_scale_untrusted():
+    m = bench_hub.analyse({"faces": moving_faces(), "soft": [rest_take(1017.0) for _ in range(3)]})
+    assert m["accel"]["ok"] is False
+
+
+def test_faces_that_were_still_are_used_as_before():
+    m = bench_hub.analyse(good_takes())
+    assert m["accel"]["ok"] and "faces" in m["accel"]["source"]
