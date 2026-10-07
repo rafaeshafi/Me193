@@ -35,20 +35,51 @@ Each folder is a self-contained Arduino App (`app.yaml`, `python/`, `sketch/`) a
 opened/checked into Arduino App Lab independently, or run side by side (only one app
 runs on the board at a time, so pick whichever you want active).
 
-## Missing piece: the laptop tracker
+## Laptop tracker: YOLOv8 minifig detector
 
-Both apps' Python code and READMEs reference a laptop-side script,
-`laptop-minifig-tracker/live_tracker.py`, which does the actual camera-based color
-tracking of the green minifig and publishes the `minifig/centroid` MQTT messages.
-That script was **not found** on the board or in the `rafaeshafi/Me193` GitHub repo —
-it needs to be copied in here separately (e.g. as `laptop-minifig-tracker/live_tracker.py`
-alongside these two app folders) before this pipeline can run end to end.
+The `laptop-minifig-tracker/` folder contains a fine-tuned YOLOv8 model that detects
+the green LEGO minifig in the webcam feed and publishes its centroid over MQTT.
 
-## Running
+**Files:**
+- `live_tracker.py` — Main detector; runs live inference and publishes MQTT messages
+- `train.py` — Fine-tuning script (trains on your dataset, saves weights to `runs/detect/`)
+- `dataset/` — Roboflow YOLOv8 export (~50 labeled minifig images)
+- `requirements.txt` — Python dependencies
 
-1. On the laptop: `cd laptop-minifig-tracker && python live_tracker.py`
-2. On the board: start `minifig-motor-follower` (and/or `minifig-dot-display`) from
-   Arduino App Lab.
+## Setup & Running
+
+### Quick start (use pre-trained weights):
+
+```bash
+cd laptop-minifig-tracker
+pip install -r requirements.txt
+python live_tracker.py
+```
+
+The script will open a preview window showing the bounding box, centroid marker, and confidence.
+Press `q` to quit. By default, it publishes to `test.mosquitto.org` (change with `--mqtt-host`).
+
+### Re-train on your own data:
+
+```bash
+cd laptop-minifig-tracker
+
+# Export your labeled images from Roboflow as YOLOv8 format and unzip into "dataset/"
+# (must contain data.yaml at the root)
+
+python train.py
+# Trains for 100 epochs on Apple Silicon (or CPU fallback)
+# Saves weights to runs/detect/green_minifig-2/weights/best.pt
+```
+
+### Connect to the board:
+
+1. Start the tracker on your laptop:
+   ```bash
+   python live_tracker.py --mqtt-host <UNO_Q_IP>
+   ```
+2. Start `minifig-motor-follower` from Arduino App Lab on the UNO Q
+3. Move the minifig around—the robot should follow!
 
 ## Wiring (motor follower)
 

@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['Green Mini Figure']
+
+roboflow:
+  workspace: rafaeshafi-icloud-com
+  project: yolo-38cfg
+  version: 2
+  license: Private
+  url: https://app.roboflow.com/rafaeshafi-icloud-com/yolo-38cfg/2
