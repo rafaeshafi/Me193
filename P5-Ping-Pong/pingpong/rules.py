@@ -93,6 +93,7 @@ class GameCore:
             if self._cpu_at is not None and now_ns >= self._cpu_at:
                 return self._cpu_response(self._cpu_at)
             if self.incoming is not None and data_ns > self.judge.miss_deadline_ns(self.incoming):
+                self._observe(1.0, True)                                  # the player failed to return the ball
                 return [GameEvent("miss", now_ns, {"ball_id": self.incoming.ball_id})] + self._end_rally("miss", now_ns)
         return []
 
@@ -183,6 +184,7 @@ class GameCore:
             topspin=sp.T, sidespin=sp.S, fault=sp.fault)
         data = {"label": sp.label, "v_out": sp.v_out, "kmh": shotmod.kmh(sp.v_out), "topspin": sp.T,
                 "sidespin": sp.S, "q_total": sp.q_total, "gates": verdict.gates, "e_s": verdict.e_s}
+        self._observe(1.0 if sp.fault else 0.5 * (1.0 - sp.q_total), bool(sp.fault))
         if sp.fault:
             events = [GameEvent("fault", now_ns, dict(data, fault=sp.fault))]
             return events + self._end_rally("fault", now_ns)
@@ -197,6 +199,11 @@ class GameCore:
         self._out_shot, self._cpu_at = sp, self.outgoing_leg.arrival_ns
         return events
 
+    def _observe(self, reward, terminal):
+        observe = getattr(self.policy, "observe", None)
+        if observe is not None:
+            observe(reward, terminal)
+
     # --- rally / match bookkeeping ----------------------------------------------------------------
     def _end_rally(self, reason, now_ns):
         final = self.tracker.end_rally()
@@ -208,6 +215,7 @@ class GameCore:
                                                   "record": self.tracker.record})]
         if self.mode == "survival":
             self.phase = "MATCH_OVER"
+            self._end_game()
             events.append(GameEvent("game_over", now_ns, {"streak": final, "record": self.tracker.record,
                                                           "reason": reason}))
             return events
@@ -221,12 +229,18 @@ class GameCore:
         winner = self._winner()
         if winner:
             self.phase = "MATCH_OVER"
+            self._end_game()
             events.append(GameEvent("match_over", now_ns, {"winner": winner, "player_points": self.player_points,
                                                            "cpu_points": self.cpu_points}))
         else:
             self.phase = "POINT_OVER"
             self.point_over_until_ns = now_ns + round(self.point_pause_s * S)
         return events
+
+    def _end_game(self):
+        end_game = getattr(self.policy, "end_game", None)
+        if end_game is not None:
+            end_game()
 
     def _winner(self):
         p, c, target = self.player_points, self.cpu_points, self.target_points

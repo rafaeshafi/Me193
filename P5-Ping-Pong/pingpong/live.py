@@ -27,7 +27,7 @@ from pathlib import Path
 
 import sqlite3
 
-from pingpong import app, mqtt_link, profile, spin
+from pingpong import app, mqtt_link, profile, qbandit, spin
 from pingpong import recorder as recorder_mod
 from pingpong import store as store_mod
 from pingpong.haptics import Actuator, ActuatorCore
@@ -57,6 +57,7 @@ class LiveRig:
                  max_reconnects=MAX_RECONNECTS, recorder=None, log=print):
         self.session, self.hub, self.imu, self.vision = session, hub, imu, vision
         self.recorder, self.store, self.audio = recorder, None, None    # store + audio are attached by build_live
+        self.closers = []                                               # extra (name, callable) teardown steps
         self._seen = {"phase": None, "pauses": None, "hub": None}
         self.actuator, self.mqtt_client, self.clock = actuator, mqtt_client, clock
         self.threaded, self.log = threaded, log
@@ -98,6 +99,7 @@ class LiveRig:
             steps.append(("recorder", self.recorder.close))
         if self.store is not None:
             steps.append(("store", self.store.close))
+        steps += self.closers
         if self.mqtt_client is not None and self.session.game.publisher is not None:
             steps.append(("mqtt", lambda: mqtt_link.shutdown(self.mqtt_client, self.session.game.publisher)))
         steps.append(("hub", self.hub.close))
@@ -271,7 +273,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
              mode="survival", target=7, seed=1, source="live", scope=None, no_publish=False, no_motor=False,
              threaded=False, lag_s=None, gyro_per_dps=None, accel_per_g=None, fs_raw=None, stale_ms=None,
              to_image=None, record_dir=None, player="rafae", vision=None, recorder=None, spin_probs_fn=None,
-             log=print):
+             learner=None, log=print):
     """Wire every piece into one LiveRig.  The real play.py and the fake rig both come through here,
     so the wiring that matters on hardware (haptic blank windows, phase-gated tag search, the pose
     lock, status lights) is exactly the wiring the tests run."""
@@ -284,7 +286,8 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         record_dir, log, source=source, player=player, seed=seed, level=level, mode=mode, target=target,
         scope=scope or config.RECORD_SCOPE, t0_ns=clock.now_ns(), calibration=calibration, gyro_per_dps=gpd,
         accel_per_g=apg, fs_raw=fs, lag_s=config.CAMERA_LAG_S if lag_s is None else lag_s,
-        stale_ms=config.STALE_MS if stale_ms is None else stale_ms, no_motor=no_motor, clock=clock)
+        stale_ms=config.STALE_MS if stale_ms is None else stale_ms, no_motor=no_motor, learn=learner is not None,
+        clock=clock)
     imu = ImuWorker(hub.imu, SwingDetector(params), shake=shake, recorder=recorder)
     core = ActuatorCore(hub.dev, clock=clock, no_motor=no_motor, on_blank=imu.blank)   # the pulse blanks the IMU
     actuator = Actuator(core, log=log) if threaded else core
@@ -293,7 +296,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         level=level, mode=mode, target=target, clock=clock, actuator=actuator,
         client=mqtt_client if publishing else None, source=source, scope=scope or config.RECORD_SCOPE,
         no_publish=no_publish, seed=seed, box=calibration.box, omega_lo=calibration.swing.omega_lo,
-        omega_hi=calibration.swing.omega_hi, t_pk=params.t_pk, spin_probs_fn=spin_probs_fn)
+        omega_hi=calibration.swing.omega_hi, t_pk=params.t_pk, spin_probs_fn=spin_probs_fn, learner=learner)
     if vision is None:
         lock = PoseLock()
         if calibration.shoulder_w:
@@ -366,6 +369,13 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
     except ValueError as exc:                                     # a damaged model file: say so, play without spin
         log(f"spin disabled: {exc}")
         model = None
+    learner = None
+    if args.learn:
+        try:
+            learner = qbandit.load_for(args.player, root=player_root) or qbandit.QBandit()
+        except ValueError as exc:
+            log(f"learning starts afresh: {exc}")
+            learner = qbandit.QBandit()
     hub = env.make_hub(config.NOTIFY_MS, card)
     try:
         hub.connect()
@@ -385,13 +395,15 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
             level=args.level, mode=args.mode, target=args.target, seed=args.seed, source="live",
             no_publish=no_publish, no_motor=args.no_motor, threaded=env.threaded,
             to_image=getattr(env, "to_image", None), record_dir=record_dir, player=args.player,
-            spin_probs_fn=None if model is None else model.probs, log=log)
+            spin_probs_fn=None if model is None else model.probs, learner=learner, log=log)
     except BaseException:
         if capture is not None:
             capture.release()
         hub.close()
         raise
     rig.calibration, rig.player, rig.session.player = calibration, args.player, args.player
+    if learner is not None:
+        rig.closers.append(("learner", lambda: qbandit.save_for(args.player, learner, root=player_root)))
     if not args.no_audio:
         rig.audio = rig.session.audio = env.make_audio()
         rig.audio.start()

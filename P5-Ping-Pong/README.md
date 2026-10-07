@@ -79,6 +79,7 @@ The card is saved in `config_local.json` after `env_check` connects (or pass
 ```bash
 ./pp play --player rafae                 # live: hub + camera + tags, scores to the broker
 ./pp play --player rafae --level 2 --mode match --target 7
+./pp play --player rafae --learn         # the computer learns where you fail (Q-learning, kept between games)
 ./pp play --player guest                 # no saved calibration; never publishes the score
 ./pp play --fake                         # no hardware: mouse is the paddle, SPACE/J/K swing
 ./pp play --no-publish --no-motor        # rehearse without the broker / without motor pulses
@@ -177,7 +178,7 @@ swing strength, how often the computer misses a ball, how often you would fault,
 ```
 play.py  config.py  pp  requirements.txt  README.md
 pingpong/   the game: sensing (hub, imu_worker, swing, shake, vision, pose, tags), game (judge, shot, physics,
-            rules, policy, levels, spin), output (haptics, feedback, audio, hud, canvas), glue (live, app, profile,
+            rules, policy, qbandit, levels, spin), output (haptics, feedback, audio, hud, canvas), glue (live, app, profile,
             spinflow, store, recorder, replay, sessionreport, fakerig, sources_fake)
 tools/      scan_hubs  env_check  bench_hub  bench_cam  bench_haptics  calibrate_swing  reset_hub
             report  replay  train_spin  sim  watch_score  republish_best  make_cards
@@ -244,9 +245,10 @@ continuous hits goes to MQTT whenever it improves.
 | PD controller | `policy.py` | Its command is Kp·error + Kd·error rate, saturated at a per-level speed after a reaction delay. Whether the computer reaches a ball is physical, not a coin flip. |
 | Softmax (Boltzmann) policy | `policy.py` | Each of nine target zones gets a utility and is sampled ∝ exp(utility / temperature). Lower temperature plays sharper at higher levels. |
 | StandardScaler + Logistic Regression | `spin.py`, `spinflow.py` | It standardises 12 swing features (the unit directions of the gyro peak, the net rotation and the linear acceleration, plus peak rate, duration and backswing ratio) and learns a linear softmax boundary between flat, top and back from my own labelled swings. The three probabilities become continuous topspin or backspin, and the model only ships if its cross-validated accuracy is at least 75%. |
+| Tabular Q-learning (opt-in, `--learn`) | `qbandit.py`, `policy.py` | It keeps Q(s,a) for nine states (my hand's third of the reach box × the column of the zone it served last) and nine target zones, and after every ball updates Q += α(r + γ·max Q' − Q) with reward 1 when I miss or fault. The computer adds Q to its softmax utility with a weight that grows with the level, so it learns to serve where I am weakest. |
 | Cross-correlation | `benchstats.py` | Wrist speed from the camera is correlated against gyro magnitude over a hand wave to find how much later the camera sees the same motion. That lag aligns the two sensors. |
 
-Not built (so not claimed): a Q-learning opponent. See `docs/PLAN.md`.
+Everything in this table is built and tested. The two *learned* pieces, the spin classifier and the Q-learning opponent, are per player and optional: the game plays without either (flat balls, a fixed opponent).
 
 ### Reflection questions (Notion template)
 

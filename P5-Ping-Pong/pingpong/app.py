@@ -206,12 +206,12 @@ def _spin_text(top, side):
 
 def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=None, client=None,
                  source="live", scope="record_session", no_publish=False, seed=1, box=None,
-                 omega_lo=300.0, omega_hi=1200.0, t_pk=250.0, spin_probs_fn=None):
+                 omega_lo=300.0, omega_hi=1200.0, t_pk=250.0, spin_probs_fn=None, learner=None):
     clock = clock or FakeClock(start_ns=1_000_000_000)
     box = box or DEFAULT_BOX
     tracker = ScoreTracker(scope=scope)
     publisher = ScorePublisher(client, scope=scope, source=source, no_publish=no_publish) if client else None
-    game = GameCore(judge=HitJudge(box, t_pk=t_pk), tracker=tracker, policy=CpuPolicy(random.Random(seed)),
+    game = GameCore(judge=HitJudge(box, t_pk=t_pk), tracker=tracker, policy=CpuPolicy(random.Random(seed), learner=learner),
                     publisher=publisher, level=levels.LEVELS[level], mode=mode, target_points=target,
                     omega_lo=omega_lo, omega_hi=omega_hi, spin_probs_fn=spin_probs_fn)
     return Session(game, clock, actuator=actuator,

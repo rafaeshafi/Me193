@@ -180,3 +180,14 @@ def test_a_recorded_fake_session_holds_the_streams_a_replay_needs(tmp_path):
     assert "tag" in kinds and "phase" in kinds
     verdicts = [e for e in loaded.events if e["k"] == "verdict"]
     assert [g["name"] for g in verdicts[0]["d"]["verdict"]["gates"]] == ["J1", "J2", "J3", "J4", "J5", "J6"]
+
+
+def test_the_whole_pipeline_plays_with_a_learning_opponent_and_the_learner_learns():
+    import random
+
+    from pingpong import qbandit
+
+    learner = qbandit.QBandit(rng=random.Random(1))
+    rig = fakerig.FakeRig(level=2, learner=learner)
+    rig.run(until=lambda: rig.game.tracker.streak >= 8, max_s=120)
+    assert rig.game.tracker.streak >= 8 and float(abs(learner.table).sum()) > 0.0

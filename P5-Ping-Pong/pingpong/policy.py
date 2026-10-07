@@ -11,7 +11,7 @@ import math
 import random
 from dataclasses import dataclass
 
-from pingpong import levels, physics
+from pingpong import levels, physics, qbandit
 
 ZONES = tuple((a, b) for b in (0.15, 0.5, 0.85) for a in (0.15, 0.5, 0.85))
 V_MAX = 14.0
@@ -53,8 +53,10 @@ def reach_deficit_m(level, x_land_m, x_cpu_m, flight_s):
 
 
 class CpuPolicy:
-    def __init__(self, rng=None):
+    def __init__(self, rng=None, learner=None):
         self.rng = rng or random.Random(0)
+        self.learner = learner                       # an optional qbandit.QBandit (--learn)
+        self._pending, self._last_col = None, 1
 
     def serve(self, level, s_prev, n_hits, player_a, survival, player_va=0.0):
         ramp = levels.survival_ramp(n_hits) if survival else 1.0
@@ -72,7 +74,37 @@ class CpuPolicy:
         return ServePlan(v=v, aim_ab=aim, topspin=0.0 if special else top,
                          sidespin=0.0 if special else side, special=special)
 
+    def observe(self, reward, terminal=False):
+        """The game reports how the ball just served went for the player (1 = they failed); the learner learns."""
+        p = self._pending
+        if self.learner is None or p is None:
+            return
+        if terminal:
+            self.learner.update(p["state"], p["action"], reward, None)
+            self._pending = None
+        else:
+            p["reward"] = reward
+
+    def end_game(self):
+        if self.learner is not None:
+            self.learner.end_game()
+
+    def _pick_learned(self, candidates, level, player_a, v, player_va):
+        q, state = self.learner, self.learner.state(player_a, self._last_col)
+        p = self._pending
+        if p is not None and p["reward"] is not None:
+            q.update(p["state"], p["action"], p["reward"], state)      # the previous ball's outcome, now with its s'
+        temp = level.softmax_temp
+        base = [zone_utility(z, player_a, v, V_MAX, player_va) for z in candidates]
+        action = q.choose(state, [ZONES.index(z) for z in candidates], weight=qbandit.weight(level), base=base,
+                          temp=temp)
+        self._pending = {"state": state, "action": action, "reward": None}
+        self._last_col = {0.15: 0, 0.5: 1, 0.85: 2}[ZONES[action][0]]
+        return ZONES[action]
+
     def _pick_zone(self, candidates, level, player_a, v, player_va):
+        if self.learner is not None:
+            return self._pick_learned(candidates, level, player_a, v, player_va)
         temp = level.softmax_temp
         if math.isinf(temp):
             return self.rng.choice(candidates)

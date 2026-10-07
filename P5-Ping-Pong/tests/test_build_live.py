@@ -190,3 +190,35 @@ def test_no_model_or_one_below_the_bar_means_flat_balls(tmp_path):
     _trained_model(tmp_path, good=False)
     weak = live.build_live(live_args("--player", "rafae"), FakeEnv(), player_root=tmp_path / "players")
     assert weak.session.game.spin_probs_fn is None
+
+
+def test_learn_gives_the_computer_a_q_table_that_is_saved_when_the_session_ends(tmp_path):
+    from pingpong import qbandit
+
+    rig = live.build_live(live_args("--player", "rafae", "--learn", "--level", "2"), FakeEnv(),
+                          player_root=tmp_path / "players")
+    learner = rig.session.game.policy.learner
+    assert learner is not None
+    learner.table[1, 2], learner.games = 0.6, 3
+    rig.close()
+    saved = qbandit.load_for("rafae", root=tmp_path / "players")
+    assert saved.table[1, 2] == 0.6 and saved.games == 3
+    again = live.build_live(live_args("--player", "rafae", "--learn"), FakeEnv(), player_root=tmp_path / "players")
+    assert again.session.game.policy.learner.table[1, 2] == 0.6               # picks up where it left off
+
+
+def test_without_learn_the_opponent_does_not_learn_and_nothing_is_saved(tmp_path):
+    rig = live.build_live(live_args("--player", "rafae"), FakeEnv(), player_root=tmp_path / "players")
+    assert rig.session.game.policy.learner is None
+    rig.close()
+    assert not (tmp_path / "players" / "rafae" / "qtable.npz").exists()
+
+
+def test_a_damaged_q_table_is_reported_and_learning_starts_afresh(tmp_path):
+    folder = tmp_path / "players" / "rafae"
+    folder.mkdir(parents=True)
+    (folder / "qtable.npz").write_bytes(b"junk")
+    messages = []
+    rig = live.build_live(live_args("--player", "rafae", "--learn"), FakeEnv(), player_root=tmp_path / "players",
+                          log=messages.append)
+    assert rig.session.game.policy.learner.games == 0 and any("qtable" in m for m in messages)

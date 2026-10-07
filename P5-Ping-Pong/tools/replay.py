@@ -55,8 +55,10 @@ def main(argv=None):
     original = recorder.load(args.session)
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(args.out) if args.out else Path(tmp) / "replayed"
-        replay.replay(original, overrides=overrides, record_dir=out)
+        result = replay.replay(original, overrides=overrides, record_dir=out)
         replayed = recorder.load(out)
+        for warning in result.warnings:
+            print(f"WARNING: {warning}")
         print("== original")
         print(sessionreport.format_report(sessionreport.summarize(original)))
         print(f"== replayed" + (f" with {', '.join(args.set)}" if args.set else " unchanged"))

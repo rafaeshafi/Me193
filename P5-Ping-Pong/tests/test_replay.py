@@ -114,3 +114,20 @@ def test_a_session_played_with_spin_replays_exactly_because_the_recorded_probabi
     assert decisions(recorder.load(tmp_path / "again")) == decisions(original)
     assert result.hits == 6
     assert any(e["d"]["topspin"] > 0.3 for e in original.events if e["k"] == "hit")      # spin really was in play
+
+
+def test_a_session_against_the_learning_opponent_is_flagged_because_its_serves_cannot_be_reproduced(tmp_path):
+    import random
+
+    from pingpong import qbandit
+
+    rig = fakerig.FakeRig(level=2, record_dir=tmp_path / "orig", learner=qbandit.QBandit(rng=random.Random(1)))
+    rig.run(until=lambda: rig.game.tracker.streak >= 3, max_s=60)
+    rig.close()
+    original = recorder.load(tmp_path / "orig")
+    assert original.meta["learn"] is True
+    assert any("learning opponent" in w for w in replay.replay(original).warnings)
+    plain = fakerig.FakeRig(record_dir=tmp_path / "plain")
+    plain.run(until=lambda: plain.game.tracker.streak >= 3, max_s=60)
+    plain.close()
+    assert replay.replay(recorder.load(tmp_path / "plain")).warnings == []

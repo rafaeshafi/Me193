@@ -39,6 +39,7 @@ def make_parser():
     ap.add_argument("--no-record", action="store_true", help="do not write recordings/<session>/ (IMU, pose, events)")
     ap.add_argument("--no-audio", action="store_true", help="no game sounds (the S key mutes while playing)")
     ap.add_argument("--no-spin", action="store_true", help="ignore the trained spin model: every ball is flat")
+    ap.add_argument("--learn", action="store_true", help="the computer learns where you fail (Q-learning, saved per player)")
     ap.add_argument("--no-store", action="store_true", help="do not save finished games to the leaderboard database")
     ap.add_argument("--board", action="store_true", help="print the leaderboard and exit")
     ap.add_argument("--db", default=None, help="leaderboard database (default: data/pingpong.db)")

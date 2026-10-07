@@ -41,12 +41,12 @@ def session_name(player, wall=None):
 
 
 def session_meta(*, source, player, seed, level, mode, target, scope, t0_ns, calibration, gyro_per_dps,
-                 accel_per_g, fs_raw, lag_s, stale_ms, no_motor):
+                 accel_per_g, fs_raw, lag_s, stale_ms, no_motor, learn=False):
     """Everything a replay needs to rebuild the same game."""
     return {"source": source, "player": player, "seed": seed, "level": level, "mode": mode, "target": target,
             "scope": scope, "t0_ns": t0_ns, "calibration": json.loads(calibration.to_json()),
             "units": {"gyro_per_dps": gyro_per_dps, "accel_per_g": accel_per_g, "fs_raw": fs_raw},
-            "camera_lag_s": lag_s, "stale_ms": stale_ms, "no_motor": no_motor}
+            "camera_lag_s": lag_s, "stale_ms": stale_ms, "no_motor": no_motor, "learn": learn}
 
 
 def _plain(obj):

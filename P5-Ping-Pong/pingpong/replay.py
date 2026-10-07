@@ -144,6 +144,7 @@ class _Collector:
 class ReplayResult:
     rig: object
     events: list                     # [(kind, t_ns, data)] from the replayed game
+    warnings: list = dataclasses.field(default_factory=list)
 
     def count(self, kind):
         return sum(1 for k, _, _ in self.events if k == kind)
@@ -229,4 +230,6 @@ def replay(loaded, *, overrides=None, record_dir=None):
             rig.pump()
             next_pump += PUMP_NS
     rig.close()
-    return ReplayResult(rig=rig, events=collector.events)
+    warnings = ["the session used the learning opponent (--learn): the computer's serves depend on what it had "
+                "learned, so this replay may diverge from what happened"] if meta.get("learn") else []
+    return ReplayResult(rig=rig, events=collector.events, warnings=warnings)
