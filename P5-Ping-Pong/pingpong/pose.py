@@ -34,15 +34,22 @@ def shoulder_width_norm(lm, width, height):
     return math.hypot((left.x - right.x) * width, (left.y - right.y) * height) / width
 
 
-def paddle_uv(lm, hand, width, height):
-    """-> (u, v, confidence) or None when the frame is not worth reading."""
+def paddle_uv(lm, hand, width, height, unit=None):
+    """-> (u, v, confidence) or None when the frame is not worth reading.
+
+    `unit` is the shoulder width, as a fraction of the frame width, that one unit of u and v is measured in: the
+    player's calibrated width.  The width of the moment shrinks when the torso turns (every stroke), which would
+    stretch the hand coordinates by 1 / cos(turn); None measures in the width of the moment (no calibration yet)."""
     shoulders = _shoulders(lm)
     if shoulders is None:
         return None
     left, right = shoulders
-    sw_px = math.hypot((left.x - right.x) * width, (left.y - right.y) * height)
-    if sw_px < MIN_SHOULDER_FRAC * width:
-        return None                               # side-on or far away: it would amplify noise
+    if unit is None:
+        sw_px = math.hypot((left.x - right.x) * width, (left.y - right.y) * height)
+        if sw_px < MIN_SHOULDER_FRAC * width:
+            return None                           # side-on or far away: it would amplify noise
+    else:
+        sw_px = unit * width                      # (a body too far from the calibrated width is the lock's to refuse)
     idx = HANDS[hand]
     wrist = lm[idx["wrist"]]
     if wrist.visibility < MIN_VISIBILITY:
@@ -62,11 +69,19 @@ def paddle_uv(lm, hand, width, height):
 
 
 class PoseLock:
-    """One player only: after calibration, a body whose shoulder width differs by more than
-    +-25% is not the player (a spectator walking into frame must not move the paddle)."""
+    """One player only: after calibration, a body whose shoulders look far wider or narrower than the calibrated
+    width is not the player (a spectator walking into frame must not move the paddle).
 
-    def __init__(self, tol=0.25):
-        self.tol, self._ref = tol, None
+    The tolerance is lopsided on purpose: turning the torso (every stroke, and a side-on stance) makes the shoulders
+    look narrower, down to about half, while only stepping towards the camera makes them wider."""
+
+    def __init__(self, lo=0.5, hi=1.3):
+        self.lo, self.hi, self._ref = lo, hi, None
+
+    @property
+    def unit(self):
+        """The calibrated shoulder width (a fraction of the frame width) the hand is measured in; None before it."""
+        return self._ref
 
     def calibrate(self, shoulder_width):
         self._ref = shoulder_width
@@ -76,4 +91,4 @@ class PoseLock:
             return False
         if self._ref is None:
             return True
-        return abs(shoulder_width - self._ref) / self._ref <= self.tol
+        return self.lo <= shoulder_width / self._ref <= self.hi

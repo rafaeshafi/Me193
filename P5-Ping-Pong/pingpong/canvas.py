@@ -104,10 +104,15 @@ def canvas_pt(x_m, depth, w, h, h_m=0.0):
     return px, py
 
 
-def draw_ball(frame, x_m, depth, h_m, color=(40, 160, 255)):
+def draw_ball(frame, x_m, depth, h_m, color=(40, 160, 255), toward=None):
+    """The ball on the court; `toward` = (x, y) pixels pulls it onto that point as it nears the player (depth 1), so a
+    ball that comes in to the target ring arrives IN the ring."""
     h, w = frame.shape[:2]
     gx, gy, _ = project(x_m, depth, 0.0, w, h)
     bx, by, scale = project(x_m, depth, h_m, w, h)
+    if toward is not None:
+        pull = max(0.0, min(1.0, depth)) ** 3
+        bx, by = round(bx + (toward[0] - bx) * pull), round(by + (toward[1] - by) * pull)
     cv2.ellipse(frame, (gx, gy), (int(16 * scale), int(6 * scale)), 0, 0, 360, (0, 0, 0), -1, cv2.LINE_AA)
     cv2.circle(frame, (bx, by), int(8 + 14 * scale), color, -1, cv2.LINE_AA)
     cv2.circle(frame, (bx, by), int(8 + 14 * scale), (255, 255, 255), 2, cv2.LINE_AA)

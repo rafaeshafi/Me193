@@ -45,6 +45,14 @@ def test_a_level_setting_changes_every_level_and_survives_a_change_of_level():
     assert levels.LEVELS[3].radius_sw == 0.35                                  # the table itself is never edited
 
 
+def test_the_arrival_window_can_be_tuned_live_with_set_level_reach():
+    rig = fakerig.FakeRig(level=1)
+    overrides.apply(rig.rig, {"level": {"reach": 0.4}})
+    assert rig.game.level.reach == 0.4 and levels.LEVELS[1].reach == 0.6
+    plans = [rig.game.policy.serve(rig.game.level, 0.5, 0, 0.5, False) for _ in range(50)]
+    assert all(abs(a - 0.5) <= 0.35 * 0.4 + 1e-9 for a, _ in (p.aim_ab for p in plans))
+
+
 def test_judge_and_swing_settings_reach_the_judge_and_the_detector():
     rig = fakerig.FakeRig()
     overrides.apply(rig.rig, {"judge": {"refractory_s": 0.5}, "swing": {"t_pk": 222.0}})

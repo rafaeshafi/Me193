@@ -231,3 +231,61 @@ def test_the_top_bar_shows_the_hubs_battery_and_goes_amber_when_it_is_low(monkey
     fine = hud.render(state(hub_status="ok", hub_battery=80, mqtt_status="ok"), size=(W, H))
     top = (slice(20, 60), slice(W - 700, W - 20))
     assert diff(low[top], fine[top]) > 1000                                # the colour differs: amber vs green
+
+
+# --- the hand plane: where the paddle and the target are drawn, in the judge's own units ------------------------------------
+BOX_SW = (3.0, 2.0)                                   # the reach box in shoulder widths
+S_PX = hud.PLANE_SW_PX * H                            # pixels per shoulder width on the hand plane
+
+
+def on_ring(frame, color, cx, cy, r, tol=3):
+    """Is `color` drawn within `tol` px of radius r, to the right, left, above and below the centre?"""
+    def hit(x, y):
+        return any(tuple(frame[y + dy, x + dx]) == color for dx in range(-tol, tol + 1) for dy in range(-tol, tol + 1)
+                   if 0 <= y + dy < H and 0 <= x + dx < W)
+    return all(hit(cx + dx, cy + dy) for dx, dy in ((r, 0), (-r, 0), (0, r), (0, -r)))
+
+
+def test_a_shoulder_width_is_the_same_number_of_pixels_across_and_up_on_the_hand_plane():
+    # the court's own mapping squashed the height 2.5x against the width: rings that looked like they touched were a
+    # shoulder width apart and the judge said miss
+    cx, cy = hud.plane_xy((0.5, 0.5), BOX_SW, W, H)
+    ax, ay = hud.plane_xy((0.5 + 1.0 / BOX_SW[0], 0.5), BOX_SW, W, H)          # one shoulder width to the player's right
+    bx, by = hud.plane_xy((0.5, 0.5 + 1.0 / BOX_SW[1]), BOX_SW, W, H)          # one shoulder width up
+    assert (ax - cx, ay - cy) == (round(S_PX), 0) and (bx - cx, by - cy) == (0, -round(S_PX))
+    assert hud.plane_xy((0.0, 1.0), BOX_SW, W, H)[1] > 0.25 * H                 # the whole box stays below the score
+
+
+def test_the_target_ring_is_the_judges_hit_zone_a_circle_of_the_levels_radius():
+    frame = hud.render(state(phase="RALLY", arrival_ab=(0.5, 0.5), box_sw=BOX_SW, radius_sw=0.55), size=(W, H))
+    cx, cy = hud.plane_xy((0.5, 0.5), BOX_SW, W, H)
+    assert on_ring(frame, hud.AMBER, cx, cy, round(0.55 * S_PX))
+
+
+def test_the_paddle_is_a_dot_at_the_hand_on_the_same_plane():
+    frame = hud.render(state(phase="RALLY", paddle_ab=(0.8, 0.3), box_sw=BOX_SW), size=(W, H))
+    px, py = hud.plane_xy((0.8, 0.3), BOX_SW, W, H)
+    assert tuple(frame[py, px]) == hud.GREEN
+
+
+def test_the_incoming_ball_arrives_on_the_target_ring_not_at_the_edge_of_the_table():
+    ab = (0.8, 0.3)
+    tx, ty = hud.plane_xy(ab, BOX_SW, W, H)
+    arrived = hud.render(state(phase="RALLY", arrival_ab=ab, box_sw=BOX_SW, ball=(canvas_x(ab), 1.0, 0.0)), size=(W, H))
+    far = hud.render(state(phase="RALLY", arrival_ab=ab, box_sw=BOX_SW, ball=(canvas_x(ab), 0.3, 0.1)), size=(W, H))
+    assert tuple(arrived[ty, tx]) == (40, 160, 255)                           # the ball's own colour, on the target
+    assert tuple(far[ty, tx]) != (40, 160, 255)                               # still out on the table
+
+
+def canvas_x(ab):
+    from pingpong import physics
+    return physics.x_of_a(ab[0])
+
+
+def test_the_arrival_window_is_outlined_so_the_player_sees_where_balls_can_come():
+    frame = hud.render(state(phase="RALLY", box_sw=BOX_SW, reach=0.6), size=(W, H))
+    cx, cy = hud.plane_xy((0.5, 0.5), BOX_SW, W, H)
+    left = cx - round(0.5 * 0.6 * BOX_SW[0] * S_PX)
+    assert tuple(frame[cy, left]) == hud.GREY
+    assert tuple(frame[cy, cx - round(0.5 * BOX_SW[0] * S_PX)]) != hud.GREY      # the full box is not what is outlined
+

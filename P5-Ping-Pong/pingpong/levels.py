@@ -28,11 +28,13 @@ class Level:
     v_ref: float         # speed above which the CPU starts missing
     spin_ref: float
     fault_th: float      # player fault threshold on s * (1 - q_total)
+    reach: float = 1.0   # the share of the reach box the balls arrive in (0.6: the middle 60%), so an easy level
+                         # never asks for the corners of a box that was stretched to reach
 
 
 LEVELS = {
-    1: Level("Rookie", 1, 3.5, 0.30, 0.18, 0.55, 0.40, 1.2, 0.10, 0.25, INF, 0.0, 5.0, 0.20, 0.60),
-    2: Level("Club", 2, 5.0, 0.22, 0.14, 0.45, 0.28, 2.2, 0.06, 0.15, 1.0, 0.2, 7.0, 0.35, 0.50),
+    1: Level("Rookie", 1, 3.5, 0.30, 0.18, 0.55, 0.40, 1.2, 0.10, 0.25, INF, 0.0, 5.0, 0.20, 0.60, 0.6),
+    2: Level("Club", 2, 5.0, 0.22, 0.14, 0.45, 0.28, 2.2, 0.06, 0.15, 1.0, 0.2, 7.0, 0.35, 0.50, 0.8),
     3: Level("Pro", 3, 7.0, 0.16, 0.10, 0.35, 0.18, 3.5, 0.03, 0.08, 0.4, 0.4, 9.0, 0.50, 0.42),
     4: Level("Insane", 4, 9.5, 0.12, 0.07, 0.28, 0.10, 5.0, 0.01, 0.04, 0.15, 0.7, 11.0, 0.65, 0.35),
 }

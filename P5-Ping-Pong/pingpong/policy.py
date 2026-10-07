@@ -20,6 +20,15 @@ K_W = {1: 0.30, 2: 0.25, 3: 0.20, 4: 0.15}      # per unit of spin above the lev
 K_D = 1.5                                         # per metre the CPU paddle cannot reach
 
 
+def in_reach(zone, reach):
+    """A zone's (a, b) pulled toward the middle of the reach box: the level decides how much of the box the balls use.
+
+    Only the served aim moves; the zone labels the learner and the softmax work with stay on the 0.15 / 0.5 / 0.85 grid."""
+    if reach == 1.0:
+        return zone
+    return tuple(0.5 + (c - 0.5) * reach for c in zone)
+
+
 @dataclass(frozen=True)
 class ServePlan:
     v: float
@@ -70,7 +79,7 @@ class CpuPolicy:
         amp = min(1.0, 0.10 + 0.03 * n_hits) if survival else level.spin_variety
         top = amp * self.rng.uniform(-1.0, 1.0)
         side = 0.5 * amp * self.rng.uniform(-1.0, 1.0)
-        return ServePlan(v=v, aim_ab=aim, topspin=0.0 if special else top,
+        return ServePlan(v=v, aim_ab=in_reach(aim, level.reach), topspin=0.0 if special else top,
                          sidespin=0.0 if special else side, special=special)
 
     def observe(self, reward, terminal=False):

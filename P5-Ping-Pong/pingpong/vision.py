@@ -89,7 +89,7 @@ class VisionWorker:
         if self.lock is not None and not self.lock.accepts(self.last_shoulder_w):
             self.n_locked_out += 1
             return
-        uv = pose.paddle_uv(landmarks, self.hand, sw, sh)
+        uv = pose.paddle_uv(landmarks, self.hand, sw, sh, unit=None if self.lock is None else self.lock.unit)
         if uv is None:
             self.n_no_pose += 1
             return
@@ -143,7 +143,7 @@ class VisionWorker:
         return {"fps": fps,
                 "infer_p50_ms": inferred[len(inferred) // 2] if inferred else 0.0,
                 "infer_p95_ms": inferred[int(len(inferred) * 0.95) - 1] if len(inferred) > 1 else 0.0,
-                "no_pose": self.n_no_pose, "locked_out": self.n_locked_out}
+                "no_pose": self.n_no_pose, "locked_out": self.n_locked_out, "frames": self.n_frames}
 
     # --- thread --------------------------------------------------------------------------------------------
     def start(self):

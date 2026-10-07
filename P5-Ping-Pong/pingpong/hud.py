@@ -6,10 +6,24 @@ explains every decision ("hand 0.9 SW from the ball") -- the policy made visible
 
 from dataclasses import dataclass, field
 
-from pingpong import canvas, physics
+import cv2
+
+from pingpong import canvas
 
 GREEN, RED, AMBER, WHITE, GREY = (80, 220, 80), (70, 70, 240), (40, 170, 255), (255, 255, 255), (170, 170, 170)
 LOW_BATTERY = 20                 # percent: the hub's number goes amber below this
+PLANE_CENTRE_Y = 0.60            # the hand plane's middle, as a fraction of the frame height
+PLANE_SW_PX = 0.17               # pixels per shoulder width on the hand plane, as a fraction of the frame height
+
+
+def plane_xy(ab, box_sw, w, h):
+    """Reach-box coordinates (a, b) -> pixels on the hand plane, where the paddle dot and the target ring live.
+
+    The same pixels per shoulder width across and up: the judge measures the hand in shoulder widths, so a ring of
+    radius R shoulder widths is a circle and 'the dot is inside the ring' is exactly 'the judge will say hit'.  (The
+    court's own mapping squashed height 2.5x against width, and rings that looked like they touched were missed.)"""
+    s = PLANE_SW_PX * h
+    return round(w / 2 + (ab[0] - 0.5) * box_sw[0] * s), round(PLANE_CENTRE_Y * h - (ab[1] - 0.5) * box_sw[1] * s)
 
 
 @dataclass(frozen=True)
@@ -44,6 +58,9 @@ class HudState:
     swing_scale: float = 1200.0      # dps that fills the trace panel (the player's hard-swing rate)
     swing_threshold: float = 0.0     # dps below which a swing does not count (T_PK)
     player_name: str = ""            # highlights the player's own row on the leaderboard
+    box_sw: tuple = (2.0, 1.4)       # the reach box's width and height in shoulder widths (sets the hand plane's shape)
+    radius_sw: float = 0.55          # the level's hit radius: the target ring is exactly this big
+    reach: float = 1.0               # the share of the reach box the balls arrive in
 
 
 def render(state, size=(1280, 720), background=None):
@@ -66,12 +83,26 @@ def render(state, size=(1280, 720), background=None):
 
 def _draw_actors(frame, s, w, h):
     canvas.draw_ring(frame, s.cpu_x_m, 0.0, 0.0, 40, GREY, 4)                     # the CPU paddle
+    if s.phase in ("COUNTDOWN", "RALLY"):
+        _draw_arrival_window(frame, s, w, h)
+    target = None
     if s.arrival_ab is not None and s.phase == "RALLY":
-        canvas.draw_ring(frame, physics.x_of_a(s.arrival_ab[0]), 1.0, 0.55 * s.arrival_ab[1], 70, AMBER, 3)
+        target = plane_xy(s.arrival_ab, s.box_sw, w, h)
+        cv2.circle(frame, target, round(s.radius_sw * PLANE_SW_PX * h), AMBER, 3, cv2.LINE_AA)     # the judge's hit zone
     if s.ball is not None:
-        canvas.draw_ball(frame, *s.ball)
+        canvas.draw_ball(frame, *s.ball, toward=target)
     if s.paddle_ab is not None:
-        canvas.draw_ring(frame, physics.x_of_a(s.paddle_ab[0]), 1.0, 0.55 * s.paddle_ab[1], 55, GREEN, 5)
+        px, py = plane_xy(s.paddle_ab, s.box_sw, w, h)
+        cv2.circle(frame, (px, py), 17, WHITE, 3, cv2.LINE_AA)
+        cv2.circle(frame, (px, py), 12, GREEN, -1, cv2.LINE_AA)
+
+
+def _draw_arrival_window(frame, s, w, h):
+    """Where balls can arrive: the level's share of the reach box, so the player sees what they have to reach."""
+    half_w = 0.5 * s.reach * s.box_sw[0] * PLANE_SW_PX * h
+    half_h = 0.5 * s.reach * s.box_sw[1] * PLANE_SW_PX * h
+    cx, cy = plane_xy((0.5, 0.5), s.box_sw, w, h)
+    cv2.rectangle(frame, (round(cx - half_w), round(cy - half_h)), (round(cx + half_w), round(cy + half_h)), GREY, 1)
 
 
 def _draw_top_bar(frame, s, w, h):

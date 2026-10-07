@@ -87,7 +87,7 @@ def test_j2_needs_confident_landmarks_on_at_least_two_frames():
     assert judge().judge(swing(), ball(), low, now_ns=T_C).kind == "REJECTED"
     one = [poses(T_C)[0], poses(T_C)[-1]]
     only_one_in_window = [PaddlePose(t_scene_ns=one[0].t_scene_ns, u=0.0, v=0.0, conf=0.9, hand="right"),
-                          PaddlePose(t_scene_ns=T_C + 20_000_000, u=0.0, v=0.0, conf=0.9, hand="right")]
+                          PaddlePose(t_scene_ns=T_C + 80_000_000, u=0.0, v=0.0, conf=0.9, hand="right")]       # after the window's end (+50 ms)
     assert judge().judge(swing(), ball(), only_one_in_window, now_ns=T_C).kind == "REJECTED"
 
 

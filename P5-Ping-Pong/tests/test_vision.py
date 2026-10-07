@@ -119,6 +119,16 @@ def test_the_pose_lock_keeps_a_spectator_from_moving_the_paddle():
     assert worker.snapshot() == () and worker.n_locked_out == 4
 
 
+def test_a_player_turned_towards_the_side_is_still_tracked_in_the_calibrated_unit():
+    lock = PoseLock()
+    lock.calibrate(0.20)
+    turned = lambda i: body(sh=(0.56, 0.44), wrist=(0.30, 0.40))        # shoulders 0.12 wide: 60% of the calibrated 0.20  # noqa: E731
+    worker, clock, *_ = make(landmarker=FakeLandmarker(scripted=turned), lock=lock)
+    tick(worker, clock)
+    assert worker.n_locked_out == 0
+    assert worker.snapshot()[-1].u == pytest.approx((0.5 - 0.30) / 0.20)       # not (0.5 - 0.30) / 0.12
+
+
 def test_the_hand_path_is_smoothed_by_the_one_euro_filter():
     import random
     rng = random.Random(2)
@@ -128,6 +138,13 @@ def test_the_hand_path_is_smoothed_by_the_one_euro_filter():
         tick(worker, clock)
     us = [p.u for p in worker.snapshot()[30:]]
     assert max(us) - min(us) < 0.12                    # raw jitter would span ~0.3 shoulder widths
+
+
+def test_the_number_of_frames_is_reported_so_the_locked_out_ones_can_be_a_share():
+    worker, clock, *_ = make()
+    for _ in range(7):
+        tick(worker, clock)
+    assert worker.stats()["frames"] == 7
 
 
 def test_inference_latency_and_fps_are_reported():

@@ -86,7 +86,7 @@ def test_a_trained_table_changes_where_a_club_or_pro_opponent_aims_but_not_a_roo
     for tag, expect_more in ((1, False), (3, True)):
         p = policy.CpuPolicy(random.Random(3), learner=q)
         picks = [p.serve(levels.LEVELS[tag], 0.5, 0, 0.5, False).aim_ab for _ in range(60)]
-        share = picks.count((0.85, 0.85)) / len(picks)
+        share = picks.count(policy.in_reach((0.85, 0.85), levels.LEVELS[tag].reach)) / len(picks)
         assert (share > 0.5) is expect_more, (tag, share)
 
 

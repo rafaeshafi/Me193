@@ -115,11 +115,17 @@ between rallies to change the level; **M** switches Survival/Match; **1–3** al
 | Q / Esc | quit (stops the motors, saves, lets the hub go) |
 | J / K | soft / hard swing (`--fake` only) |
 
-| Level | ball speed | flight (3 m) | hit window early / late | paddle radius |
-|---|---|---|---|---|
-| Rookie | 3.5 m/s | 0.86 s | 0.30 / 0.18 s | 0.55 shoulder widths |
-| Club | 5.0 m/s | 0.60 s | 0.22 / 0.14 s | 0.45 |
-| Pro | 7.0 m/s | 0.43 s | 0.16 / 0.10 s | 0.35 |
+| Level | ball speed | flight (3 m) | hit window early / late | paddle radius | balls arrive in |
+|---|---|---|---|---|---|
+| Rookie | 3.5 m/s | 0.86 s | 0.30 / 0.18 s | 0.55 shoulder widths | the middle 60% of your reach box |
+| Club | 5.0 m/s | 0.60 s | 0.22 / 0.14 s | 0.45 | the middle 80% |
+| Pro | 7.0 m/s | 0.43 s | 0.16 / 0.10 s | 0.35 | the whole box |
+
+**What the screen shows.** The camera picture is behind everything; on top of it sit your **hand plane**: a green dot is
+your hand, an amber circle is where the ball is about to arrive, and the circle is exactly the level's paddle radius, so
+*the dot inside the circle when the ball gets there* is what the judge calls a hit. The grey rectangle is the part of your
+reach box the balls can come to. One shoulder width is the same number of pixels across and up. `--set level.reach=0.5`
+shrinks that window (0.5 = the middle half of the box) and `--set level.radius_sw=0.8` widens the circle.
 
 **One shot.** The computer's ball arrives at a known instant. You swing; the swing detector reports
 its peak (back-dated to when the gyro really peaked), and the judge checks six gates (below). A valid
@@ -132,7 +138,7 @@ computer more likely to miss. Without a model (or one that did not reach 75% cro
 ball is flat; `--no-spin` ignores the model.
 
 **The six gates** (the x-ray shows each one with its reason): **J1** timing inside the level's window ·
-**J2** your hand near the ball over the last 0.3 s, and still near it at detection · **J3** swing big and
+**J2** your hand near the ball from 0.3 s before to 0.05 s after the impact, and near it at the impact · **J3** swing big and
 clean enough · **J4** pose and IMU agree on the moment (logged only) · **J5** one hit per ball, not
 too fast · **J6** paddle not locked after the hub was shaken.
 
@@ -255,7 +261,7 @@ runs on the camera's hand velocity); AprilTag ids must be seen in 4 of
 6 frames (START also held 0.4 s) before they count; pose is used only when the landmarks are visible.
 **The hit judge** is a conjunction of five deciding gates: the swing's back-dated time inside a window
 around the ball's known arrival, my hand (from pose, shifted by the measured camera lag) within a
-level-dependent radius of the ball and still near it at detection, the swing big and clean enough, one
+level-dependent radius of the ball around the impact and at the impact itself, the swing big and clean enough, one
 hit per ball, and no shake lock. A sixth gate only measures and logs whether the camera and the IMU saw
 the swing at the same moment. Each gate's result and reason appears on screen. **The shot policy** turns a valid
 swing into a shot: peak gyro rate sets ball speed, my hand position sets aim, a trained spin model (if I

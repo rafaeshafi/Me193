@@ -85,10 +85,27 @@ def test_shoulder_width_is_reported_for_the_one_player_lock():
     assert pose.shoulder_width_norm(landmarks(vis=0.1), W, H) is None
 
 
-def test_the_lock_accepts_the_calibrated_width_within_25_percent_and_rejects_others():
+def test_the_lock_accepts_a_turned_or_nearer_player_and_rejects_a_stranger():
+    # a stroke turns the torso and the shoulders look narrower: a symmetric +-25% lock threw away 32% of the player's
+    # own frames in the first live game (pose gaps of up to 1.5 s, the ball clock paused nine times in 78 s)
     lock = pose.PoseLock()
     assert lock.accepts(0.50) is True            # not calibrated yet: nothing to compare with
     lock.calibrate(0.20)
-    assert lock.accepts(0.20) and lock.accepts(0.24) and lock.accepts(0.16)
-    assert not lock.accepts(0.26) and not lock.accepts(0.14)
-    assert lock.accepts(None) is False
+    assert lock.accepts(0.20) and lock.accepts(0.25) and lock.accepts(0.13) and lock.accepts(0.11)
+    assert not lock.accepts(0.27) and not lock.accepts(0.09)
+    assert lock.accepts(None) is False and lock.unit == 0.20
+
+
+def test_a_calibrated_unit_keeps_a_turned_torso_from_stretching_the_hand_coordinates():
+    lm = landmarks(sh_x=(0.55, 0.45))            # shoulders at half the calibrated 0.20 width: the torso is turned
+    hand(lm, R_WRIST, 0.30, 0.40)
+    u_now, _, _ = pose.paddle_uv(lm, "right", W, H)
+    u_fixed, _, _ = pose.paddle_uv(lm, "right", W, H, unit=0.20)
+    assert u_now == pytest.approx(2.0) and u_fixed == pytest.approx(1.0)       # (0.5 - 0.3) / 0.10 against / 0.20
+
+
+def test_without_a_calibration_the_unit_is_still_the_shoulder_width_of_the_moment():
+    assert pose.PoseLock().unit is None
+    lm = landmarks()
+    hand(lm, R_WRIST, 0.30, 0.40)
+    assert pose.paddle_uv(lm, "right", W, H, unit=None) == pose.paddle_uv(lm, "right", W, H)

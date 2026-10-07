@@ -5,7 +5,7 @@ import random
 import pytest
 
 import config
-from pingpong import levels
+from pingpong import levels, physics, shot
 from pingpong.events import PaddlePose, SwingEvent
 from pingpong.judge import HitJudge
 from pingpong.mqtt_pub import ScorePublisher
@@ -109,6 +109,38 @@ def test_a_good_swing_scores_publishes_and_the_cpu_returns_the_ball():
     assert game.outgoing_leg is not None
     served = next_serve(game)
     assert "serve" in kinds(served) and game.incoming.ball_id == 2
+
+
+def at_the_ball_then_following_through(t_i, ab, far_u):
+    """The hand on the ball until the impact, then the follow-through: the newest reading at detection is far away."""
+    u, v = BOX.to_uv(*ab)
+    on = [PaddlePose(t_scene_ns=int(t_i - 0.30 * S + k * 0.05 * S), u=u, v=v, conf=0.9, hand="right") for k in range(7)]
+    return on + [PaddlePose(t_scene_ns=int(t_i + 0.09 * S), u=far_u, v=v, conf=0.9, hand="right")]
+
+
+def test_the_return_starts_where_the_hand_was_at_the_impact_not_where_the_follow_through_ended():
+    game, _ = make()
+    start_rally(game)
+    ball, t = game.incoming, game.incoming.t_c_ns
+    events = game.on_swing(swing(t), at_the_ball_then_following_through(t, ball.aim_ab, BOX.u_min), t + int(0.1 * S))
+    assert "hit" in kinds(events)
+    assert game.outgoing_leg.x_start == pytest.approx(physics.x_of_a(ball.aim_ab[0]))   # not x_of_a(0), the far end
+
+
+@pytest.mark.parametrize("seed", range(1, 9))
+def test_a_small_arrival_window_still_lets_the_return_use_the_whole_table(seed):
+    # Rookie balls arrive in the middle 60% of the reach box, so the hand's lateral range is 60% of the box too:
+    # the return's aim spreads it back over the table, or wide shots (the way to win a point) would vanish
+    game, _ = make(seed=seed)
+    start_rally(game)
+    ball = game.incoming
+    a = ball.aim_ab[0]
+    good_hit(game)
+    reach = game.level.reach
+    expect = min(1.0, max(0.0, 0.5 + (a - 0.5) / reach))
+    assert game.outgoing_leg.x_end == pytest.approx(physics.x_of_a(0.5 + shot.aim_from_a(expect) / 1.6))
+    if abs(a - 0.5) > 0.2:                                                    # an outer column: a wide return
+        assert abs(game.outgoing_leg.x_end) > 0.4
 
 
 def test_five_consecutive_hits_tick_the_score_up_live():

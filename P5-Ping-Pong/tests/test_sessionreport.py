@@ -68,6 +68,17 @@ def test_the_rig_adds_a_summary_event_with_loop_timing_when_it_closes(tmp_path):
     assert summarise(tmp_path)["loop_p95_ms"] >= 0.0
 
 
+def test_the_pose_lock_refusals_come_from_the_summary_and_are_named_in_the_report(tmp_path):
+    # the first live game refused 751 of 2358 camera frames as 'not the player' and nothing in the report said so
+    rig = record(tmp_path)
+    rig.close()
+    s = summarise(tmp_path)
+    assert s["pose_lock"] == {"locked_out": 0, "frames": s["pose_lock"]["frames"]} and s["pose_lock"]["frames"] > 100
+    assert "Pose lock" not in sessionreport.format_report(s)                       # nothing refused: nothing to say
+    s["pose_lock"] = {"locked_out": 751, "frames": 2358}
+    assert "Pose lock: refused 751 of 2358 camera frames (32%)" in sessionreport.format_report(s)
+
+
 def test_the_text_report_names_the_numbers_a_person_looks_for(tmp_path):
     rig = record(tmp_path)
     rig.close()

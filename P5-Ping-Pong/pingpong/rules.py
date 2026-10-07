@@ -16,7 +16,7 @@ import dataclasses
 from pingpong import levels, physics
 from pingpong import shot as shotmod
 from pingpong.events import GameEvent
-from pingpong.judge import BallWindow
+from pingpong.judge import BallWindow, pose_at
 from pingpong.policy import reach_deficit_m
 
 S = 1_000_000_000
@@ -173,12 +173,15 @@ class GameCore:
     # --- the player's swing ----------------------------------------------------------------------
     def _on_hit(self, swing, verdict, pose_samples, now_ns):
         ball = self.incoming
-        latest = pose_samples[-1] if pose_samples else None
-        paddle_a = self.judge.box.to_ab(latest.u, latest.v)[0] if latest else 0.5
+        at = pose_at(pose_samples, swing.t_ns, min_conf=self.judge.min_conf) or (pose_samples[-1] if pose_samples else None)
+        paddle_a = self.judge.box.to_ab(at.u, at.v)[0] if at else 0.5          # where the hand was AT the impact
+        # the balls come in a level's share of the box, so the hand's lateral range is that share too: the aim
+        # spreads it back over the whole table (wide returns are how a point is won)
+        aim_a = min(1.0, max(0.0, 0.5 + (paddle_a - 0.5) / self.level.reach))
         probs = self.spin_probs_fn(swing.feat) if self.spin_probs_fn else None
         sp = shotmod.make(w_pk=swing.w_pk, omega_lo=self.omega_lo, omega_hi=self.omega_hi,
                           d_min_sw=verdict.d_min_sw, e_s=verdict.e_s, level=self.level,
-                          paddle_a=paddle_a, spin_probs=probs)
+                          paddle_a=aim_a, spin_probs=probs)
         self.s_prev = shotmod.swing_strength(swing.w_pk, self.omega_lo, self.omega_hi)
         self.player_a, self.incoming = paddle_a, None
         launch = max(now_ns, ball.t_c_ns)

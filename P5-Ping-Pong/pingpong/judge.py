@@ -1,8 +1,10 @@
 """HitJudge: a swing is a HIT only if every hard gate passes (J1-J6).
 
     J1 timing      t_i in [t_c - E, t_c + L]   (earlier = ignored practice swing)
-    J2 pose        hand near the ball over the approach window [t_i-0.30, t_i-0.05]
-                   AND still near it at detection (closes "touch, then swing elsewhere")
+    J2 pose        hand near the ball over [t_i-0.30, t_i+0.05] (the impact included: a stroke sweeps ~10 SW/s,
+                   so the hand is within reach only at the moment of impact) AND near it AT the impact (closes
+                   "touch, then swing elsewhere"; the newest pose is no use here: detection comes up to 150 ms
+                   after the peak, when the hand is in the follow-through)
     J3 swing       peak, duration and oscillation limits
     J4 cross-sensor (logged only; made hard only after measuring false rejects)
     J5 refractory  one hit per ball, 0.35 s after a counted hit, <= 3 hits per second
@@ -30,6 +32,14 @@ class BallWindow:
     t_c_ns: int
     aim_ab: tuple        # arrival point in reach-box coordinates
     level: object        # pingpong.levels.Level
+
+
+def pose_at(samples, t_ns, *, before_s=0.10, after_s=0.05, min_conf=0.0):
+    """The pose reading nearest to t_ns, within [t_ns - before_s, t_ns + after_s]: where the hand was at that
+    moment (None if there is none).  A swing is only recognised 30-150 ms after its peak, so the newest reading is
+    the follow-through, not the impact."""
+    near = [p for p in samples if -int(before_s * S) <= p.t_scene_ns - t_ns <= int(after_s * S) and p.conf >= min_conf]
+    return min(near, key=lambda p: abs(p.t_scene_ns - t_ns), default=None)
 
 
 def cross_sensor_offset_ms(samples, t_i_ns):
@@ -91,16 +101,16 @@ class HitJudge:
     def _pose_gate(self, swing, ball, samples):
         R = ball.level.radius_sw
         bu, bv = self.box.to_uv(*ball.aim_ab)
-        lo, hi = swing.t_ns - int(0.30 * S), swing.t_ns - int(0.05 * S)
+        lo, hi = swing.t_ns - int(0.30 * S), swing.t_ns + int(0.05 * S)
         visible = [p for p in samples if lo <= p.t_scene_ns <= hi and p.conf >= self.min_conf]
         dist = lambda p: math.hypot(p.u - bu, p.v - bv)           # noqa: E731
         d_min = min((dist(p) for p in visible), default=math.inf)
-        latest = samples[-1] if samples else None
         if len(visible) < 2:
             return GateResult("J2", False, f"only {len(visible)} confident pose frame(s) in the approach window"), d_min
         if d_min > R:
             return GateResult("J2", False, f"hand {d_min:.2f} SW from the ball (limit {R:.2f})"), d_min
-        if latest is None or latest.conf < self.min_conf or dist(latest) > 1.6 * R:
+        at_impact = pose_at(visible, swing.t_ns)
+        if at_impact is None or dist(at_impact) > 1.6 * R:
             return GateResult("J2", False, "hand moved away from the ball before the swing"), d_min
         return GateResult("J2", True, f"hand {d_min:.2f} SW from the ball (limit {R:.2f})"), d_min
 

@@ -178,7 +178,9 @@ class Session:
                      or (self._notice if g.phase == "LOBBY" else "")),
             gates=self._gates, show_xray=self.xray,
             flash=self._flash if now < self._flash_until else None, leaderboard=tuple(leaderboard),
-            player_name=self.player)
+            player_name=self.player,
+            box_sw=(g.judge.box.u_max - g.judge.box.u_min, g.judge.box.v_max - g.judge.box.v_min),
+            radius_sw=g.level.radius_sw, reach=g.level.reach)
 
     def _paused_text(self):
         if not self.game.paused:

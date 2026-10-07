@@ -78,6 +78,15 @@ def test_the_hud_state_shows_the_ball_and_the_last_shot():
     assert st.mqtt_status in ("ok", "off", "offline")
 
 
+def test_the_hud_state_carries_the_shape_of_the_hand_plane_and_the_levels_hit_zone():
+    session = app.make_session(level=1)
+    st, box = session.hud_state(), session.game.judge.box
+    assert st.box_sw == pytest.approx((box.u_max - box.u_min, box.v_max - box.v_min))
+    assert st.radius_sw == levels.LEVELS[1].radius_sw and st.reach == levels.LEVELS[1].reach == 0.6
+    session.game.set_level(levels.LEVELS[3])
+    assert session.hud_state().radius_sw == 0.35 and session.hud_state().reach == 1.0
+
+
 def test_the_ball_is_reported_while_it_is_in_flight():
     session = app.make_session()
     session.on_start()

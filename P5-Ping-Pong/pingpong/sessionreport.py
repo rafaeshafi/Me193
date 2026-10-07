@@ -93,6 +93,8 @@ def summarize(loaded):
         "swing_source": (meta.get("calibration") or {}).get("swing", {}).get("source", "imu"),
         "overrides": meta.get("overrides") or {},
         "pose": {"n": len(pose_t), "fps": (len(pose_t) - 1) / pose_span if pose_span > 0 else 0.0},
+        "pose_lock": {"locked_out": (summary or {}).get("vision", {}).get("locked_out", 0),
+                      "frames": (summary or {}).get("vision", {}).get("frames", len(pose_t))},
         "pauses": _pauses(events, t0, end), "hub_trouble": sum(1 for e in events if e["k"] == "hub" and e["d"]["status"] != "ok"),
         "loop_p95_ms": summary["loop"]["p95_ms"] if summary else None,
     }
@@ -145,6 +147,11 @@ def format_report(s):
     else:
         lines.append(f"Hub: {hub['hz']:.1f} Hz, worst gap {hub['worst_gap_ms']:.0f} ms, {hub['gaps_over_100ms']} gaps "
                      f"over 100 ms; pose {pose['fps']:.1f} fps ({pose['n']} readings)")
+    lock = s["pose_lock"]
+    if lock["locked_out"] > 0 and lock["frames"] > 0:
+        lines.append(f"Pose lock: refused {lock['locked_out']} of {lock['frames']} camera frames "
+                     f"({100.0 * lock['locked_out'] / lock['frames']:.0f}%) as 'not the player': the shoulders looked "
+                     "far narrower or wider than at calibration (a turned torso, or a step towards or away from the camera)")
     for p in s["pauses"]:
         lines.append(f"  paused ({', '.join(p['reasons'])}) for {p['seconds']:.1f} s at {p['start_s']:.1f} s")
     if s["loop_p95_ms"] is not None:

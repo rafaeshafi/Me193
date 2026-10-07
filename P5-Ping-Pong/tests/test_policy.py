@@ -46,12 +46,26 @@ def test_zone_utility_prefers_far_zones_and_penalises_the_edges_at_speed():
     assert fast_edge < slow_edge
 
 
+def test_balls_arrive_inside_the_levels_share_of_the_reach_box():
+    p = pol(5)
+    for level in (ROOKIE, CLUB, PRO):
+        half = 0.35 * level.reach                                   # the zones sit 0.35 either side of the box's middle
+        aims = [p.serve(level, 0.5, 0, 0.5, survival=False).aim_ab for _ in range(300)]
+        assert all(abs(a - 0.5) <= half + 1e-9 and abs(b - 0.5) <= half + 1e-9 for a, b in aims)
+        assert max(abs(a - 0.5) for a, _ in aims) == pytest.approx(half)          # the edge zones are still used
+
+
+def test_a_full_reach_changes_nothing_so_the_learners_zone_labels_stay_exact():
+    assert policy.in_reach((0.15, 0.85), 1.0) == (0.15, 0.85)
+    assert policy.in_reach((0.15, 0.85), 0.6) == pytest.approx((0.29, 0.71))
+
+
 def test_survival_specials_come_every_tenth_ball_and_wide_balls_grow_with_the_rally():
     p = pol(9)
     assert p.serve(CLUB, 0.5, n_hits=10, player_a=0.5, survival=True).special is True
     assert p.serve(CLUB, 0.5, n_hits=9, player_a=0.5, survival=True).special is False
-    few = sum(abs(p.serve(CLUB, 0.5, 2, 0.5, True).aim_ab[0] - 0.5) > 0.3 for _ in range(300))
-    many = sum(abs(p.serve(CLUB, 0.5, 60, 0.5, True).aim_ab[0] - 0.5) > 0.3 for _ in range(300))
+    few = sum(abs(p.serve(CLUB, 0.5, 2, 0.5, True).aim_ab[0] - 0.5) > 0.15 for _ in range(300))
+    many = sum(abs(p.serve(CLUB, 0.5, 60, 0.5, True).aim_ab[0] - 0.5) > 0.15 for _ in range(300))
     assert many > few
 
 

@@ -14,6 +14,13 @@ def test_levels_are_strictly_ordered_in_every_difficulty_dimension():
         assert harder.cpu_speed_ms > easier.cpu_speed_ms
 
 
+def test_easier_levels_throw_the_ball_into_a_smaller_part_of_the_reach_box():
+    # the first live game: a Rookie was served to the far corners of a box he had stretched to reach, and never got there
+    reach = [levels.LEVELS[i].reach for i in (1, 2, 3, 4)]
+    assert reach == sorted(reach) and reach[-1] == 1.0
+    assert levels.LEVELS[1].reach == 0.6 and levels.LEVELS[2].reach == 0.8
+
+
 def test_names_and_tags_line_up_with_the_printed_cards():
     assert [levels.LEVELS[i].name for i in (1, 2, 3)] == ["Rookie", "Club", "Pro"]
     assert levels.level_for_tag(1).name == "Rookie"
