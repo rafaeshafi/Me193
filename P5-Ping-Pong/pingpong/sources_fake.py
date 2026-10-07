@@ -5,13 +5,25 @@ genuine IMU/gesture packets), so HubLink is exercised end to end without BLE.
 """
 
 import contextlib
+import inspect
 from types import SimpleNamespace
 
 from legoeducation import rpc_message as rm
 
 
+def _conforms(name, *args, **kwargs):
+    """TypeError unless the REAL DoubleMotor.<name> would accept this call (a fake that accepts anything hides typos)."""
+    import legoeducation as le
+
+    inspect.signature(getattr(le.DoubleMotor, name)).bind(None, *args, **kwargs)
+
+
 class FakeDoubleMotor:
-    """Stands in for the legoeducation DoubleMotor: records every command, can fail on demand."""
+    """Stands in for the legoeducation DoubleMotor: records every command, can fail on demand.
+
+    Every call is checked against the real library's signature, so a misnamed argument fails in
+    the tests instead of on the hardware.
+    """
 
     def __init__(self, fail_connect=False):
         self.calls = []             # (method name, kwargs) in call order
@@ -31,6 +43,7 @@ class FakeDoubleMotor:
         self._callback = callback
 
     def connect(self, **kwargs):
+        _conforms("connect", **kwargs)
         self._record("connect", **kwargs)
         self.connected = not self.fail_connect
 
@@ -39,22 +52,27 @@ class FakeDoubleMotor:
         self.connected = False
 
     def motor_stop(self, *, motor=None, blocking=True):
+        _conforms("motor_stop", motor=motor, blocking=blocking)
         self._record("motor_stop", motor=motor, blocking=blocking)
 
     def motor_run_for_time(self, time_ms, **kwargs):
+        _conforms("motor_run_for_time", time_ms, **kwargs)
         self._record("motor_run_for_time", time_ms=time_ms, **kwargs)
 
-    def beep(self, **kwargs):
+    def beep(self, *args, **kwargs):
+        _conforms("beep", *args, **kwargs)
         self._record("beep", **kwargs)
 
     def light_color(self, color, **kwargs):
+        _conforms("light_color", color, **kwargs)
         self._record("light_color", color=color, **kwargs)
 
     def begin_batch(self):
         self._record("begin_batch")
 
-    def end_batch(self, blocking=True):
-        self._record("end_batch", blocking=blocking)
+    def end_batch(self, *args, **kwargs):
+        _conforms("end_batch", *args, **kwargs)
+        self._record("end_batch", blocking=kwargs.get("blocking", True))
 
     def cancel_batch(self):
         self._record("cancel_batch")

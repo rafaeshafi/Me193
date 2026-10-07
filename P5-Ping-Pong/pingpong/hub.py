@@ -95,8 +95,10 @@ class HubLink:
         return age is None or age > threshold_ms
 
     def battery_pct(self):
+        """Battery percent, or None until the hub has reported (the library starts at 0, which means "unknown")."""
         info = getattr(self.dev, "info_device", None)
-        return getattr(info, "batteryLevel", None) if info is not None else None
+        level = getattr(info, "batteryLevel", None) if info is not None else None
+        return level or None
 
     # --- teardown (a killed process leaves the hub "connected" ~24 s) ------------------
     def close(self):

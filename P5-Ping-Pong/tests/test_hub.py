@@ -131,3 +131,15 @@ def test_card_kwargs_normalise_colour_name_and_zero_pad_the_serial():
         hubmod.card_kwargs("chartreuse", "0001")
     with pytest.raises(ValueError):
         hubmod.card_kwargs("green", "12345")
+
+
+def test_a_battery_level_of_zero_is_the_librarys_not_yet_known_value_not_an_empty_battery():
+    from pingpong.hub import HubLink
+    from pingpong.sources_fake import FakeDoubleMotor
+
+    dev = FakeDoubleMotor()
+    link = HubLink(dev)
+    dev.set_battery(0)
+    assert link.battery_pct() is None
+    dev.set_battery(63)
+    assert link.battery_pct() == 63
