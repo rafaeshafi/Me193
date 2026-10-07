@@ -70,7 +70,7 @@ not trust are reported and **not** written. Do these from Terminal.app:
 ./pp bench_cam                 # pose fps, tag read rate at 1.8 m, camera-vs-IMU lag, hub rate under load (a live
                                # window shows whether you are in position; Enter works there and in the terminal)
 ./pp bench_haptics             # which motor pulses you feel, and how long the IMU rings after one
-./pp calibrate_swing --player rafae   # shoulders, four reach corners, 5 soft + 5 full swings (~3 minutes)
+./pp calibrate_swing --player rafae   # shoulders, four reach corners, hub upright + turned side to side, 5 soft + 5 full swings (~4 minutes)
 ./pp train_spin --player rafae        # optional: 12 flat, 12 top, 12 back swings -> your spin model (~3 minutes)
 ```
 
@@ -123,7 +123,8 @@ between rallies to change the level; **M** switches Rally/Match; **1–3** also 
 | Pro | 7.0 m/s | 0.43 s | 0.16 / 0.10 s | 0.35 | the whole box |
 
 **What the screen shows.** The camera picture is behind everything; on top of it is a table with two table-tennis
-paddles. The **red paddle is yours** and follows your hand (the fist, not the wrist); its round face is exactly the
+paddles. The **red paddle is yours** and follows your hand (the fist, not the wrist) and **turns when you turn the hub**
+side to side in your fist (the calibration learns which way you turn it); its round face is exactly the
 level's hit radius, and the small amber ring is where the ball is about to arrive, so *the ring inside the red face
 when the ball gets there* is what the judge calls a hit. The **blue paddle is the computer**: it waits where it hit,
 moves to where your shot will land, and flicks when it hits the ball back from there. The grey rectangle is the part

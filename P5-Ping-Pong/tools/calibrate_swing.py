@@ -1,4 +1,4 @@
-"""Guided calibration: shoulders, four reach corners, soft and full swings.
+"""Guided calibration: shoulders, four reach corners, how you turn the hub, soft and full swings.
 
 Usage (from Terminal.app: camera and Bluetooth are not available to the Claude app):
     cd ~/ME193/P5-Ping-Pong
@@ -12,7 +12,9 @@ Stand about 1.8 m from the laptop with the hub in your fist, as you will play.  
 tells you what to do and the hub beeps at each capture (you are too far away to press keys):
   1. stand still, arms down (shoulder width: the one-player lock)
   2. hold the hub still at four corners of where you can comfortably reach
-  3. five SOFT swings, then five FULL swings
+  3. hold the hub upright like the paddle, then turn it side to side like a doorknob, right first (the paddle
+     on screen turns with it)
+  4. five SOFT swings, then five FULL swings
 The result (forward axis, soft/full strengths, reach box) is saved to
 data/players/<name>/calibration.json (calibration-pose.json for the camera) and `./pp play --player <name>` uses it.
 Q cancels without saving.
@@ -90,17 +92,25 @@ def render_frame(flow, background, hand_uv, last_note, size=(W, H)):
     cv2.rectangle(frame, (24, bar_y), (24 + bar_w, bar_y + 18), GREY, 1)
     cv2.rectangle(frame, (24, bar_y), (24 + int(bar_w * done / max(1, total)), bar_y + 18), GREEN, -1)
     if last_note:
-        canvas.draw_text(frame, last_note, (24, h - 30), 0.8, GREEN if "too" not in last_note else RED, 2)
+        canvas.draw_text(frame, last_note, (24, h - 30), 0.8, RED if is_complaint(last_note) else GREEN, 2)
     _draw_map(frame, flow, hand_uv, (w - 360, 90, 320, 240))
     return frame
+
+
+COMPLAINTS = ("too ", "waving", "harder", "firmer", "on too long", "further", "both ways", "one axis")
+
+
+def is_complaint(note):
+    """A note that tells the player to do it again (a low beep, shown in red)."""
+    return any(word in note for word in COMPLAINTS)
 
 
 def _beep(hub, note):
     """Audible feedback from the hub itself: you cannot read the screen mid-swing."""
     hz, count = 880, 1
-    if "swing" in note and "too" not in note and "waving" not in note:
+    if "swing" in note and not is_complaint(note):
         hz = 1320
-    if any(word in note for word in ("too ", "waving", "harder", "firmer", "on too long")):
+    if is_complaint(note):
         hz = 220
     if "calibration done" in note:
         hz, count = 2000, 3
@@ -209,7 +219,7 @@ def _selftest():
     script = fakerig.CalibrationScript()
     env = FakeEnv(hz=66.0)
     t0 = env.clock.now_ns()
-    env.scenario = lambda now: (0, 0, 1000, *script.imu_raw((now - t0) / S))
+    env.scenario = lambda now: (*script.accel_raw((now - t0) / S), *script.imu_raw((now - t0) / S))
     env.make_landmarker = lambda: FakeLandmarker(lambda t_ns: script.hand_uv((t_ns - t0) / S), env.clock)
     with tempfile.TemporaryDirectory() as tmp:
         args = parse_args(["--card-color", "red", "--card-serial", "1131", "--player", "selftest"])

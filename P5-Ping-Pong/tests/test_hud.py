@@ -266,6 +266,20 @@ def test_your_paddle_is_a_table_tennis_paddle_whose_face_is_the_hit_zone():
     assert tuple(frame[cy + round(1.5 * r), cx]) == canvas.WOOD                   # the wooden handle hangs below
 
 
+@pytest.mark.parametrize("angle, side", [(45.0, -1), (-45.0, 1), (0.0, 0)])
+def test_the_paddle_turns_with_the_hub_a_positive_angle_is_clockwise_as_the_player_sees_it(angle, side):
+    # clockwise: the handle, which hangs down, swings to the LEFT of the screen (like a clock hand moving from 6 to 9)
+    frame = hud.render(state(phase="RALLY", paddle_ab=(0.5, 0.5), box_sw=BOX_SW, radius_sw=0.55, paddle_angle=angle),
+                       size=(W, H))
+    cx, cy = hud.plane_xy((0.5, 0.5), BOX_SW, W, H)
+    r = 0.55 * S_PX
+    probe = (round(cx + side * 1.5 * r * 0.7071), round(cy + 1.5 * r * (0.7071 if side else 1.0)))
+    assert tuple(frame[probe[1], probe[0]]) == canvas.WOOD
+    straight_down = tuple(frame[round(cy + 1.5 * r), cx])
+    assert (straight_down == canvas.WOOD) is (side == 0)                        # the handle left the straight-down line
+    assert tuple(frame[cy, cx + round(0.6 * r)]) == canvas.RUBBER_RED          # and the face stays where the hand is
+
+
 def test_the_paddle_moves_with_the_hand_on_the_same_plane():
     frame = hud.render(state(phase="RALLY", paddle_ab=(0.8, 0.3), box_sw=BOX_SW, radius_sw=0.55), size=(W, H))
     px, py = hud.plane_xy((0.8, 0.3), BOX_SW, W, H)

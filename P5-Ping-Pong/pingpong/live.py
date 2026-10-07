@@ -34,6 +34,7 @@ from pingpong.livebuild import LiveSetupError, build_live, request_720p, require
 from pingpong.pose import PoseLock
 from pingpong.shake import ShakeMonitor
 from pingpong.swing import SwingDetector
+from pingpong.tilt import TiltEstimator
 from pingpong.vision import VisionWorker
 
 ACTIVE_PHASES = ("COUNTDOWN", "RALLY", "POINT_OVER")
@@ -293,6 +294,7 @@ class LiveRig:
         trace = tuple(rate for _, rate in self.imu.trace(1.5))
         return dataclasses.replace(self.session.hud_state(), swing_trace=trace, swing_scale=game.omega_hi,
                                    swing_threshold=game.judge.t_pk, hub_battery=self.hub.battery_pct(),
+                                   paddle_angle=self.imu.tilt_deg(),
                                    swing_label="CAMERA SWING" if self.swing_source == "pose" else "IMU SWING")
 
     def loop_stats(self):
@@ -332,8 +334,10 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         accel_per_g=apg, fs_raw=fs, lag_s=config.CAMERA_LAG_S if lag_s is None else lag_s,
         stale_ms=config.STALE_MS if stale_ms is None else stale_ms, no_motor=no_motor, learn=learner is not None,
         overrides=overrides, clock=clock)
+    tilt = (TiltEstimator(calibration.tilt, gpd, apg, nominal_hz=config.HUB_RATE_HZ or 64.0)
+            if calibration.tilt is not None and not camera else None)
     imu = ImuWorker(hub.imu if pose_gyro is None else queue.SimpleQueue(), SwingDetector(params), shake=shake,
-                    recorder=recorder, log=log)
+                    recorder=recorder, log=log, tilt=tilt)
     actuator = None                                      # no hub (--no-hub): no haptics, the sounds carry the cues
     if getattr(hub, "dev", None) is not None:
         # a pulse blanks the hub's gyro (the motors shake it); the camera does not feel the motors

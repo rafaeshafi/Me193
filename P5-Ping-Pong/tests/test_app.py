@@ -87,6 +87,16 @@ def test_the_hud_state_carries_the_shape_of_the_hand_plane_and_the_levels_hit_zo
     assert session.hud_state().radius_sw == 0.35 and session.hud_state().reach == 1.0
 
 
+def test_a_soft_notice_is_only_a_hint_and_gives_way_to_a_real_one():
+    session = app.make_session()
+    session.set_notice("PADDLE STAYS UPRIGHT: run ./pp calibrate_swing", soft=True)
+    assert session.hud_state().message.startswith("PADDLE") and session.has_notice() is False   # a real notice may still come
+    session.set_notice("BROKER HOLDS 18")
+    assert session.hud_state().message == "BROKER HOLDS 18" and session.has_notice() is True
+    session.game.start(session.clock.now_ns())
+    assert session.hud_state().message == ""                                     # and nothing shows once the game is on
+
+
 def test_the_ball_is_reported_while_it_is_in_flight():
     session = app.make_session()
     session.on_start()

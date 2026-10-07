@@ -160,3 +160,38 @@ def test_the_worker_records_every_sample_raw_even_the_ones_the_detector_ignores(
     feed(q, samples)
     worker.step()
     assert rec.samples == samples                             # ... the recording keeps the raw truth
+
+
+# --- the paddle's tilt ----------------------------------------------------------------------------------------------------
+def turning_samples(deg, seconds=2.0):
+    """The hub turned about its x axis up to `deg` degrees and held there (gravity turns the other way)."""
+    out = []
+    for i in range(int(seconds * HZ) + 1):
+        angle = min(deg, i * 0.8)
+        rate = 0.8 * HZ if i * 0.8 < deg else 0.0
+        a = (0, round(1000 * math.sin(math.radians(angle))), round(1000 * math.cos(math.radians(angle))))   # up, seen from the turned hub
+        out.append(ImuSample(t_ns=T0 + int(i / HZ * 1e9), g=(round(rate * GPD), 0, 0), a=a))
+    return out
+
+
+def tilting_worker():
+    from pingpong.tilt import TiltCalibration, TiltEstimator
+
+    est = TiltEstimator(TiltCalibration(axis=(1.0, 0.0, 0.0), neutral=(0.0, 0.0, 1.0), bias_dps=(0.0, 0.0, 0.0)), GPD, 1000.0)
+    q = queue.SimpleQueue()
+    return ImuWorker(q, SwingDetector(params()), tilt=est), q
+
+
+def test_the_worker_feeds_the_tilt_estimator_and_reports_the_paddles_angle():
+    worker, q = tilting_worker()
+    assert worker.tilt_deg() == 0.0
+    feed(q, turning_samples(30.0))
+    worker.step()
+    assert worker.tilt_deg() == pytest.approx(30.0, abs=3.0)
+
+
+def test_without_a_tilt_estimator_the_paddle_stays_upright():
+    worker, q = make()
+    feed(q, turning_samples(30.0))
+    worker.step()
+    assert worker.tilt_deg() == 0.0

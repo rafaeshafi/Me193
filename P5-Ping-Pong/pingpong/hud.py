@@ -67,6 +67,7 @@ class HudState:
     radius_sw: float = 0.55          # the level's hit radius: the target ring is exactly this big
     reach: float = 1.0               # the share of the reach box the balls arrive in
     cpu_swing: float | None = None   # 0..1 while the computer's paddle is hitting the ball, else None
+    paddle_angle: float = 0.0        # degrees, clockwise as the player sees it: how far the hub is turned in the hand
 
 
 def render(state, size=(1280, 720), background=None):
@@ -94,7 +95,7 @@ def _draw_actors(frame, s, w, h):
     if s.paddle_ab is not None:
         # your paddle: its face is the judge's hit zone (a circle of the level's radius), centred on your hand
         px, py = plane_xy(s.paddle_ab, s.box_sw, w, h)
-        canvas.draw_paddle(frame, px, py, round(s.radius_sw * PLANE_SW_PX * h))
+        canvas.draw_paddle(frame, px, py, round(s.radius_sw * PLANE_SW_PX * h), angle_deg=s.paddle_angle)
         cv2.circle(frame, (px, py), 4, WHITE, -1, cv2.LINE_AA)
     target = None
     if s.arrival_ab is not None and s.phase == "RALLY":

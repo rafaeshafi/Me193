@@ -1,4 +1,4 @@
-"""CalibrationFlow: stand still, hold four reach corners, 5 soft + 5 full swings -> a Calibration.
+"""CalibrationFlow: stand still, hold four reach corners, hold upright and turn side to side, 5 soft + 5 full swings.
 
 Driven by a scripted person (pingpong.fakerig.CalibrationScript) whose hub is mounted at an
 arbitrary angle, so the learned forward axis has something real to find.
@@ -29,10 +29,35 @@ def run_script(script, flow=None, **flow_kw):
     return flow, steps_seen
 
 
-def test_the_flow_walks_stand_corners_soft_full_done_with_a_prompt_for_each():
+def test_the_flow_walks_stand_corners_tilt_soft_full_done_with_a_prompt_for_each():
     flow, steps = run_script(fakerig.CalibrationScript())
-    assert steps == ["stand", "corners", "soft", "full", "done"]
+    assert steps == ["stand", "corners", "tilt", "soft", "full", "done"]
     assert flow.finished()
+
+
+def test_after_the_corners_the_hub_is_held_upright_then_turned_side_to_side():
+    script = fakerig.CalibrationScript()
+    tilt = run_script(script)[0].calibration().tilt
+    assert tilt is not None
+    assert angle_deg(tilt.axis, script.tilt_axis) < 5.0                    # the first move was to the right: positive about it
+    assert angle_deg(tilt.neutral, (0, 0, 1)) < 3.0                        # upright is how the hub was held still
+
+
+def test_the_tilt_step_asks_for_upright_and_still_first_and_then_for_the_turn():
+    flow = CalibrationFlow(gyro_per_dps=GPD)
+    flow.step = "tilt"
+    assert "upright" in flow.prompt().lower() and flow.progress() == (0, 2)
+    for i in range(int(4.5 * 64)):                                         # 4.5 s of holding the hub still, upright
+        flow.feed_imu(ImuSample(t_ns=5 * S + round(i * S / 64), g=(0, 0, 0), a=(0, 0, 1000)))
+    assert "side to side" in flow.prompt().lower() and flow.progress() == (1, 2)
+    assert any("upright" in note for note in flow.take_notes())
+
+
+def test_a_player_who_barely_turns_the_hub_is_told_to_turn_it_further_and_stays_on_the_step():
+    notes, flow = [], CalibrationFlow(gyro_per_dps=GPD)
+    fakerig.drive_calibration(fakerig.CalibrationScript(tilt_deg=8.0), flow, on_note=notes.append,
+                              stop_after_notes=("further",))
+    assert flow.step == "tilt" and any("further" in note for note in notes)
 
 
 def test_the_forward_axis_strengths_box_and_shoulder_width_come_out_right():
@@ -181,7 +206,8 @@ def test_the_flow_can_calibrate_from_the_hand_speed_alone():
     steps = []
     fakerig.drive_calibration(script, flow, on_step=steps.append, camera=True)
     cal = flow.calibration()
-    assert steps == ["stand", "corners", "soft", "full", "done"]
+    assert steps == ["stand", "corners", "soft", "full", "done"]                  # no hub, no tilt: the camera has no hub to turn
+    assert cal.tilt is None
     assert cal.swing.source == "pose" and angle_deg(cal.swing.u_fwd, script.u_true) < 8.0
     assert cal.swing.omega_hi > 1.5 * cal.swing.omega_lo
     detected, total = flow.self_check

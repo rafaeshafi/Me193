@@ -30,6 +30,17 @@ def test_a_calibration_round_trips_through_json():
     assert again.calibrated is True
 
 
+def test_the_paddle_tilt_calibration_is_saved_with_the_rest_and_an_older_file_without_it_still_loads():
+    from pingpong.tilt import TiltCalibration
+
+    tilt = TiltCalibration(axis=(0.6, 0.8, 0.0), neutral=(0.0, 0.0, 1.0), bias_dps=(1.0, -2.0, 0.5))
+    with_tilt = profile.Calibration(swing=sample().swing, box=sample().box, shoulder_w=0.21, hand="left", tilt=tilt)
+    assert profile.Calibration.from_json(with_tilt.to_json()).tilt == tilt
+    old = json.loads(sample().to_json())
+    assert "tilt" not in old and profile.Calibration.from_json(json.dumps(old)).tilt is None
+    assert profile.Calibration.default().tilt is None
+
+
 def test_the_default_is_flagged_uncalibrated_so_the_game_can_say_so():
     default = profile.Calibration.default()
     assert default.calibrated is False and default.shoulder_w is None

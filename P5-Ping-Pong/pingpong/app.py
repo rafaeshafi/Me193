@@ -39,7 +39,7 @@ class Session:
         self.xray = False
         self._gates, self._last_kmh, self._last_label, self._spin = (), None, "", ""
         self._message, self._message_until = "", 0
-        self._notice = ""
+        self._notice = self._soft_notice = ""
         self.audio = None                        # pingpong.audio.Audio (optional)
         self._last_digit = None
         self.player = ""                         # the player's name (highlighted on the leaderboard)
@@ -49,9 +49,14 @@ class Session:
         self._flash, self._flash_until = None, 0
         self._cpu_swing_ns = None
 
-    def set_notice(self, text):
-        """A standing message for the lobby (e.g. "UNCALIBRATED"); pauses and event banners win over it."""
-        self._notice = text
+    def set_notice(self, text, soft=False):
+        """A standing message for the lobby (e.g. "UNCALIBRATED"); pauses and event banners win over it.
+
+        A soft one is only a hint: any real notice (what the broker holds, UNCALIBRATED) takes its place."""
+        if soft:
+            self._soft_notice = text
+        else:
+            self._notice = text
 
     def has_notice(self):
         return bool(self._notice)
@@ -180,7 +185,7 @@ class Session:
             last_kmh=self._last_kmh, last_label=self._last_label, spin_text=self._spin,
             mqtt_status=self._mqtt_status(), hub_status=self._hub_status(),
             message=(self._paused_text() or (self._message if now < self._message_until else "")
-                     or (self._notice if g.phase == "LOBBY" else "")),
+                     or ((self._notice or self._soft_notice) if g.phase == "LOBBY" else "")),
             gates=self._gates, show_xray=self.xray,
             flash=self._flash if now < self._flash_until else None, leaderboard=tuple(leaderboard),
             player_name=self.player,

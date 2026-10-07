@@ -246,16 +246,19 @@ class FakeRig:
 class CalibrationScript:
     """A scripted person doing the whole calibration, with the hub mounted at an arbitrary angle.
 
-    Stand still, hold four reach corners, then soft and full swings (each a backswing lobe followed
-    by the forward stroke along u_true).  Everything is reproducible from `seed`.
+    Stand still, hold four reach corners, hold the hub upright and turn it side to side (two cycles of +-tilt_deg
+    about tilt_axis, to the right first), then soft and full swings (each a backswing lobe followed by the forward
+    stroke along u_true).  Everything is reproducible from `seed`.
     """
 
     def __init__(self, *, u_true=(0.35, 0.88, -0.32), shoulder_w=0.21, hand="right",
                  corners=((-1.1, 0.7), (1.1, 0.7), (1.1, -0.6), (-1.1, -0.6)),
                  soft=(330, 360, 300, 350, 320), full=(1100, 1050, 1200, 1150, 1000), back_ratios=None,
-                 gpd=GPD, seed=1, camera=False):
+                 tilt_axis=(0.8, 0.6, 0.0), tilt_deg=40.0, gpd=GPD, seed=1, camera=False):
         norm = math.sqrt(sum(c * c for c in u_true))
         self.u_true = tuple(c / norm for c in u_true)
+        tilt_norm = math.sqrt(sum(c * c for c in tilt_axis))
+        self.tilt_axis, self.tilt_deg = tuple(c / tilt_norm for c in tilt_axis), tilt_deg
         self.camera = camera                                 # the hand itself swings (u_true is then a direction in u, v)
         self._swings = []                                    # camera mode: (forward start, duration, speed, back ratio)
         self.shoulder_w, self.hand, self.corners = shoulder_w, hand, [tuple(c) for c in corners]
@@ -271,6 +274,8 @@ class CalibrationScript:
             pos, t = corner, t + 2.0                         # 0.6 s to get there, 1.4 s held still
         self._segments.append((t, t + 0.6, pos, rest))
         t += 1.1
+        self._tilt_move = (t + 3.8, t + 7.8)                 # 3.8 s upright and still, then 4 s of turning side to side
+        t += 7.8 + 0.8
         for peak, b in zip(peaks, back):
             t += 1.2
             self._lobes += [(t, 0.20, -b * peak), (t + 0.22, 0.15, peak)]
@@ -292,9 +297,25 @@ class CalibrationScript:
             u, v = u + travel * self.u_true[0] / norm, v + travel * self.u_true[1] / norm
         return u + self.rng.gauss(0, 0.004), v + self.rng.gauss(0, 0.004)
 
+    def _tilt_deg(self, t):
+        t0, t1 = self._tilt_move
+        return self.tilt_deg * math.sin(2 * math.pi * 0.5 * (t - t0)) if t0 <= t < t1 else 0.0
+
     def imu_raw(self, t):
         rate = sum(peak * math.sin(math.pi * (t - t0) / dur) for t0, dur, peak in self._lobes if t0 <= t <= t0 + dur)
-        return tuple(round((rate * c + self.rng.gauss(0, 2.0)) * self.gpd) for c in self.u_true)
+        t0, t1 = self._tilt_move
+        turn = self.tilt_deg * math.pi * math.cos(2 * math.pi * 0.5 * (t - t0)) if t0 <= t < t1 else 0.0   # deg/s
+        return tuple(round((rate * c + turn * k + self.rng.gauss(0, 2.0)) * self.gpd)
+                     for c, k in zip(self.u_true, self.tilt_axis))
+
+    def accel_raw(self, t):
+        """Gravity as the hub reads it: along z, but turned the opposite way while the hub is turned about tilt_axis."""
+        a, k = math.radians(-self._tilt_deg(t)), self.tilt_axis
+        up = (0.0, 0.0, 1.0)
+        cross = (k[1] * up[2] - k[2] * up[1], k[2] * up[0] - k[0] * up[2], k[0] * up[1] - k[1] * up[0])
+        dot = sum(x * y for x, y in zip(k, up))
+        return tuple(round(GRAVITY * (up[i] * math.cos(a) + cross[i] * math.sin(a) + k[i] * dot * (1 - math.cos(a))))
+                     for i in range(3))
 
 
 def drive_calibration(script, flow, *, on_step=None, on_note=None, stop_after_notes=(), imu_hz=66.0, pose_hz=30.0,
@@ -326,7 +347,7 @@ def drive_calibration(script, flow, *, on_step=None, on_note=None, stop_after_no
             break
         now = t0_ns + round(t * S)
         if t >= next_imu and not camera:
-            flow.feed_imu(ImuSample(t_ns=now, g=script.imu_raw(t), a=(0, 0, GRAVITY)))
+            flow.feed_imu(ImuSample(t_ns=now, g=script.imu_raw(t), a=script.accel_raw(t)))
             next_imu += 1.0 / imu_hz
         if t >= next_pose:
             u, v = script.hand_uv(t)

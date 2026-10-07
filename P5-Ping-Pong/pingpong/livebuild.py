@@ -169,4 +169,7 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
     if not calibration.calibrated:
         flags = (" --swing-source pose" + (" --no-hub" if args.no_hub else "")) if camera else ""
         rig.session.set_notice(f"UNCALIBRATED: run ./pp calibrate_swing --player {args.player}{flags}")
+    elif calibration.tilt is None and not camera:
+        rig.session.set_notice(f"PADDLE STAYS UPRIGHT: run ./pp calibrate_swing --player {args.player} to teach it "
+                               "how you turn the hub", soft=True)
     return rig

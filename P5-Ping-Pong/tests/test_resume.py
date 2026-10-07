@@ -13,6 +13,7 @@ from pingpong import live, profile
 from pingpong.calibration import SwingCalibration
 from pingpong.paddle import ReachBox
 from pingpong.sources_fake import FakeEnv
+from pingpong.tilt import TiltCalibration
 
 OFFICIAL = config.SCORE_TOPIC
 
@@ -23,7 +24,9 @@ def args_for(*extra):
 
 def calibrated(tmp_path):
     profile.save("rafae", profile.Calibration(swing=SwingCalibration((1.0, 0.0, 0.0), 300.0, 1100.0),
-                                              box=ReachBox(-1.5, 1.5, -0.9, 0.7), shoulder_w=0.2), root=tmp_path)
+                                              box=ReachBox(-1.5, 1.5, -0.9, 0.7), shoulder_w=0.2,
+                                              tilt=TiltCalibration((1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 0.0, 0.0))),
+                 root=tmp_path)
 
 
 def build(tmp_path, *extra, messages=None):
@@ -53,7 +56,7 @@ def test_the_broker_holding_nothing_worth_keeping_is_not_announced(tmp_path):
     rig, client = build(tmp_path, messages=messages)
     client.deliver(OFFICIAL, "0.0", retain=True)
     rig.pump()
-    assert rig.session.hud_state().message == "" and not any("holds" in m for m in messages)
+    assert rig.session.hud_state().message == "" and not any("broker holds" in m for m in messages)   # ("thresholds" has "holds" in it)
 
 
 def test_with_resume_the_record_starts_from_the_retained_best_and_the_lobby_says_so(tmp_path):

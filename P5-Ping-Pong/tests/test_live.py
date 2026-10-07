@@ -77,7 +77,7 @@ class Vision:
 
 class Imu:
     def __init__(self, log):
-        self.log, self.events, self.steps, self.locks = log, [], 0, []
+        self.log, self.events, self.steps, self.locks, self.tilt = log, [], 0, [], 0.0
 
     def step(self):
         self.steps += 1
@@ -91,6 +91,9 @@ class Imu:
 
     def trace(self, seconds):
         return [(0.0, 100.0), (0.1, 450.0)]
+
+    def tilt_deg(self):
+        return self.tilt
 
     def poll_locks(self):
         out, self.locks = self.locks, []
@@ -430,6 +433,13 @@ def test_the_hud_state_carries_the_imu_trace_and_the_thresholds_it_is_judged_aga
     assert state.swing_trace == (100.0, 450.0)
     assert state.swing_threshold == r.game.judge.t_pk and state.swing_scale == r.game.omega_hi
     assert state.phase == r.session.hud_state().phase
+
+
+def test_the_hud_state_carries_how_far_the_hub_is_turned_for_the_paddle():
+    r = Rig()
+    assert r.rig.hud_state().paddle_angle == 0.0
+    r.imu.tilt = -23.5
+    assert r.rig.hud_state().paddle_angle == -23.5
 
 
 def test_the_rig_records_poses_swings_game_events_tags_pauses_and_phase_changes():

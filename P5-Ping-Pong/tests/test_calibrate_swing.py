@@ -16,7 +16,7 @@ S = 1_000_000_000
 def fake_env(script):
     env = FakeEnv(hz=66.0)
     t0 = env.clock.now_ns()
-    env.scenario = lambda now: (0, 0, 1000, *script.imu_raw((now - t0) / S))
+    env.scenario = lambda now: (*script.accel_raw((now - t0) / S), *script.imu_raw((now - t0) / S))
     env.make_landmarker = lambda: FakeLandmarker(lambda t_ns: script.hand_uv((t_ns - t0) / S), env.clock)
     return env
 
@@ -41,7 +41,18 @@ def test_the_whole_tool_on_fake_hardware_saves_a_calibration_the_game_can_load(t
     assert angle_deg(cal.swing.u_fwd, script.u_true) < 5.0
     assert cal.shoulder_w == pytest.approx(0.20, abs=0.01)                   # what the fake landmarks encode
     assert cal.box.u_max - cal.box.u_min > 1.8 and cal.box.v_max - cal.box.v_min > 1.0
+    assert cal.tilt is not None and angle_deg(cal.tilt.axis, script.tilt_axis) < 6.0     # the paddle will turn with the hub
     assert frames and any("calibration done" in n for n in notes)
+
+
+def test_what_the_tool_complains_about_beeps_low_and_shows_red_and_what_it_accepts_does_not():
+    for complaint in ("that swing was too gentle (80 dps): swing a bit firmer", "turn it both ways: right, then left",
+                      "the hub hardly turned: turn it side to side, further", "turn it about one axis, like a doorknob",
+                      "that was waving, not a swing: one clean swing at a time"):
+        assert tool.is_complaint(complaint), complaint
+    for fine in ("soft swing 1/5: peak 330 dps", "upright captured: now turn the hub side to side like a doorknob, right first",
+                 "tilt measured: the paddle on screen will turn with the hub", "corner 1/4 captured (top-left)"):
+        assert not tool.is_complaint(fine), fine
 
 
 def test_pressing_q_cancels_without_saving_and_lets_the_hub_go(tmp_path):

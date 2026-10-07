@@ -8,6 +8,7 @@ from pingpong import live, profile
 from pingpong.calibration import SwingCalibration
 from pingpong.paddle import ReachBox
 from pingpong.sources_fake import FakeEnv
+from pingpong.tilt import TiltCalibration
 
 
 def live_args(*extra):
@@ -59,14 +60,23 @@ def test_an_unknown_player_gets_the_default_calibration_and_the_lobby_says_so(tm
     assert "calibrat" in rig.session.hud_state().message.lower()
 
 
+def test_a_calibration_without_a_tilt_makes_the_lobby_say_how_to_get_a_paddle_that_turns(tmp_path):
+    saved = profile.Calibration(swing=SwingCalibration((0.0, 1.0, 0.0), 280.0, 1100.0),
+                                box=ReachBox(-1.5, 1.5, -0.9, 0.7), shoulder_w=0.2)
+    profile.save("rafae", saved, root=tmp_path)
+    message = live.build_live(live_args("--player", "rafae"), FakeEnv(), player_root=tmp_path).session.hud_state().message
+    assert "calibrate_swing" in message and "turn" in message.lower() and "UNCALIBRATED" not in message
+
+
 def test_a_saved_calibration_is_loaded_for_the_player(tmp_path):
     saved = profile.Calibration(swing=SwingCalibration((0.0, 1.0, 0.0), 280.0, 1100.0),
-                                box=ReachBox(-1.5, 1.5, -0.9, 0.7), shoulder_w=0.2, hand="left")
+                                box=ReachBox(-1.5, 1.5, -0.9, 0.7), shoulder_w=0.2, hand="left",
+                                tilt=TiltCalibration((1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 0.0, 0.0)))
     profile.save("rafae", saved, root=tmp_path)
     rig = live.build_live(live_args("--player", "rafae"), FakeEnv(), player_root=tmp_path)
     assert rig.calibration.calibrated and rig.calibration.hand == "left"
     assert rig.session.game.judge.box == saved.box and rig.session.game.omega_hi == 1100.0
-    assert rig.session.hud_state().message == ""
+    assert rig.session.hud_state().message == "" and rig.imu.tilt is not None           # fully calibrated: nothing to say
 
 
 def test_the_hub_is_connected_with_the_configured_notify_interval_and_card(tmp_path):

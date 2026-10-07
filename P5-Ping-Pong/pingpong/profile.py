@@ -15,6 +15,7 @@ from typing import Optional
 import config
 from pingpong.calibration import SwingCalibration
 from pingpong.paddle import ReachBox
+from pingpong.tilt import TiltCalibration
 
 VERSION = 1
 
@@ -38,6 +39,7 @@ class Calibration:
     shoulder_w: Optional[float] = None      # standing shoulder width as a fraction of the frame; feeds PoseLock
     hand: str = "right"
     calibrated: bool = True
+    tilt: Optional[TiltCalibration] = None  # how the paddle turns with the hub; None: it stays upright on screen
 
     @classmethod
     def default(cls, source="imu"):
@@ -55,12 +57,15 @@ class Calibration:
 
     def to_json(self):
         box = self.box
-        return json.dumps({
+        data = {
             "version": VERSION, "hand": self.hand, "shoulder_w": self.shoulder_w,
             "swing": {"u_fwd": list(self.swing.u_fwd), "omega_lo": self.swing.omega_lo,
                       "omega_hi": self.swing.omega_hi, "source": self.swing.source},
             "box": {"u_min": box.u_min, "u_max": box.u_max, "v_min": box.v_min, "v_max": box.v_max},
-        }, indent=2) + "\n"
+        }
+        if self.tilt is not None:
+            data["tilt"] = json.loads(self.tilt.to_json())
+        return json.dumps(data, indent=2) + "\n"
 
     @classmethod
     def from_json(cls, text):
@@ -69,7 +74,8 @@ class Calibration:
         return cls(swing=SwingCalibration(u_fwd=tuple(swing["u_fwd"]), omega_lo=float(swing["omega_lo"]),
                                           omega_hi=float(swing["omega_hi"]), source=swing.get("source", "imu")),
                    box=ReachBox(box["u_min"], box["u_max"], box["v_min"], box["v_max"]),
-                   shoulder_w=d.get("shoulder_w"), hand=d.get("hand", "right"))
+                   shoulder_w=d.get("shoulder_w"), hand=d.get("hand", "right"),
+                   tilt=TiltCalibration.from_json(d["tilt"]) if d.get("tilt") else None)
 
 
 def _path(name, root, source="imu"):

@@ -1,4 +1,4 @@
-"""ImuWorker: hub IMU samples -> SwingDetector (+ ShakeMonitor) -> SwingEvents / shake locks, on its own thread.
+"""ImuWorker: hub IMU samples -> SwingDetector (+ ShakeMonitor, TiltEstimator) -> SwingEvents / shake locks, on its own thread.
 
 It BLOCKS on the sample queue (no 60 Hz polling latency), so an IMPACT is emitted as
 soon as the falling edge arrives.  The detector is not thread-safe, so every touch of it
@@ -13,10 +13,11 @@ from pingpong.swing import SwingDetector
 
 
 class ImuWorker:
-    def __init__(self, samples, detector, shake=None, recorder=None, log=print):
+    def __init__(self, samples, detector, shake=None, recorder=None, log=print, tilt=None):
         self.samples = samples                       # queue.SimpleQueue of ImuSample (HubLink.imu)
         self.detector = detector
         self.shake = shake                           # optional ShakeMonitor (judge gate J6)
+        self.tilt = tilt                             # optional TiltEstimator: how far the hub is turned, for the paddle
         self.recorder = recorder                     # optional Recorder: gets every raw sample
         self.log = log
         self._events = queue.SimpleQueue()
@@ -40,6 +41,11 @@ class ImuWorker:
         with self._lock:
             return self.detector.trace(seconds)
 
+    def tilt_deg(self):
+        """How far the hub is turned side to side, in degrees (0.0 without a tilt calibration)."""
+        with self._lock:
+            return 0.0 if self.tilt is None else self.tilt.angle
+
     def poll(self):
         events = []
         while not self._events.empty():
@@ -58,6 +64,8 @@ class ImuWorker:
         if self.recorder is not None:
             self.recorder.imu(sample)                # raw truth, including blanked samples
         with self._lock:
+            if self.tilt is not None:
+                self.tilt.feed(sample)
             for event in self.detector.feed(sample):
                 self._events.put_nowait(event)
             if self.shake is not None:
