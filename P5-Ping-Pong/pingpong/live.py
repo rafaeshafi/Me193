@@ -23,7 +23,10 @@ from collections import deque
 import cv2
 
 import config
+from pathlib import Path
+
 from pingpong import app, mqtt_link, profile
+from pingpong import recorder as recorder_mod
 from pingpong.haptics import Actuator, ActuatorCore
 from pingpong.hub import card_kwargs
 from pingpong.imu_worker import ImuWorker
@@ -48,8 +51,10 @@ class LiveRig:
     def __init__(self, session, *, hub, imu, vision, actuator=None, mqtt_client=None, clock,
                  threaded=False, stale_ms=None, pose_stale_s=POSE_STALE_S,
                  reconnect_after_s=RECONNECT_AFTER_S, reconnect_cooldown_s=RECONNECT_COOLDOWN_S,
-                 max_reconnects=MAX_RECONNECTS, log=print):
+                 max_reconnects=MAX_RECONNECTS, recorder=None, log=print):
         self.session, self.hub, self.imu, self.vision = session, hub, imu, vision
+        self.recorder = recorder
+        self._seen = {"phase": None, "pauses": None, "hub": None}
         self.actuator, self.mqtt_client, self.clock = actuator, mqtt_client, clock
         self.threaded, self.log = threaded, log
         self.stale_ms = config.STALE_MS if stale_ms is None else stale_ms
@@ -83,6 +88,8 @@ class LiveRig:
             return
         self._closed = True
         steps = [("actuator", self._stop_actuator), ("camera", self.vision.stop), ("imu", self.imu.stop)]
+        if self.recorder is not None:                # after the IMU thread stopped: the last samples are in
+            steps.append(("recorder", self.recorder.close))
         if self.mqtt_client is not None and self.session.game.publisher is not None:
             steps.append(("mqtt", lambda: mqtt_link.shutdown(self.mqtt_client, self.session.game.publisher)))
         steps.append(("hub", self.hub.close))
@@ -109,22 +116,59 @@ class LiveRig:
         self._update_pauses(now, hub_stale)
         self._maybe_reconnect(now, hub_stale)
         for tag in self.vision.poll_tags():
+            self._record("tag", tag.t_ns, {"role": tag.role, "value": tag.value})
             self.session.on_tag(tag)
         for until in self.imu.poll_locks():
+            self._record("shake_lock", now, {"until_ns": until})
             self.session.game.judge.lock_paddle(until)               # gate J6: the hub is being shaken
         for swing in self.imu.poll():
             if swing.kind == "IMPACT":
                 self.n_impacts += 1
-                self.session.on_swing(swing)
-        self.session.tick(data_ns=self.hub.last_rx_ns)
+                self._record("swing", swing.t_ns, dataclasses.asdict(swing))
+                self._game_events(self.session.on_swing(swing))
+        self._game_events(self.session.tick(data_ns=self.hub.last_rx_ns))
         if not self.threaded and hasattr(self.actuator, "process"):
             self.actuator.process(now)
+        self._record_changes(now)
+        if self.recorder is not None:
+            self.recorder.tick(now)
         self._loop_ms.append((time.perf_counter() - t0) * 1000.0)
+
+    # --- recording hooks (no-ops without a recorder) ------------------------------------------------------
+    def _record(self, kind, t_ns, data):
+        if self.recorder is not None:
+            self.recorder.event(kind, t_ns, data)
+
+    def _game_events(self, events):
+        if self.recorder is not None and events:
+            self.recorder.game_events(events)
+
+    def _record_changes(self, now):
+        """Phase, pause and hub-status transitions: what a replay needs to rebuild the same game."""
+        if self.recorder is None:
+            return
+        game = self.session.game
+        phase = (game.phase, game.mode, game.level.tag)
+        if phase != self._seen["phase"]:
+            self._seen["phase"] = phase
+            self._record("phase", now, {"phase": game.phase, "level": game.level.tag, "mode": game.mode,
+                                        "started_at_ns": game.started_at_ns, "player_points": game.player_points,
+                                        "cpu_points": game.cpu_points})
+        pauses = sorted(game.pause_reasons)
+        if pauses != self._seen["pauses"]:
+            self._seen["pauses"] = pauses
+            self._record("pause", now, {"reasons": pauses})
+        status = self.hub_status()
+        if status != self._seen["hub"]:
+            self._seen["hub"] = status
+            self._record("hub", now, {"status": status})
 
     def _feed_poses(self):
         for pose in self.vision.snapshot():
             if self._last_pose_ns is None or pose.t_scene_ns > self._last_pose_ns:
                 self.session.on_pose(pose)
+                if self.recorder is not None:
+                    self.recorder.pose(pose)
                 self._last_pose_ns = pose.t_scene_ns
 
     def _update_pauses(self, now, hub_stale):
@@ -210,7 +254,7 @@ class LiveRig:
 def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None, mqtt_client=None, level=1,
              mode="survival", target=7, seed=1, source="live", scope=None, no_publish=False, no_motor=False,
              threaded=False, lag_s=None, gyro_per_dps=None, accel_per_g=None, fs_raw=None, stale_ms=None,
-             to_image=None, log=print):
+             to_image=None, record_dir=None, player="rafae", log=print):
     """Wire every piece into one LiveRig.  The real play.py and the fake rig both come through here,
     so the wiring that matters on hardware (haptic blank windows, phase-gated tag search, the pose
     lock, status lights) is exactly the wiring the tests run."""
@@ -219,7 +263,13 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
     fs = config.HUB_FS_RAW if fs_raw is None else fs_raw
     params = calibration.swing_params(gpd, apg, fs)
     shake = ShakeMonitor(gyro_per_dps=gpd, rms_min_dps=0.35 * params.t_pk)     # motion smaller than this is tremor
-    imu = ImuWorker(hub.imu, SwingDetector(params), shake=shake)
+    recorder = _start_recording(record_dir, log, source=source, player=player, seed=seed, level=level, mode=mode,
+                                target=target, scope=scope or config.RECORD_SCOPE, t0_ns=clock.now_ns(),
+                                calibration=calibration, gyro_per_dps=gpd, accel_per_g=apg, fs_raw=fs,
+                                lag_s=config.CAMERA_LAG_S if lag_s is None else lag_s,
+                                stale_ms=config.STALE_MS if stale_ms is None else stale_ms, no_motor=no_motor,
+                                clock=clock)
+    imu = ImuWorker(hub.imu, SwingDetector(params), shake=shake, recorder=recorder)
     core = ActuatorCore(hub.dev, clock=clock, no_motor=no_motor, on_blank=imu.blank)   # the pulse blanks the IMU
     actuator = Actuator(core, log=log) if threaded else core
     publishing = mqtt_client is not None and not no_publish
@@ -236,11 +286,22 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
                           to_image=to_image)
     rig = LiveRig(session, hub=hub, imu=imu, vision=vision, actuator=actuator,
                   mqtt_client=mqtt_client if publishing else None, clock=clock, threaded=threaded,
-                  stale_ms=stale_ms, log=log)
+                  stale_ms=stale_ms, recorder=recorder, log=log)
     session.bind_status(hub=rig.hub_status, mqtt=mqtt_link.status_fn(mqtt_client) if publishing else None)
     if publishing:
         mqtt_link.attach(mqtt_client, session.game.publisher)
     return rig
+
+
+def _start_recording(record_dir, log, *, clock, **meta):
+    """A Recorder for this session, or None: a recording that cannot start must never stop the game."""
+    if record_dir is None:
+        return None
+    try:
+        return recorder_mod.Recorder(record_dir, recorder_mod.session_meta(**meta), clock=clock, log=log)
+    except OSError as exc:
+        log(f"recording disabled: {exc}")
+        return None
 
 
 def require_card(args):
@@ -263,7 +324,7 @@ def _request_720p(capture):
         setter(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
 
-def build_live(args, env, *, player_root=None, log=print):
+def build_live(args, env, *, player_root=None, record_root=None, log=print):
     """Everything a live session needs, from the command line and an environment (real or fake).
 
     A failure after the hub connected lets the hub go again: a leaked connection would keep the
@@ -273,6 +334,8 @@ def build_live(args, env, *, player_root=None, log=print):
     guest = profile.slug(args.player) == "guest"
     calibration = (None if guest else profile.load(args.player, root=player_root)) or profile.Calibration.default()
     no_publish = bool(args.no_publish or guest)                  # a guest must never touch the owner's score
+    record_dir = None if args.no_record else Path(record_root or recorder_mod.default_root()) / \
+        recorder_mod.session_name(args.player)
     hub = env.make_hub(config.NOTIFY_MS, card)
     try:
         hub.connect()
@@ -291,7 +354,7 @@ def build_live(args, env, *, player_root=None, log=print):
             tag_detector=env.make_tag_detector(), mqtt_client=None if no_publish else env.make_mqtt_client(),
             level=args.level, mode=args.mode, target=args.target, seed=args.seed, source="live",
             no_publish=no_publish, no_motor=args.no_motor, threaded=env.threaded,
-            to_image=getattr(env, "to_image", None), log=log)
+            to_image=getattr(env, "to_image", None), record_dir=record_dir, player=args.player, log=log)
     except BaseException:
         if capture is not None:
             capture.release()

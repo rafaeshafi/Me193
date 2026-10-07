@@ -347,3 +347,10 @@ def test_without_a_data_horizon_the_wall_clock_decides_as_before():
     game, _ = make()
     start_rally(game)
     assert "miss" in kinds(game.tick(game.judge.miss_deadline_ns(game.incoming) + 1))
+
+
+def test_the_game_remembers_exactly_when_it_was_started_so_a_replay_can_reproduce_it():
+    game, _ = make()
+    assert game.started_at_ns is None
+    game.start(123_456_789)
+    assert game.started_at_ns == 123_456_789

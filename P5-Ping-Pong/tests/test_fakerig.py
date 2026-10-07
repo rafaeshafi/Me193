@@ -163,3 +163,20 @@ def test_after_the_shaking_stops_the_lock_expires_and_hits_count_again():
     rig.shake_windows.append((rig.now_s(), rig.now_s() + 1.5))          # over before the first ball arrives
     rig.run(until=lambda: rig.game.tracker.streak >= 3, max_s=60)
     assert rig.game.tracker.streak >= 3
+
+
+def test_a_recorded_fake_session_holds_the_streams_a_replay_needs(tmp_path):
+    from pingpong import recorder
+
+    rig = fakerig.FakeRig(seed=5, record_dir=tmp_path / "run")
+    rig.run(until=lambda: rig.game.tracker.streak >= 3, max_s=60)
+    rig.close()
+    loaded = recorder.load(tmp_path / "run")
+    assert loaded.meta["seed"] == 5 and loaded.meta["units"]["gyro_per_dps"] == fakerig.GPD
+    assert loaded.meta["t0_ns"] == rig.origin_ns and loaded.meta["calibration"]["swing"]["omega_hi"] == 1200.0
+    assert len(loaded.imu) > 300 and len(loaded.poses) > 100
+    kinds = [e["k"] for e in loaded.events]
+    assert kinds.count("serve") >= 3 and kinds.count("hit") == 3 and kinds.count("swing") >= 3
+    assert "tag" in kinds and "phase" in kinds
+    verdicts = [e for e in loaded.events if e["k"] == "verdict"]
+    assert [g["name"] for g in verdicts[0]["d"]["verdict"]["gates"]] == ["J1", "J2", "J3", "J4", "J5", "J6"]

@@ -41,6 +41,7 @@ class GameCore:
         self._serve_at = self._cpu_at = self._out_shot = None
         self._record_before = tracker.record
         self._pause_reasons, self._paused_at = set(), None
+        self.started_at_ns = None            # exactly when start() was last called (a replay needs it)
 
     # --- inputs ------------------------------------------------------------------------
     def set_level(self, level):
@@ -61,6 +62,7 @@ class GameCore:
         if self.phase == "MATCH_OVER":
             self.player_points = self.cpu_points = 0
         self.phase = "COUNTDOWN"
+        self.started_at_ns = now_ns
         self._serve_at = now_ns + round(self.countdown_s * S)
         return True
 

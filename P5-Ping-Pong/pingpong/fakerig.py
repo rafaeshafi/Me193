@@ -119,7 +119,7 @@ class VibratingMotor(FakeDoubleMotor):
 class FakeRig:
     def __init__(self, *, level=1, mode="survival", target=7, seed=1, calibration=None, source="live",
                  scope="record_session", w_pk=600.0, timing_s=0.0, cards=None, hz=66.0, fps=30.0, lag_s=0.10,
-                 stale_ms=300.0, vibration=False, no_motor=False):
+                 stale_ms=300.0, vibration=False, no_motor=False, record_dir=None):
         self.clock = FakeClock(start_ns=1_000_000_000)
         self.origin_ns = self.clock.now_ns()
         calibration = calibration or Calibration.default()
@@ -140,7 +140,7 @@ class FakeRig:
             tag_detector=tags, mqtt_client=self.client, level=level, mode=mode, target=target, seed=seed,
             source=source, scope=scope, no_motor=no_motor, threaded=False, lag_s=lag_s, gyro_per_dps=GPD,
             accel_per_g=1000.0, fs_raw=32767, stale_ms=stale_ms, to_image=lambda frame: frame,
-            log=lambda *_: None)
+            record_dir=record_dir, player="fake", log=lambda *_: None)
         self.session, self.game = self.rig.session, self.rig.session.game
         self._dt = S // 240
         self._imu_period, self._frame_period, self._pump_period = round(S / hz), round(S / fps), S // 60

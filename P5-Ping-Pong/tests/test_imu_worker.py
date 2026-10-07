@@ -143,3 +143,20 @@ def test_a_worker_without_a_monitor_has_no_locks():
     feed(q, swing_samples())
     worker.step()
     assert worker.poll_locks() == []
+
+
+def test_the_worker_records_every_sample_raw_even_the_ones_the_detector_ignores():
+    class Rec:
+        def __init__(self):
+            self.samples = []
+
+        def imu(self, sample):
+            self.samples.append(sample)
+
+    q, rec = queue.SimpleQueue(), Rec()
+    worker = ImuWorker(q, SwingDetector(params()), recorder=rec)
+    worker.blank(T0, T0 + 10_000_000_000)                     # the detector ignores all of it ...
+    samples = swing_samples()
+    feed(q, samples)
+    worker.step()
+    assert rec.samples == samples                             # ... the recording keeps the raw truth

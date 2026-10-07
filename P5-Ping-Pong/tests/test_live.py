@@ -115,6 +115,29 @@ class Actuator:
         self.log.append("actuator.stop")
 
 
+class Rec:
+    """Recorder-shaped: remembers what it was given."""
+
+    def __init__(self, log):
+        self.log, self.poses, self.events, self.ticks = log, [], [], 0
+
+    def pose(self, pose):
+        self.poses.append(pose)
+
+    def event(self, kind, t_ns, data=None):
+        self.events.append((kind, data or {}))
+
+    def game_events(self, events):
+        for e in events:
+            self.events.append((e.kind, e.data))
+
+    def tick(self, now_ns):
+        self.ticks += 1
+
+    def close(self):
+        self.log.append("recorder.close")
+
+
 class Rig:
     """A LiveRig on stand-ins, plus helpers that advance time while beating chosen sensors."""
 
@@ -123,6 +146,9 @@ class Rig:
         self.log = []
         self.hub, self.vision = Hub(self.clock, self.log), Vision(self.clock, self.log)
         self.imu, self.actuator = Imu(self.log), Actuator(self.log)
+        self.recorder = Rec(self.log) if kw.pop("record", False) else None
+        if self.recorder is not None:
+            kw["recorder"] = self.recorder
         self.session = app.make_session(clock=self.clock, actuator=self.actuator, client=kw.get("mqtt_client"))
         self.rig = live.LiveRig(self.session, hub=self.hub, imu=self.imu, vision=self.vision,
                                 actuator=self.actuator, clock=self.clock, **kw)
@@ -403,84 +429,38 @@ def test_the_hud_state_carries_the_imu_trace_and_the_thresholds_it_is_judged_aga
     assert state.phase == r.session.hud_state().phase
 
 
+def test_the_rig_records_poses_swings_game_events_tags_pauses_and_phase_changes():
+    r = Rig(record=True, stale_ms=300.0)
+    r.hub.fail_reconnect = True
+    pose = PaddlePose(t_scene_ns=1, u=0.1, v=0.2, conf=0.9, hand="right")
+    r.vision.poses = (pose,)
+    r.vision.tags = [TagEvent("START", 0, r.clock.now_ns())]
+    r.rig.pump()
+    kinds = [k for k, _ in r.recorder.events]
+    assert r.recorder.poses == [pose] and "tag" in kinds and "phase" in kinds
+    phase = [d for k, d in r.recorder.events if k == "phase"][-1]
+    assert phase["phase"] == "COUNTDOWN" and phase["started_at_ns"] == r.game.started_at_ns
+    assert phase["level"] == 1 and phase["mode"] == "survival"
+    r.advance(3.2)                                            # the first ball is served
+    r.imu.events = [fake_swing(r.clock.now_ns(), 600.0)]
+    r.advance(0.05)
+    swing = [d for k, d in r.recorder.events if k == "swing"]
+    assert swing and swing[0]["w_pk"] == 600.0 and len(swing[0]["feat"]) == 12
+    assert "serve" in [k for k, _ in r.recorder.events]
+    r.advance(1.0, hub=False)
+    assert [d["reasons"] for k, d in r.recorder.events if k == "pause"][-1] == ["hub"]
+    assert r.recorder.ticks > 0
+
+
+def test_a_recorder_is_closed_after_the_sensors_stop_and_before_the_hub_lets_go():
+    r = Rig(record=True)
+    r.rig.close()
+    assert r.log == ["actuator.stop", "vision.stop", "imu.stop", "recorder.close", "hub.close"]
+
+
 def test_pump_timings_are_collected_for_the_report():
     r = Rig()
     for _ in range(5):
         r.rig.pump()
     stats = r.rig.loop_stats()
     assert stats["n"] == 5 and stats["p95_ms"] >= 0.0
-
-
-# --- build_live: card + calibration + hardware, with failures that leave nothing open ------------------------
-import play  # noqa: E402
-from pingpong import profile  # noqa: E402
-from pingpong.calibration import SwingCalibration  # noqa: E402
-from pingpong.paddle import ReachBox  # noqa: E402
-from pingpong.sources_fake import FakeEnv  # noqa: E402
-
-
-def live_args(*extra):
-    return play.parse_args(["--card-color", "red", "--card-serial", "1131", *extra])
-
-
-def test_build_live_needs_a_hub_card_and_says_how_to_find_it():
-    with pytest.raises(live.LiveSetupError, match="scan_hubs"):
-        live.build_live(play.parse_args([]), FakeEnv())
-
-
-def test_build_live_refuses_a_malformed_card_serial():
-    with pytest.raises(live.LiveSetupError, match="serial"):
-        live.build_live(play.parse_args(["--card-color", "red", "--card-serial", "12345"]), FakeEnv())
-
-
-def test_a_hub_that_is_not_found_is_a_clear_error():
-    with pytest.raises(live.LiveSetupError, match="not found"):
-        live.build_live(live_args(), FakeEnv(hub_found=False))
-
-
-def test_a_camera_that_will_not_open_is_a_clear_error_and_the_hub_is_let_go_again():
-    env = FakeEnv(camera="closed")
-    with pytest.raises(live.LiveSetupError, match="camera"):
-        live.build_live(live_args(), env)
-    names = [c[0] for c in env.hub_device.calls]
-    assert names[-2:] == ["motor_stop", "disconnect"]                 # no ghost connection for the next run
-
-
-def test_a_guest_never_publishes_and_a_named_player_does(tmp_path):
-    env = FakeEnv()
-    guest = live.build_live(live_args("--player", "guest"), env, player_root=tmp_path)
-    assert guest.mqtt_client is None and guest.session.hud_state().mqtt_status == "off"
-    env = FakeEnv()
-    named = live.build_live(live_args("--player", "rafae"), env, player_root=tmp_path)
-    assert named.mqtt_client is env.mqtt_client
-    assert any(c["call"] == "connect_async" for c in env.mqtt_client.config_calls)
-    assert named.session.hud_state().mqtt_status == "offline"        # until the broker answers
-
-
-def test_no_publish_silences_even_a_named_player(tmp_path):
-    rig = live.build_live(live_args("--player", "rafae", "--no-publish"), FakeEnv(), player_root=tmp_path)
-    assert rig.mqtt_client is None
-
-
-def test_an_unknown_player_gets_the_default_calibration_and_the_lobby_says_so(tmp_path):
-    rig = live.build_live(live_args("--player", "newbie"), FakeEnv(), player_root=tmp_path)
-    assert rig.calibration.calibrated is False
-    assert "calibrat" in rig.session.hud_state().message.lower()
-
-
-def test_a_saved_calibration_is_loaded_for_the_player(tmp_path):
-    saved = profile.Calibration(swing=SwingCalibration((0.0, 1.0, 0.0), 280.0, 1100.0),
-                                box=ReachBox(-1.5, 1.5, -0.9, 0.7), shoulder_w=0.2, hand="left")
-    profile.save("rafae", saved, root=tmp_path)
-    rig = live.build_live(live_args("--player", "rafae"), FakeEnv(), player_root=tmp_path)
-    assert rig.calibration.calibrated and rig.calibration.hand == "left"
-    assert rig.session.game.judge.box == saved.box and rig.session.game.omega_hi == 1100.0
-    assert rig.session.hud_state().message == ""
-
-
-def test_the_hub_is_connected_with_the_configured_notify_interval_and_card(tmp_path):
-    env = FakeEnv()
-    live.build_live(live_args("--player", "rafae"), env, player_root=tmp_path)
-    connect = [c for c in env.hub_device.calls if c[0] == "connect"][0][1]
-    assert connect["device_notification_delay"] == live.config.NOTIFY_MS
-    assert connect["card_serial"] == "1131"

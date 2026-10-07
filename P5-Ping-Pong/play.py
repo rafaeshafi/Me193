@@ -35,6 +35,7 @@ def parse_args(argv=None):
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--no-publish", action="store_true", help="never touch the MQTT broker")
     ap.add_argument("--no-motor", action="store_true", help="mute the hub motors (beep + light stay)")
+    ap.add_argument("--no-record", action="store_true", help="do not write recordings/<session>/ (IMU, pose, events)")
     ap.add_argument("--card-color", default=None, help="Connection Card colour (default: config_local.json)")
     ap.add_argument("--card-serial", default=None, help="Connection Card serial, a 4-digit string")
     ap.add_argument("--player", default="rafae", help="player profile; 'guest' = no saved calibration, never publishes")
