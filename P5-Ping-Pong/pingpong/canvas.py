@@ -95,3 +95,10 @@ def draw_trace(frame, x0, y0, w, h, values, scale, threshold=0.0, color=(200, 20
     for (a, va), (b, vb) in zip(zip(pts, values), zip(pts[1:], values[1:])):
         cv2.line(frame, a, b, hot if max(va, vb) >= threshold > 0 else color, 2, cv2.LINE_AA)
     cv2.rectangle(frame, (x0, y0), (x0 + w, y0 + h), (170, 170, 170), 1)
+
+
+def dim_rect(frame, x0, y0, w, h, factor=0.35):
+    """Darken a rectangle so text on top stays readable over the court or the camera picture."""
+    region = frame[y0:y0 + h, x0:x0 + w]
+    region[:] = (region * factor).astype(np.uint8)
+    cv2.rectangle(frame, (x0, y0), (x0 + w, y0 + h), (170, 170, 170), 1)

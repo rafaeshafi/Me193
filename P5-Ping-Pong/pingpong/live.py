@@ -25,8 +25,11 @@ import cv2
 import config
 from pathlib import Path
 
+import sqlite3
+
 from pingpong import app, mqtt_link, profile
 from pingpong import recorder as recorder_mod
+from pingpong import store as store_mod
 from pingpong.haptics import Actuator, ActuatorCore
 from pingpong.hub import card_kwargs
 from pingpong.imu_worker import ImuWorker
@@ -53,7 +56,7 @@ class LiveRig:
                  reconnect_after_s=RECONNECT_AFTER_S, reconnect_cooldown_s=RECONNECT_COOLDOWN_S,
                  max_reconnects=MAX_RECONNECTS, recorder=None, log=print):
         self.session, self.hub, self.imu, self.vision = session, hub, imu, vision
-        self.recorder = recorder
+        self.recorder, self.store = recorder, None      # the store (leaderboard database) is attached by build_live
         self._seen = {"phase": None, "pauses": None, "hub": None}
         self.actuator, self.mqtt_client, self.clock = actuator, mqtt_client, clock
         self.threaded, self.log = threaded, log
@@ -91,6 +94,8 @@ class LiveRig:
         if self.recorder is not None:                # after the IMU thread stopped: the last samples are in
             steps.append(("summary", self._record_summary))
             steps.append(("recorder", self.recorder.close))
+        if self.store is not None:
+            steps.append(("store", self.store.close))
         if self.mqtt_client is not None and self.session.game.publisher is not None:
             steps.append(("mqtt", lambda: mqtt_link.shutdown(self.mqtt_client, self.session.game.publisher)))
         steps.append(("hub", self.hub.close))
@@ -330,7 +335,15 @@ def request_720p(capture):
         setter(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
 
-def build_live(args, env, *, player_root=None, record_root=None, log=print):
+def _save_game(db, player, summary, log):
+    """A finished game goes on file; a database problem must never reach the game."""
+    try:
+        db.record_game(player, {**summary, "source": "live"})
+    except Exception as exc:
+        log(f"could not save the game to the leaderboard: {exc}")
+
+
+def build_live(args, env, *, player_root=None, record_root=None, store_path=None, log=print):
     """Everything a live session needs, from the command line and an environment (real or fake).
 
     A failure after the hub connected lets the hub go again: a leaked connection would keep the
@@ -366,7 +379,16 @@ def build_live(args, env, *, player_root=None, record_root=None, log=print):
             capture.release()
         hub.close()
         raise
-    rig.calibration, rig.player = calibration, args.player
+    rig.calibration, rig.player, rig.session.player = calibration, args.player, args.player
+    if not args.no_store:
+        try:
+            db = store_mod.Store(store_path)
+        except (OSError, sqlite3.Error) as exc:
+            log(f"leaderboard disabled: {exc}")
+        else:
+            rig.store = db
+            rig.session.on_game_over = lambda summary: _save_game(db, args.player, summary, log)
+            rig.session.leaderboard_fn = lambda: tuple(db.leaderboard(rig.session.game.mode, limit=5))
     if not calibration.calibrated:
         rig.session.set_notice(f"UNCALIBRATED: run ./pp calibrate_swing --player {args.player}")
     return rig

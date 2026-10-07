@@ -37,6 +37,10 @@ class Session:
         self._gates, self._last_kmh, self._last_label, self._spin = (), None, "", ""
         self._message, self._message_until = "", 0
         self._notice = ""
+        self.player = ""                         # the player's name (highlighted on the leaderboard)
+        self.on_game_over = None                 # callback(summary dict) when a game or match ends
+        self.leaderboard_fn = None               # () -> ((name, score), ...) for the end screen
+        self._stats_key, self._stats = object(), {}
         self._flash, self._flash_until = None, 0
 
     def set_notice(self, text):
@@ -77,11 +81,37 @@ class Session:
         return events
 
     # --- events -> feedback + HUD memory ---------------------------------------------------------
+    def _game_stats(self):
+        """Per-game counters, reset whenever a new game is started."""
+        if self._stats_key != self.game.started_at_ns:
+            self._stats_key = self.game.started_at_ns
+            self._stats = {"hits": 0, "misses": 0, "faults": 0, "max_kmh": 0.0, "best_streak": 0}
+        return self._stats
+
+    def _summary(self, e):
+        g, st = self.game, self._game_stats()
+        return {"mode": g.mode, "level": g.level.name, "target": g.target_points, "streak": st["best_streak"],
+                "record": g.tracker.record, "player_points": g.player_points, "cpu_points": g.cpu_points,
+                "winner": e.data.get("winner"), "hits": st["hits"], "misses": st["misses"], "faults": st["faults"],
+                "max_kmh": st["max_kmh"], "duration_s": (e.t_ns - (g.started_at_ns or e.t_ns)) / S,
+                "started_at_ns": g.started_at_ns}
+
     def _absorb(self, events):
         now = self.clock.now_ns()
         if self.actuator is not None:
             feedback.play(events, self.game.level, self.actuator)
+        st = self._game_stats()
         for e in events:
+            if e.kind == "hit":
+                st["hits"] += 1
+                st["max_kmh"] = max(st["max_kmh"], e.data["kmh"])
+                st["best_streak"] = max(st["best_streak"], e.data["streak"])
+            elif e.kind == "miss":
+                st["misses"] += 1
+            elif e.kind == "fault":
+                st["faults"] += 1
+            elif e.kind in ("game_over", "match_over") and self.on_game_over is not None:
+                self.on_game_over(self._summary(e))
             if e.kind == "verdict":
                 self._gates = e.data["verdict"].gates
             elif e.kind == "hit":
@@ -108,6 +138,8 @@ class Session:
     # --- HUD -------------------------------------------------------------------------------------------
     def hud_state(self, leaderboard=()):
         g, now = self.game, self.clock.now_ns()
+        if not leaderboard and g.phase == "MATCH_OVER" and self.leaderboard_fn is not None:
+            leaderboard = self.leaderboard_fn()
         remaining = g.seconds_to_serve(now)
         return HudState(
             phase=g.phase, mode=g.mode, level_name=g.level.name, streak=g.tracker.streak,
@@ -120,7 +152,8 @@ class Session:
             message=(self._paused_text() or (self._message if now < self._message_until else "")
                      or (self._notice if g.phase == "LOBBY" else "")),
             gates=self._gates, show_xray=self.xray,
-            flash=self._flash if now < self._flash_until else None, leaderboard=tuple(leaderboard))
+            flash=self._flash if now < self._flash_until else None, leaderboard=tuple(leaderboard),
+            player_name=self.player)
 
     def _paused_text(self):
         if not self.game.paused:

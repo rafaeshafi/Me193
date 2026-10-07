@@ -40,6 +40,7 @@ class HudState:
     swing_trace: tuple = ()          # recent signed forward gyro rate in dps (the IMU, made visible)
     swing_scale: float = 1200.0      # dps that fills the trace panel (the player's hard-swing rate)
     swing_threshold: float = 0.0     # dps below which a swing does not count (T_PK)
+    player_name: str = ""            # highlights the player's own row on the leaderboard
 
 
 def render(state, size=(1280, 720), background=None):
@@ -49,6 +50,8 @@ def render(state, size=(1280, 720), background=None):
     _draw_actors(frame, state, w, h)
     _draw_top_bar(frame, state, w, h)
     _draw_phase(frame, state, w, h)
+    if state.phase == "MATCH_OVER":
+        _draw_leaderboard(frame, state)
     if state.show_xray and state.gates:
         _draw_xray(frame, state, w, h)
     _draw_swing(frame, state, w, h)
@@ -97,10 +100,23 @@ def _draw_phase(frame, s, w, h):
         if s.mode == "survival":
             canvas.draw_text(frame, f"streak {s.streak}   best {s.record}", (w // 2, h // 2), 1.5, WHITE, 3,
                              anchor="center")
-        for i, (name, score) in enumerate(s.leaderboard[:5]):
-            canvas.draw_text(frame, f"{i + 1}. {name}  {score}", (w // 2, h // 2 + 60 + 38 * i), 1.0, GREY, 2,
-                             anchor="center")
         canvas.draw_text(frame, "SPACE to play again", (w // 2, h - 120), 1.2, WHITE, 2, anchor="center")
+
+
+def _draw_leaderboard(frame, s):
+    """A panel on the left (clear of the prompts in the middle); the player's own row is green."""
+    rows = s.leaderboard[:5]
+    if not rows:
+        return
+    x0, y0, pw, ph = 24, 100, 380, 64 + 40 * len(rows)
+    canvas.dim_rect(frame, x0, y0, pw, ph)
+    canvas.draw_text(frame, "BEST STREAKS" if s.mode == "survival" else "MATCH WINS", (x0 + 14, y0 + 36), 0.8, AMBER, 2)
+    for i, (name, score) in enumerate(rows):
+        mine = bool(s.player_name) and name.lower() == s.player_name.lower()
+        color = GREEN if mine else WHITE if i == 0 else GREY
+        y = y0 + 80 + 40 * i
+        canvas.draw_text(frame, f"{i + 1}. {name}", (x0 + 14, y), 0.9, color, 2)
+        canvas.draw_text(frame, str(score), (x0 + pw - 14, y), 0.9, color, 2, anchor="right")
 
 
 def _draw_xray(frame, s, w, h):

@@ -464,3 +464,15 @@ def test_pump_timings_are_collected_for_the_report():
         r.rig.pump()
     stats = r.rig.loop_stats()
     assert stats["n"] == 5 and stats["p95_ms"] >= 0.0
+
+
+def test_the_store_is_closed_after_the_recorder_and_before_the_hub():
+    r = Rig(record=True)
+
+    class Store:
+        def close(self):
+            r.log.append("store.close")
+
+    r.rig.store = Store()
+    r.rig.close()
+    assert r.log == ["actuator.stop", "vision.stop", "imu.stop", "recorder.close", "store.close", "hub.close"]

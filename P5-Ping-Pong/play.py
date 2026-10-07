@@ -8,6 +8,7 @@ Usage:
     ./pp play --player rafae --level 2 --mode match
     ./pp play --player guest          # no saved calibration, never publishes to the score topic
     ./pp play --no-publish --no-motor # rehearse without the broker / without motor pulses
+    ./pp play --board                 # the leaderboard (best streaks, match wins) and nothing else
 
 Keys:  SPACE start (and swing in --fake)  1-3 level  M mode  X x-ray  D motors  R reconnect hub  Q/ESC quit
        --fake only:  J soft swing   K hard swing
@@ -36,6 +37,9 @@ def parse_args(argv=None):
     ap.add_argument("--no-publish", action="store_true", help="never touch the MQTT broker")
     ap.add_argument("--no-motor", action="store_true", help="mute the hub motors (beep + light stay)")
     ap.add_argument("--no-record", action="store_true", help="do not write recordings/<session>/ (IMU, pose, events)")
+    ap.add_argument("--no-store", action="store_true", help="do not save finished games to the leaderboard database")
+    ap.add_argument("--board", action="store_true", help="print the leaderboard and exit")
+    ap.add_argument("--db", default=None, help="leaderboard database (default: data/pingpong.db)")
     ap.add_argument("--card-color", default=None, help="Connection Card colour (default: config_local.json)")
     ap.add_argument("--card-serial", default=None, help="Connection Card serial, a 4-digit string")
     ap.add_argument("--player", default="rafae", help="player profile; 'guest' = no saved calibration, never publishes")
@@ -144,10 +148,20 @@ def run_live(args):
     return 0
 
 
+def print_board(args):
+    from pingpong import store
+
+    path = Path(args.db) if args.db else store.default_path()
+    print(store.format_board(store.Store(path)) if path.exists() else "no games yet: play one with ./pp play")
+    return 0
+
+
 def main(argv=None):
     args = parse_args(argv)
     if args.selftest:
         return selftest()
+    if args.board:
+        return print_board(args)
     if args.fake and not args.no_window:
         return run_fake(args)
     return run_live(args)

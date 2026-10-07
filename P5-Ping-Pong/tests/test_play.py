@@ -50,3 +50,20 @@ def test_live_arguments():
     args = play.parse_args(["--card-color", "red", "--card-serial", "1131", "--player", "Rafae"])
     assert (args.card_color, args.card_serial, args.player) == ("red", "1131", "Rafae")
     assert play.parse_args([]).player == "rafae"
+
+
+def test_board_prints_the_leaderboard_without_touching_any_hardware(tmp_path, capsys):
+    from pingpong import store
+
+    db = store.Store(tmp_path / "pp.db")
+    db.record_game("rafae", dict(mode="survival", level="Club", target=7, streak=12, record=12, hits=12, misses=1,
+                                 faults=0, max_kmh=30.0, duration_s=40.0, source="live"))
+    db.close()
+    assert play.main(["--board", "--db", str(tmp_path / "pp.db")]) == 0
+    out = capsys.readouterr().out
+    assert "SURVIVAL" in out and "rafae" in out and "12" in out
+
+
+def test_board_without_a_database_says_there_are_no_games_and_creates_nothing(tmp_path, capsys):
+    assert play.main(["--board", "--db", str(tmp_path / "none.db")]) == 0
+    assert "no games yet" in capsys.readouterr().out and not (tmp_path / "none.db").exists()

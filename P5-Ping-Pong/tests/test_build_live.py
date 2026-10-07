@@ -11,7 +11,7 @@ from pingpong.sources_fake import FakeEnv
 
 
 def live_args(*extra):
-    return play.parse_args(["--card-color", "red", "--card-serial", "1131", "--no-record", *extra])
+    return play.parse_args(["--card-color", "red", "--card-serial", "1131", "--no-record", "--no-store", *extra])
 
 
 def test_build_live_needs_a_hub_card_and_says_how_to_find_it():
@@ -95,3 +95,58 @@ def test_a_recording_that_cannot_be_started_is_reported_and_the_game_still_runs(
     args = play.parse_args(["--card-color", "red", "--card-serial", "1131", "--player", "rafae"])
     rig = live.build_live(args, FakeEnv(), player_root=tmp_path / "players", record_root=blocker, log=messages.append)
     assert rig.recorder is None and any("recording" in m.lower() for m in messages)
+
+
+def _summary(**kw):
+    base = dict(mode="survival", level="Rookie", target=7, streak=6, record=6, player_points=0, cpu_points=0,
+                winner=None, hits=6, misses=1, faults=0, max_kmh=28.0, duration_s=30.0, started_at_ns=1)
+    base.update(kw)
+    return base
+
+
+def test_a_finished_game_is_saved_for_the_player_and_the_end_screen_shows_the_board(tmp_path):
+    args = play.parse_args(["--card-color", "red", "--card-serial", "1131", "--no-record", "--player", "rafae"])
+    rig = live.build_live(args, FakeEnv(), player_root=tmp_path / "players", store_path=tmp_path / "pp.db")
+    rig.session.on_game_over(_summary())
+    rig.session.on_game_over(_summary(streak=11, record=11))
+    from pingpong import store
+
+    assert store.Store(tmp_path / "pp.db").leaderboard("survival") == [("rafae", 11)]
+    assert rig.session.leaderboard_fn() == (("rafae", 11),)
+    rig.close()
+
+
+def test_a_guest_is_stored_too_under_their_own_name(tmp_path):
+    args = play.parse_args(["--card-color", "red", "--card-serial", "1131", "--no-record", "--player", "guest"])
+    rig = live.build_live(args, FakeEnv(), player_root=tmp_path / "players", store_path=tmp_path / "pp.db")
+    rig.session.on_game_over(_summary())
+    from pingpong import store
+
+    assert store.Store(tmp_path / "pp.db").players() == ["guest"]
+    rig.close()
+
+
+def test_no_store_means_no_database_and_no_end_screen_board(tmp_path):
+    rig = live.build_live(live_args("--player", "rafae"), FakeEnv(), player_root=tmp_path / "players",
+                          store_path=tmp_path / "pp.db")
+    assert rig.store is None and rig.session.leaderboard_fn is None and not (tmp_path / "pp.db").exists()
+
+
+def test_an_unusable_database_is_reported_and_the_game_still_runs(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    messages = []
+    args = play.parse_args(["--card-color", "red", "--card-serial", "1131", "--no-record", "--player", "rafae"])
+    rig = live.build_live(args, FakeEnv(), player_root=tmp_path / "players", store_path=blocker / "pp.db",
+                          log=messages.append)
+    assert rig.store is None and any("leaderboard" in m.lower() for m in messages)
+
+
+def test_a_failing_save_never_reaches_the_game(tmp_path):
+    messages = []
+    args = play.parse_args(["--card-color", "red", "--card-serial", "1131", "--no-record", "--player", "rafae"])
+    rig = live.build_live(args, FakeEnv(), player_root=tmp_path / "players", store_path=tmp_path / "pp.db",
+                          log=messages.append)
+    rig.store.close()                                         # the database goes away under the game
+    rig.session.on_game_over(_summary())                      # must not raise
+    assert any("could not save" in m.lower() for m in messages)

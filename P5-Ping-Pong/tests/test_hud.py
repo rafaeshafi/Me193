@@ -116,3 +116,26 @@ def test_the_longest_xray_notes_stay_inside_the_frame():
     base = hud.render(state(show_xray=False), size=(W, H))
     shown = hud.render(state(show_xray=True, gates=long_notes), size=(W, H))
     assert diff(base[:, -6:], shown[:, -6:]) == 0           # no text pixel touches the right edge
+
+
+BOARD = (("maya", 21), ("rafae", 17), ("omar", 12), ("zed", 9), ("guest", 4))
+
+
+def test_the_leaderboard_is_a_panel_on_the_left_that_keeps_clear_of_the_prompts():
+    base = hud.render(state(phase="MATCH_OVER", streak=12, record=17), size=(W, H))
+    board = hud.render(state(phase="MATCH_OVER", streak=12, record=17, leaderboard=BOARD), size=(W, H))
+    assert diff(base[90:420, 0:420], board[90:420, 0:420]) > 20_000           # the panel is there ...
+    assert diff(base[:, 430:], board[:, 430:]) == 0                            # ... and nothing else moved
+    assert diff(base[H - 150:H - 90], board[H - 150:H - 90]) == 0              # "SPACE to play again" is untouched
+
+
+def test_the_players_own_row_is_highlighted():
+    plain = hud.render(state(phase="MATCH_OVER", leaderboard=BOARD, player_name="nobody"), size=(W, H))
+    mine = hud.render(state(phase="MATCH_OVER", leaderboard=BOARD, player_name="Rafae"), size=(W, H))
+    assert diff(plain[170:260, 0:420], mine[170:260, 0:420]) > 500            # rafae is row 2: recoloured
+    assert diff(plain[290:420, 0:420], mine[290:420, 0:420]) == 0             # the other rows are not
+
+
+def test_the_board_is_only_drawn_on_the_end_screen():
+    rally = hud.render(state(phase="RALLY", leaderboard=BOARD), size=(W, H))
+    assert diff(rally, hud.render(state(phase="RALLY"), size=(W, H))) == 0

@@ -134,3 +134,45 @@ def test_a_notice_is_shown_in_the_lobby_only_and_never_hides_a_pause_message():
     session.tick()
     session.game.set_pause("hub", True, session.clock.now_ns())
     assert session.hud_state().message.startswith("PAUSED")
+
+
+def _play_a_game(session, hits=3):
+    app.play_until_hits(session, hits)
+    session.clock.advance_s(6.0)
+    session.tick()                                                  # the miss ends the game
+
+
+def test_a_finished_survival_game_is_summarised_for_the_store():
+    summaries = []
+    session = app.make_session()
+    session.on_game_over = summaries.append
+    _play_a_game(session, hits=3)
+    [s] = summaries
+    assert (s["mode"], s["level"], s["streak"], s["hits"], s["misses"]) == ("survival", "Rookie", 3, 3, 1)
+    assert s["max_kmh"] > 0 and 5.0 < s["duration_s"] < 60.0 and s["winner"] is None
+    summaries.clear()
+    _play_a_game(session, hits=2)                                    # the next game starts from zero
+    assert summaries[0]["hits"] == 2 and summaries[0]["streak"] == 2
+
+
+def test_a_finished_match_is_summarised_with_its_winner_and_points():
+    summaries = []
+    session = app.make_session(mode="match", target=1)
+    session.on_game_over = summaries.append
+    app.play_until_hits(session, 1)
+    for _ in range(40):                                              # let the CPU miss or the player miss until it ends
+        if session.game.phase == "MATCH_OVER":
+            break
+        session.clock.advance_s(1.0)
+        session.tick()
+    assert summaries and summaries[0]["mode"] == "match" and summaries[0]["winner"] in ("player", "cpu")
+    assert summaries[0]["player_points"] + summaries[0]["cpu_points"] >= 1
+
+
+def test_the_end_screen_shows_the_leaderboard_the_session_was_given():
+    session = app.make_session()
+    session.leaderboard_fn = lambda: (("maya", 15), ("rafae", 12))
+    _play_a_game(session, hits=1)
+    assert session.game.phase == "MATCH_OVER" and session.hud_state().leaderboard == (("maya", 15), ("rafae", 12))
+    session.on_start()
+    assert session.hud_state().leaderboard == ()                     # only shown on the end screen
