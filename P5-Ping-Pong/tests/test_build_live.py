@@ -276,3 +276,31 @@ def test_a_pose_model_with_an_unreadable_file_is_the_default_one_not_a_crash(tmp
     asked = landmarker_log(env)
     live.build_live(live_args("--player", "rafae"), env, player_root=tmp_path)
     assert asked == ["lite"]
+
+
+def test_a_live_session_can_be_started_by_holding_the_hub_on_the_button_with_no_keyboard(tmp_path):
+    rig = live.build_live(live_args("--player", "rafae"), FakeEnv(), player_root=tmp_path)
+    assert rig.session.hold_start is not None
+    assert rig.session.hud_state().start_button == (0.0, False)          # the screen shows the button from the first frame
+    rig.close()
+
+
+def test_holding_the_hand_in_the_top_right_of_the_reach_starts_a_game_through_the_whole_live_pipeline(tmp_path):
+    """Fake camera -> pose landmarks -> body tracker -> poses -> session: the same chain the real camera feeds."""
+    env = FakeEnv()
+    t0 = env.clock.now_ns()
+    box = profile.Calibration.default().box
+    middle, corner = box.to_uv(0.5, 0.5), box.to_uv(0.95, 0.9)
+    env.make_landmarker = lambda model="lite": FakeLandmarker(
+        lambda t_ns: middle if (t_ns - t0) / 1e9 < 0.5 else corner, env.clock)
+    rig = live.build_live(live_args("--player", "newbie"), env, player_root=tmp_path)
+    shown = []
+    for _ in range(60 * 4):                                                    # four seconds at 60 Hz
+        env.sleep(1 / 60)
+        rig.vision.step()
+        rig.pump()
+        shown.append(rig.session.hud_state().start_button)
+    assert rig.session.game.phase in ("COUNTDOWN", "RALLY")
+    assert any(b is not None and b[0] > 0.5 for b in shown)                    # the bar filled on the way
+    rig.close()
+

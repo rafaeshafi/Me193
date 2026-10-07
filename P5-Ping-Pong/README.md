@@ -122,7 +122,11 @@ before and after the filter, so more games make the next training better. `./pp 
 ./pp play --board                        # the leaderboard and nothing else
 ```
 
-Show the **START card** (or press SPACE): 3-2-1, then the computer serves. Show **card 1, 2 or 3**
+Show the **START card** (or press SPACE), or, with no keyboard at all, **hold the hub on the START button** in the top
+right of the screen for 1.5 s: your hand is a cursor over the whole screen (its place in your calibrated reach box is where
+the ring stands), so reach to the top right of your reach; the bar fills while you hold, a flicker of the reading shorter
+than 0.3 s does not undo it, and on the game-over screen the same hold plays again (leave the corner once first, so a hand
+that ended the game up there does not restart it). Then 3-2-1, and the computer serves. Show **card 1, 2 or 3**
 between rallies to change the level; **M** switches Rally/Match; **1–3** also set the level.
 
 | Key | |
@@ -242,7 +246,7 @@ that half of the balls I missed had a swing of 210-300 dps right at them, gentle
 with (458 dps), so the threshold dropped them (`tests/test_play_swings.py` keeps six of those swings). The price: a big
 wobble of the hub or a hesitation before a stroke can now count as a weak swing too (the judge ignores a swing when no
 ball is near and takes one hit per ball, and a backswing still never counts). The shake lock is unchanged, and so is the
-camera swing detector, which was only ever tuned on scripted hands.
+camera swing detector, which was only ever tuned on scripted hands. (`./pp replay` of a session recorded before this change starts from the new threshold; add `--set swing.t_pk=N` with the old one, 0.7 x the soft strength, to get it back.)
 
 **Tuning the levels.** `./pp sim` plays the whole game loop with a scripted player and prints, per level and
 swing strength, how often the computer misses a ball, how often you would fault, and how long rallies last

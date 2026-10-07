@@ -120,14 +120,19 @@ def fake_loop(session, *, show, wait_key, mouse_xy):
             return
 
 
-def run_fake(args):
-    import cv2
-
+def make_fake_session(args, clock=None):
+    """The --fake game: the mouse is the hand, so holding it in the top right of the window starts a game as the hub does."""
     from pingpong import app
     from pingpong.clock import Clock
 
-    session = app.make_session(level=args.level, mode=args.mode, target=args.target, clock=Clock(),
-                               client=None, source="fake", seed=args.seed)
+    return app.make_session(level=args.level, mode=args.mode, target=args.target, clock=clock or Clock(), client=None,
+                            source="fake", seed=args.seed, hold_start=True)
+
+
+def run_fake(args):
+    import cv2
+
+    session = make_fake_session(args)
     if not args.no_audio:
         from pingpong.audio import Audio
 

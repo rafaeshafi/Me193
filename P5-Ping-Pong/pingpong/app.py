@@ -9,7 +9,7 @@ import math
 import random
 from collections import deque
 
-from pingpong import feedback, levels
+from pingpong import feedback, holdstart, levels
 from pingpong import latency as latency_mod
 from pingpong.clock import FakeClock
 from pingpong.events import PaddlePose, SwingEvent
@@ -29,8 +29,11 @@ FLASH = {"perfect": ((255, 255, 255), 0.25), "good": ((0, 200, 0), 0.18), "early
 
 
 class Session:
-    def __init__(self, game, clock, actuator=None, mqtt_status=None, hub_status=None, latency=None, hand_model=None):
+    def __init__(self, game, clock, actuator=None, mqtt_status=None, hub_status=None, latency=None, hand_model=None,
+                 hold_start=None):
         self.game, self.clock, self.actuator = game, clock, actuator
+        self.hold_start = hold_start             # a holdstart.HoldStart: the game also starts when the hub is held on the START button
+        self._hand_ab = None                     # where the hand points in the reach box, for that button
         self._mqtt_status = mqtt_status or (lambda: "off")
         self._hub_status = hub_status or (lambda: "ok")
         self.latency = latency or latency_mod.Latency.from_config()
@@ -106,7 +109,16 @@ class Session:
         self._bounce_sound(now)
         self._flush_sounds(now)
         self._last_tick_ns = now
+        self._hold_to_start(now)
         return events
+
+    def _hold_to_start(self, now):
+        """The hub held on the START button for long enough starts the game, like the key and the card."""
+        if self.hold_start is None:
+            return
+        self._hand_ab = holdstart.hand_ab(self.game.judge.box, self.poses, now)
+        if self.hold_start.update(now, self._hand_ab, self.game.phase in holdstart.PHASES):
+            self.on_start()
 
     def _countdown_sounds(self, events):
         """A tick per countdown digit (3-2-1) and a "go" when the first ball is served."""
@@ -220,6 +232,9 @@ class Session:
         v = self.view
         view = v.view_ns(now)
         paddle, rest = v.paddle(now, view)
+        button = cursor = None
+        if self.hold_start is not None and g.phase in holdstart.PHASES:
+            button, cursor = (self.hold_start.progress(), self.hold_start.inside), self._hand_ab
         return HudState(
             phase=g.phase, mode=g.mode, level_name=g.level.name, streak=g.tracker.streak,
             record=g.tracker.record, player_points=g.player_points, cpu_points=g.cpu_points,
@@ -232,7 +247,7 @@ class Session:
                      or ((self._notice or self._soft_notice) if g.phase == "LOBBY" else "")),
             gates=self._gates, show_xray=self.xray,
             flash=self._flash if now < self._flash_until else None, leaderboard=tuple(leaderboard),
-            player_name=self.player)
+            player_name=self.player, start_button=button, cursor=cursor)
 
     def _paused_text(self):
         if not self.game.paused:
@@ -252,7 +267,7 @@ def _spin_text(top, side):
 def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=None, client=None,
                  source="live", scope="record_session", no_publish=False, seed=1, box=None,
                  omega_lo=300.0, omega_hi=1200.0, t_pk=250.0, spin_probs_fn=None, learner=None, resume=False,
-                 latency=None, hand_model=None):
+                 latency=None, hand_model=None, hold_start=False):
     clock = clock or FakeClock(start_ns=1_000_000_000)
     latency = latency or latency_mod.Latency.from_config()
     box = box or DEFAULT_BOX
@@ -264,6 +279,7 @@ def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=Non
                     publisher=publisher, level=levels.LEVELS[level], mode=mode, target_points=target,
                     omega_lo=omega_lo, omega_hi=omega_hi, spin_probs_fn=spin_probs_fn)
     return Session(game, clock, actuator=actuator, latency=latency, hand_model=hand_model,
+                   hold_start=holdstart.HoldStart() if hold_start else None,
                    mqtt_status=(lambda: "ok") if client is not None and not no_publish else None)
 
 

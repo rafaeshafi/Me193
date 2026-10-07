@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from pingpong import canvas, hud
+from pingpong import canvas, holdstart, hud
 from pingpong.events import GateResult
 
 W, H = 1280, 720
@@ -244,3 +244,66 @@ def test_the_survival_mode_is_called_rally_on_screen(monkeypatch):
     seen.clear()
     hud.render(state(mode="match", level_name="Rookie"), size=(W, H))
     assert any(text.startswith("MATCH") for text in seen)
+
+
+# --- the START button (hold the hub on it) ----------------------------------------------------------------------------------
+GREEN = hud.GREEN
+
+
+def button_rect(w=W, h=H):
+    return tuple(round(f * v) for f, v in zip(holdstart.BUTTON, (w, h, w, h)))
+
+
+def green_pixels(frame, rect):
+    x, y, bw, bh = rect
+    patch = frame[y:y + bh, x:x + bw].reshape(-1, 3)
+    return int((patch == GREEN).all(axis=1).sum())
+
+
+def test_the_start_button_takes_the_right_panel_and_fills_while_the_hub_is_held_on_it():
+    off = hud.render(state(phase="LOBBY"), size=(W, H))
+    idle = hud.render(state(phase="LOBBY", start_button=(0.0, False)), size=(W, H))
+    half = hud.render(state(phase="LOBBY", start_button=(0.5, True)), size=(W, H))
+    full = hud.render(state(phase="LOBBY", start_button=(1.0, True)), size=(W, H))
+    rect = button_rect()
+    assert diff(off[rect[1]:rect[1] + rect[3], rect[0]:rect[0] + rect[2]], idle[rect[1]:rect[1] + rect[3], rect[0]:rect[0] + rect[2]]) > 5_000
+    assert green_pixels(idle, rect) == 0 < green_pixels(half, rect) < green_pixels(full, rect)
+
+
+def test_the_cursor_ring_follows_the_hand_over_the_whole_screen():
+    base = hud.render(state(phase="LOBBY", start_button=(0.0, False)), size=(W, H))
+    left = hud.render(state(phase="LOBBY", start_button=(0.0, False), cursor=(0.2, 0.3)), size=(W, H))
+    cx, cy = round(0.2 * (W - 1)), round(0.7 * (H - 1))
+    spot = (slice(cy - 30, cy + 31), slice(cx - 30, cx + 31))
+    assert diff(base[spot], left[spot]) > 2_000
+    mask = np.ones((H, W), dtype=bool)
+    mask[spot] = False
+    assert diff(base[mask], left[mask]) == 0                                   # and nothing else moved
+    on = hud.render(state(phase="LOBBY", start_button=(0.3, True), cursor=(0.2, 0.3)), size=(W, H))
+    assert green_pixels(on, (cx - 30, cy - 30, 61, 61)) > 50                    # the ring turns green over the button
+
+
+def test_the_cursor_is_clamped_to_the_screen():
+    frame = hud.render(state(phase="LOBBY", start_button=(0.0, True), cursor=(1.6, 1.4)), size=(W, H))
+    assert frame.shape == (H, W, 3) and green_pixels(frame, (W - 60, 0, 60, 60)) > 20
+
+
+def test_the_prompts_say_to_hold_the_hub_on_start_when_the_button_is_there():
+    lobby_off = hud.render(state(phase="LOBBY"), size=(W, H))
+    lobby_on = hud.render(state(phase="LOBBY", start_button=(0.0, False)), size=(W, H))
+    centre = (slice(H // 2 - 80, H // 2 + 70), slice(160, W - 160))
+    assert diff(lobby_off[centre], lobby_on[centre]) > 20_000
+    over_off = hud.render(state(phase="MATCH_OVER"), size=(W, H))
+    over_on = hud.render(state(phase="MATCH_OVER", start_button=(0.0, False)), size=(W, H))
+    bottom = (slice(H - 160, H - 90), slice(160, W - 160))
+    assert diff(over_off[bottom], over_on[bottom]) > 10_000
+
+
+def test_the_button_stays_inside_the_frame_and_below_the_top_bar_whatever_the_size():
+    for size in ((1280, 720), (960, 540), (1920, 1080)):
+        w, h = size
+        x, y, bw, bh = button_rect(w, h)
+        assert x + bw <= w - 10 and y >= round(0.116 * h) and y + bh < h // 2
+        frame = hud.render(state(phase="LOBBY", start_button=(1.0, True), cursor=(0.9, 0.8)), size=size)
+        assert green_pixels(frame, (x, y, bw, bh)) > 100
+

@@ -321,14 +321,18 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
              mode="survival", target=7, seed=1, source="live", scope=None, no_publish=False, no_motor=False,
              threaded=False, lag_s=None, gyro_per_dps=None, accel_per_g=None, fs_raw=None, stale_ms=None,
              to_image=None, record_dir=None, player="rafae", vision=None, recorder=None, spin_probs_fn=None,
-             learner=None, pose_gyro=None, resume=False, overrides=None, latency=None, pose_model=None, log=print):
+             learner=None, pose_gyro=None, resume=False, overrides=None, latency=None, pose_model=None, hold_start=False,
+             log=print):
     """Wire every piece into one LiveRig.  The real play.py and the fake rig both come through here,
     so the wiring that matters on hardware (haptic blank windows, phase-gated tag search, the pose
     lock, status lights) is exactly the wiring the tests run.
 
     The swing source is the calibration's: "imu" reads the hub's gyro, "pose" the camera's hand speed.  Live
     camera mode passes a PoseGyro (it makes the swing samples from the poses); a replay of a camera session
-    passes none, because the recorded pose-derived samples arrive through the replay hub like hub samples."""
+    passes none, because the recorded pose-derived samples arrive through the replay hub like hub samples.
+
+    hold_start: the game also starts when the hub is held on the START button (live play; a replay starts its games
+    where the recording says)."""
     camera = calibration.swing.source == "pose"
     latency = latency or latency_mod.Latency.from_config()
     pose_model = pose_model or posemodel.PoseModel.default()
@@ -363,7 +367,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         client=mqtt_client if publishing else None, source=source, scope=scope or config.RECORD_SCOPE,
         no_publish=no_publish, seed=seed, box=calibration.box, omega_lo=calibration.swing.omega_lo,
         omega_hi=calibration.swing.omega_hi, t_pk=params.t_pk, spin_probs_fn=spin_probs_fn, learner=learner,
-        resume=resume, latency=latency, hand_model=pose_model.predictor)
+        resume=resume, latency=latency, hand_model=pose_model.predictor, hold_start=hold_start)
     if vision is None:
         vision = VisionWorker(capture, landmarker, clock=clock, hand=calibration.hand, lag_s=lag_s,
                               tag_detector=tag_detector, phase_fn=lambda: session.game.phase,

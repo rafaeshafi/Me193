@@ -157,3 +157,21 @@ def test_control_c_is_never_swallowed_by_the_frame_guard():
 
     with pytest.raises(KeyboardInterrupt):
         play.run_loop(Impatient(lambda n: False), show=lambda f: None, wait_key=lambda ms: 255, log=lambda *_: None)
+
+
+def test_the_fake_game_starts_from_the_mouse_held_in_the_top_right_too():
+    from pingpong.clock import FakeClock
+
+    clock = FakeClock(start_ns=1_000_000_000)
+    session = play.make_fake_session(play.parse_args(["--fake", "--no-audio"]), clock=clock)
+    assert session.hold_start is not None
+    calls = {"n": 0}
+
+    def mouse_xy():
+        calls["n"] += 1
+        clock.advance_s(1 / 30)
+        return (play.W * 0.5, play.H * 0.7) if calls["n"] < 10 else (play.W * 0.95, play.H * 0.12)    # then the top right
+
+    keys = iter([255] * 100 + [ord("q")])
+    play.fake_loop(session, show=lambda frame: None, wait_key=lambda ms: next(keys), mouse_xy=mouse_xy)
+    assert session.game.phase in ("COUNTDOWN", "RALLY")

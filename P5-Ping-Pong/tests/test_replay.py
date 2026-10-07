@@ -131,3 +131,10 @@ def test_a_session_against_the_learning_opponent_is_flagged_because_its_serves_c
     plain.run(until=lambda: plain.game.tracker.streak >= 3, max_s=60)
     plain.close()
     assert replay.replay(recorder.load(tmp_path / "plain")).warnings == []
+
+
+def test_a_replay_never_starts_a_game_by_itself_from_a_hand_that_sits_on_the_start_button(tmp_path):
+    # games start in a replay exactly where the recording says; the hold-to-start logic is for live play only
+    loaded = record(tmp_path, until=lambda: True)
+    assert replay.replay(loaded).rig.session.hold_start is None
+

@@ -11,7 +11,7 @@ from functools import lru_cache
 import cv2
 import numpy as np
 
-from pingpong import canvas, court3d, levels, scene
+from pingpong import canvas, court3d, holdstart, levels, scene
 
 GREEN, RED, AMBER, WHITE, GREY = (80, 220, 80), (70, 70, 240), (40, 170, 255), (255, 255, 255), (170, 170, 170)
 LOW_BATTERY = 20                 # percent: the hub's number goes amber below this
@@ -55,6 +55,8 @@ class HudState:
     swing_threshold: float = 0.0     # dps below which a swing does not count (T_PK)
     player_name: str = ""            # highlights the player's own row on the leaderboard
     hand_img: tuple | None = None    # your hand in the camera picture: (across, down) as fractions, as the mirror shows it
+    start_button: tuple | None = None   # (how far the hold has come 0..1, hand on it) while the START button is shown, else None
+    cursor: tuple | None = None      # (a, b): where the hand points over the screen (across, up; 0..1) while the button is shown
 
 
 @lru_cache(maxsize=4)
@@ -67,6 +69,7 @@ def render(state, size=(1280, 720), background=None):
     frame = np.empty((h, w, 3), dtype=np.uint8)
     scene.draw_scene(frame, _camera((w, h)), state)
     _draw_score(frame, state, w, h)
+    _draw_start_button(frame, state, w, h)
     _draw_top_bar(frame, state, w, h)
     _draw_phase(frame, state, w, h)
     if state.phase == "MATCH_OVER":
@@ -90,6 +93,8 @@ def _draw_score(frame, s, w, h):
         left, right = ("YOU", s.player_points, WHITE), ("CPU", s.cpu_points, WHITE)
     if s.phase == "MATCH_OVER" and s.leaderboard:
         left = None                                          # the end screen's board takes the left side
+    if s.start_button is not None:
+        right = None                                         # the START button takes the right panel's place
     for panel, x in ((left, 16), (right, w - 246)):
         if panel is None:
             continue
@@ -102,6 +107,31 @@ def _draw_score(frame, s, w, h):
                          (w // 2, 100), 0.7, GREY, 2, anchor="center")
 
 
+def _draw_start_button(frame, s, w, h):
+    """The START button in the top right, and a ring where the hand points over the screen: hold the hub on the button to start."""
+    if s.start_button is None:
+        return
+    progress, on = s.start_button
+    color = GREEN if on else WHITE
+    x0, y0, bw, bh = (round(f * v) for f, v in zip(holdstart.BUTTON, (w, h, w, h)))
+    scale = bh / 132
+    canvas.panel(frame, x0, y0, bw, bh)
+    cv2.rectangle(frame, (x0, y0), (x0 + bw, y0 + bh), color, 3)
+    canvas.draw_text(frame, "START", (x0 + bw // 2, y0 + round(0.45 * bh)), 1.9 * scale, color, 4, anchor="center")
+    canvas.draw_text(frame, "hold the hub here", (x0 + bw // 2, y0 + round(0.68 * bh)), 0.6 * scale, GREY, 1, anchor="center")
+    bar_x, bar_y, bar_w, bar_h = x0 + 14, y0 + round(0.78 * bh), bw - 28, max(6, round(0.11 * bh))
+    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), GREY, 1)
+    fill = int(bar_w * min(1.0, max(0.0, progress)))
+    if fill > 0:
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + fill, bar_y + bar_h), GREEN, -1)
+    if s.cursor is not None:
+        cx = round(min(1.0, max(0.0, s.cursor[0])) * (w - 1))
+        cy = round((1.0 - min(1.0, max(0.0, s.cursor[1]))) * (h - 1))
+        ring = GREEN if on else AMBER
+        cv2.circle(frame, (cx, cy), 24, ring, 3, cv2.LINE_AA)
+        cv2.circle(frame, (cx, cy), 4, ring, -1, cv2.LINE_AA)
+
+
 def _draw_top_bar(frame, s, w, h):
     mode = levels.MODE_NAMES.get(s.mode, s.mode.upper())
     canvas.draw_text(frame, f"{mode}  {s.level_name.upper()}", (24, 44), 1.0, WHITE, 2)
@@ -112,7 +142,11 @@ def _draw_top_bar(frame, s, w, h):
 
 
 def _draw_phase(frame, s, w, h):
-    if s.phase == "LOBBY":
+    if s.phase == "LOBBY" and s.start_button is not None:
+        canvas.draw_text(frame, "HOLD THE HUB ON START", (w // 2, h // 2 - 20), 1.8, WHITE, 4, anchor="center")
+        canvas.draw_text(frame, "top right, 1.5 s   (or show the START card, or press SPACE)", (w // 2, h // 2 + 40), 0.8, GREY, 2,
+                         anchor="center")
+    elif s.phase == "LOBBY":
         canvas.draw_text(frame, "SHOW THE START CARD", (w // 2, h // 2 - 20), 2.0, WHITE, 4, anchor="center")
         canvas.draw_text(frame, "or press SPACE", (w // 2, h // 2 + 40), 1.2, GREY, 2, anchor="center")
     elif s.phase == "COUNTDOWN" and s.countdown is not None:
@@ -125,7 +159,8 @@ def _draw_phase(frame, s, w, h):
         if s.mode == "survival":
             canvas.draw_text(frame, f"streak {s.streak}   best {s.record}", (w // 2, h // 2), 1.5, WHITE, 3,
                              anchor="center")
-        canvas.draw_text(frame, "SPACE to play again", (w // 2, h - 120), 1.2, WHITE, 2, anchor="center")
+        canvas.draw_text(frame, "hold the hub on START to play again" if s.start_button is not None else "SPACE to play again",
+                         (w // 2, h - 120), 1.05 if s.start_button is not None else 1.2, WHITE, 2, anchor="center")
 
 
 def _draw_leaderboard(frame, s):
