@@ -88,6 +88,11 @@ def test_too_little_turning_is_refused_and_says_to_turn_further():
         fit(stream(sine(6.0, 2), noise=1.0))
 
 
+def test_a_turn_that_is_big_enough_to_start_but_too_small_says_to_turn_further_not_both_ways():
+    with pytest.raises(tilt.TiltError, match="further"):
+        fit(stream(sine(14.0, 2), noise=1.0))                      # +-14 degrees: both ways, but not far
+
+
 def test_turning_one_way_only_is_refused_and_says_to_turn_both_ways():
     with pytest.raises(tilt.TiltError, match="both ways"):
         fit(stream([40.0 * math.sin(math.pi * i / 256) for i in range(256)]))        # 0 -> 40 -> 0, never to the left

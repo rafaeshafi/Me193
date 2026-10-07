@@ -40,8 +40,7 @@ class CalibrationFlow:
     def __init__(self, *, gyro_per_dps, hand="right", accel_per_g=1000.0, fs_raw=32767, n_soft=5, n_full=5,
                  stand_s=1.0, hold_s=0.8, still_sw=0.08, min_corner_gap_sw=0.35, min_span=(0.6, 0.4),
                  swing_start_dps=80.0, swing_end_dps=40.0, quiet_s=0.25, min_peak_dps=150.0, max_take_s=3.0,
-                 lead_s=0.8, max_reversals=3, source="imu", tilt_settle_s=2.5, tilt_hold_s=1.0, tilt_still_dps=25.0,
-                 tilt_start_dps=15.0, tilt_move_s=4.0):
+                 lead_s=0.8, max_reversals=3, source="imu", tilt=True):
         self.gpd, self.hand, self.accel_per_g, self.fs_raw = gyro_per_dps, hand, accel_per_g, fs_raw
         self.source = source                                     # "pose": the samples are the camera's hand speed
         self.n_soft, self.n_full = n_soft, n_full
@@ -50,8 +49,8 @@ class CalibrationFlow:
         self.start_dps, self.end_dps, self.quiet_ns = swing_start_dps, swing_end_dps, round(quiet_s * S)
         self.min_peak, self.max_take_ns, self.lead_ns = min_peak_dps, round(max_take_s * S), round(lead_s * S)
         self.max_reversals = max_reversals
-        self.tilt_settle_ns, self.tilt_hold_ns, self.tilt_move_ns = round(tilt_settle_s * S), round(tilt_hold_s * S), round(tilt_move_s * S)
-        self.tilt_still_dps, self.tilt_start_dps = tilt_still_dps, tilt_start_dps
+        self.ask_for_tilt = tilt                                 # False: no tilt step (the paddle stays upright on screen)
+        self._capture = tilt_mod.TiltCapture(accel_per_g=accel_per_g, gyro_per_dps=gyro_per_dps)
         self.step = "stand"
         self.corners, self.soft, self.full = [], [], []         # soft / full: [(peak_dps, [ImuSample, ...])]
         self.self_check = None                                  # (swings the new calibration detects, swings taken)
@@ -61,8 +60,6 @@ class CalibrationFlow:
         self._take_start = self._last_loud = 0
         self._notes, self._calibration = [], None
         self.tilt = None                                         # the TiltCalibration, once the hub has been turned
-        self._tilt_phase, self._tilt_t0, self._tilt_still = "hold", None, []
-        self._tilt_neutral, self._tilt_move_t0, self._tilt_rows, self._tilt_bias = None, None, [], None
 
     # --- what to tell the player ---------------------------------------------------------------------
     def prompt(self):
@@ -72,7 +69,7 @@ class CalibrationFlow:
             name = CORNER_NAMES[len(self.corners)].upper()
             return f"Hold the hub at the {name} corner of where you can comfortably reach, and keep still"
         if self.step == "tilt":
-            if self._tilt_phase == "hold":
+            if self._capture.phase == "hold":
                 return "Hold the hub UPRIGHT, like the paddle, in your ready position, and keep still"
             return "Now turn the hub side to side like a doorknob: RIGHT first, then LEFT, a few times"
         if self.step == "soft":
@@ -82,7 +79,7 @@ class CalibrationFlow:
         return "Calibration complete"
 
     def progress(self):
-        return {"stand": (0, 1), "corners": (len(self.corners), 4), "tilt": (0 if self._tilt_phase == "hold" else 1, 2),
+        return {"stand": (0, 1), "corners": (len(self.corners), 4), "tilt": (0 if self._capture.phase == "hold" else 1, 2),
                 "soft": (len(self.soft), self.n_soft),
                 "full": (len(self.full), self.n_full), "done": (1, 1)}[self.step]
 
@@ -150,7 +147,7 @@ class CalibrationFlow:
                        "to each corner")
             self.corners = []
         else:
-            self.step = "tilt" if self.source == "imu" else "soft"          # a camera has no hub to turn
+            self.step = "tilt" if self.source == "imu" and self.ask_for_tilt else "soft"     # a camera has no hub to turn
 
     # --- IMU: swings ------------------------------------------------------------------------------------
     def feed_imu(self, sample):
@@ -158,14 +155,17 @@ class CalibrationFlow:
         if self._bias is None:
             self._bias = g
         mag = float(np.linalg.norm(g - self._bias))
-        if mag < 25.0 and not (self.step == "tilt" and self._tilt_phase == "turn"):
+        if mag < 25.0 and not (self.step == "tilt" and self._capture.freezes_bias):
             self._bias = self._bias + 0.02 * (g - self._bias)    # resting: keep the zero-rate offset fresh (not while
                                                                  # turning the hub: a slow turn is not an offset)
         self._lead.append(sample)
         while self._lead and self._lead[0].t_ns < sample.t_ns - self.lead_ns:
             self._lead.popleft()
         if self.step == "tilt":
-            self._tilt_sample(sample, mag)
+            for note in self._capture.feed(sample, mag, self._bias):
+                self._note(note)
+            if self._capture.result is not None:
+                self.tilt, self.step = self._capture.result, "soft"
             return
         if self.step not in ("soft", "full"):
             self._take = None
@@ -184,42 +184,15 @@ class CalibrationFlow:
         elif t - self._last_loud >= self.quiet_ns:
             self._finish_take()
 
-    def _tilt_sample(self, sample, mag):
-        """Upright and still for a second (after a moment to get to the ready position), then four seconds of turning."""
-        t = sample.t_ns
-        if self._tilt_t0 is None:
-            self._tilt_t0 = t
-        if self._tilt_phase == "hold":
-            up = np.array(sample.a, dtype=float)
-            if t - self._tilt_t0 < self.tilt_settle_ns or mag > self.tilt_still_dps or np.linalg.norm(up) < 1e-6:
-                if mag > self.tilt_still_dps:
-                    self._tilt_still = []
-                return
-            self._tilt_still.append((t, up / np.linalg.norm(up)))
-            if t - self._tilt_still[0][0] >= self.tilt_hold_ns and len(self._tilt_still) >= 30:
-                self._tilt_neutral = np.mean([v for _, v in self._tilt_still], axis=0)
-                self._tilt_bias = self._bias.copy()              # the gyro's offset from the still hold, before any turning
-                self._tilt_phase = "turn"
-                self._note("upright captured: now turn the hub side to side like a doorknob, right first")
-            return
-        if self._tilt_move_t0 is None:
-            if mag < self.tilt_start_dps:
-                return
-            self._tilt_move_t0, self._tilt_rows = t, []
-        self._tilt_rows.append(sample)
-        if t - self._tilt_move_t0 >= self.tilt_move_ns:
-            self._finish_tilt()
+    def hint(self):
+        """A live line under the prompt about what the current step is waiting for ("" when there is none)."""
+        return self._capture.hint() if self.step == "tilt" else ""
 
-    def _finish_tilt(self):
-        rows, self._tilt_rows, self._tilt_move_t0 = self._tilt_rows, [], None
-        try:
-            self.tilt = tilt_mod.fit(rows, neutral=self._tilt_neutral, gyro_per_dps=self.gpd,
-                                     accel_per_g=self.accel_per_g, bias_dps=tuple(float(c) for c in self._tilt_bias))
-        except tilt_mod.TiltError as exc:
-            self._note(f"{exc}")                                 # and the next turn is measured afresh
-            return
-        self._note("tilt measured: the paddle on screen will turn with the hub")
-        self.step = "soft"
+    def skip_tilt(self):
+        """Give up on the tilt step (the paddle then stays upright on screen); only that step can be skipped."""
+        if self.step == "tilt":
+            self.step = "soft"
+            self._note("tilt skipped: the paddle will stay upright on screen")
 
     def _finish_take(self):
         samples, self._take = self._take, None

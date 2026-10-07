@@ -71,6 +71,7 @@ not trust are reported and **not** written. Do these from Terminal.app:
                                # window shows whether you are in position; Enter works there and in the terminal)
 ./pp bench_haptics             # which motor pulses you feel, and how long the IMU rings after one
 ./pp calibrate_swing --player rafae   # shoulders, four reach corners, hub upright + turned side to side, 5 soft + 5 full swings (~4 minutes)
+./pp calibrate_swing --player rafae --tilt-only   # just the paddle turning with the hub (~15 s; the rest is kept)
 ./pp train_spin --player rafae        # optional: 12 flat, 12 top, 12 back swings -> your spin model (~3 minutes)
 ```
 

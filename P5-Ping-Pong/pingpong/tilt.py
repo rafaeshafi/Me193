@@ -12,6 +12,7 @@ while the hub is not being thrown about) pulls the slow drift back.  Everything 
 
 import json
 import math
+from collections import deque
 from dataclasses import dataclass
 
 import numpy as np
@@ -20,7 +21,7 @@ MAX_DEG = 80.0               # the paddle is drawn leaning at most this far
 MIN_SPEED_DPS = 25.0         # slower gyro readings are not part of turning the hub
 MIN_RANGE_DEG = 15.0         # the turn has to reach this far each way
 FIRST_MOVE_DEG = 12.0        # the first turn this big says which way is 'right'
-AXIS_SHARE = 0.65            # of the turning energy that has to be about one axis
+AXIS_SHARE = 0.45            # of the turning energy that has to be about one axis (a wrist turn wanders; noise gives ~0.35)
 
 
 class TiltError(Exception):
@@ -67,10 +68,113 @@ def fit(samples, *, neutral, gyro_per_dps, accel_per_g, bias_dps):
         raise TiltError("the hub did not turn far enough: turn it side to side, further")
     if first < 0:                                               # the first move is 'right', positive by definition
         axis, angle = -axis, -angle
+    if angle.max() - angle.min() < 2 * MIN_RANGE_DEG:
+        raise TiltError("the hub did not turn far enough: turn it side to side, further")
     if angle.max() < MIN_RANGE_DEG or angle.min() > -MIN_RANGE_DEG:
         raise TiltError("turn it both ways: right, then left")
     return TiltCalibration(axis=tuple(float(c) for c in axis), neutral=tuple(float(c) for c in _unit(neutral)),
                            bias_dps=tuple(float(c) for c in bias_dps))
+
+
+class TiltCapture:
+    """The calibration step: hold the hub upright and steady, then turn it side to side -> a TiltCalibration.
+
+    A held hub is never 'still' by a rate threshold, so steady means an unchanging orientation (the accelerometer's
+    direction stays within a few degrees) for a second.  The player may also simply start turning once the hub has
+    been steady for a little while (before the prompt changed): the steady stretch just before the turn is 'upright'.
+    The turn starts when the hub's rotation rate, smoothed over 0.15 s, reaches `start_dps` (tremor does not)."""
+
+    def __init__(self, *, accel_per_g, gyro_per_dps, settle_s=1.5, hold_s=1.0, min_steady_s=0.6, steady_deg=10.0,
+                 start_dps=30.0, move_s=4.0):
+        self.apg, self.gpd = accel_per_g, gyro_per_dps
+        self.settle_ns, self.hold_ns, self.min_steady_ns = round(settle_s * 1e9), round(hold_s * 1e9), round(min_steady_s * 1e9)
+        self.steady_deg, self.start_dps, self.move_ns = steady_deg, start_dps, round(move_s * 1e9)
+        self.phase, self.result = "hold", None              # phase: "hold" until steady, then "turn"
+        self._t0 = self._last_t = None
+        self._sum = self._stretch_t0 = self._stretch_t1 = None
+        self._motion, self._recent = deque(), deque()       # (t, rate): the last 0.15 s, and the last 2 s of smoothed rates
+        self._move_t0, self._rows, self._neutral, self._bias, self._asked_ns = None, [], None, None, None
+
+    @property
+    def collecting(self):
+        return self._move_t0 is not None
+
+    @property
+    def freezes_bias(self):
+        """While the hub is being turned the gyro's resting offset must not follow it."""
+        return self.phase == "turn" or self.collecting
+
+    def feed(self, sample, rate, bias):
+        """One sample (rate = |gyro - offset| in dps, bias = the offset) -> the notes to tell the player."""
+        t = sample.t_ns
+        self._t0 = t if self._t0 is None else self._t0
+        self._last_t = t
+        if self.collecting:
+            self._rows.append(sample)
+            return self._finish() if t - self._move_t0 >= self.move_ns else []
+        motion = self._smooth(t, rate)
+        self._follow_orientation(sample, t)
+        settled = t - self._t0 >= self.settle_ns
+        steady_ns = 0 if self._sum is None else self._stretch_t1 - self._stretch_t0
+        if motion >= self.start_dps:                         # the turn begins
+            notes = []
+            if settled and steady_ns >= self.min_steady_ns:
+                self._neutral, self._bias = _unit(self._sum), np.array(bias, dtype=float)
+                self._move_t0, self._rows = t, [sample]
+                return notes
+            if settled and (self._asked_ns is None or t - self._asked_ns > 3e9):
+                self._asked_ns = t
+                notes.append("hold the hub steady for a second first, then turn it side to side")
+            self._sum = None
+            return notes
+        if self.phase == "hold" and settled and steady_ns >= self.hold_ns:
+            self.phase = "turn"
+            return ["upright captured: now turn the hub side to side like a doorknob, right first"]
+        return []
+
+    def hint(self):
+        """What the step is waiting for, for the window (a line under the prompt)."""
+        if self.collecting:
+            done = max(0.0, (self._last_t - self._move_t0) / 1e9)
+            return f"turning... {min(done, self.move_ns / 1e9):.1f} of {self.move_ns / 1e9:.1f} s"
+        if self.phase == "hold":
+            elapsed = 0.0 if self._last_t is None else (self._last_t - self._t0 - self.settle_ns) / 1e9
+            steady = 0.0 if self._sum is None else (self._stretch_t1 - self._stretch_t0) / 1e9
+            return f"hold it steady: {max(0.0, min(steady, elapsed, self.hold_ns / 1e9)):.1f} of {self.hold_ns / 1e9:.1f} s"
+        peak = max((m for _, m in self._recent), default=0.0)
+        if 10.0 <= peak < self.start_dps:
+            return f"turn it harder: you reached {peak:.0f} dps, it needs {self.start_dps:.0f}"
+        return "now turn the hub side to side: right, then left"
+
+    def _smooth(self, t, rate):
+        self._motion.append((t, rate))
+        while self._motion and self._motion[0][0] < t - 150_000_000:
+            self._motion.popleft()
+        smooth = sum(r for _, r in self._motion) / len(self._motion)
+        self._recent.append((t, smooth))
+        while self._recent and self._recent[0][0] < t - 2_000_000_000:
+            self._recent.popleft()
+        return smooth
+
+    def _follow_orientation(self, sample, t):
+        a = np.asarray(sample.a, dtype=float) / self.apg
+        size = float(np.linalg.norm(a))
+        if not 0.8 <= size <= 1.25:                          # thrown about, not held: leave the stretch alone
+            return
+        u = a / size
+        if self._sum is not None and math.degrees(math.acos(float(np.clip(u @ _unit(self._sum), -1.0, 1.0)))) <= self.steady_deg:
+            self._sum, self._stretch_t1 = self._sum + u, t
+        else:
+            self._sum, self._stretch_t0, self._stretch_t1 = u.copy(), t, t
+
+    def _finish(self):
+        rows, self._rows, self._move_t0, self._sum = self._rows, [], None, None
+        try:
+            self.result = fit(rows, neutral=self._neutral, gyro_per_dps=self.gpd, accel_per_g=self.apg,
+                              bias_dps=tuple(float(c) for c in self._bias))
+        except TiltError as exc:
+            return [str(exc)]
+        return ["tilt measured: the paddle on screen will turn with the hub"]
 
 
 class TiltEstimator:

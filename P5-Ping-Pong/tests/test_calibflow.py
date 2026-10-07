@@ -55,7 +55,7 @@ def test_the_tilt_step_asks_for_upright_and_still_first_and_then_for_the_turn():
 
 def test_a_player_who_barely_turns_the_hub_is_told_to_turn_it_further_and_stays_on_the_step():
     notes, flow = [], CalibrationFlow(gyro_per_dps=GPD)
-    fakerig.drive_calibration(fakerig.CalibrationScript(tilt_deg=8.0), flow, on_note=notes.append,
+    fakerig.drive_calibration(fakerig.CalibrationScript(tilt_deg=14.0), flow, on_note=notes.append,
                               stop_after_notes=("further",))
     assert flow.step == "tilt" and any("further" in note for note in notes)
 

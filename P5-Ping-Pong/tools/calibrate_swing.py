@@ -4,6 +4,7 @@ Usage (from Terminal.app: camera and Bluetooth are not available to the Claude a
     cd ~/ME193/P5-Ping-Pong
     ./pp calibrate_swing --player rafae            # the card comes from config_local.json
     ./pp calibrate_swing --player rafae --hand left
+    ./pp calibrate_swing --player rafae --tilt-only           # just teach the paddle to turn with the hub (~15 s)
     ./pp calibrate_swing --player rafae --swing-source pose   # the camera's hand speed instead of the hub's gyro
     ./pp calibrate_swing --player rafae --no-hub              # camera only (implies --swing-source pose)
     ./pp calibrate_swing --selftest                # no hardware needed
@@ -21,6 +22,7 @@ Q cancels without saving.
 """
 
 import argparse
+import dataclasses
 import signal
 import sys
 import textwrap
@@ -45,6 +47,9 @@ def parse_args(argv=None):
     ap.add_argument("--card-serial", default=None)
     ap.add_argument("--player", default="rafae")
     ap.add_argument("--hand", choices=("right", "left"), default="right")
+    ap.add_argument("--no-tilt", action="store_true", help="skip the step that teaches the paddle to turn with the hub")
+    ap.add_argument("--tilt-only", action="store_true",
+                    help="only teach the paddle to turn with the hub (~15 s); the saved calibration keeps everything else")
     ap.add_argument("--selftest", action="store_true")
     livebuild.add_swing_source_args(ap)
     return ap.parse_args(argv)
@@ -84,8 +89,12 @@ def render_frame(flow, background, hand_uv, last_note, size=(W, H)):
     done, total = flow.progress()
     canvas.draw_text(frame, f"{flow.step.upper()}  {done}/{total}" if flow.step != "done" else "DONE", (24, 54),
                      1.3, AMBER, 3)
-    for i, line in enumerate(textwrap.wrap(flow.prompt(), 34)):
+    lines = textwrap.wrap(flow.prompt(), 34)
+    for i, line in enumerate(lines):
         canvas.draw_text(frame, line, (24, 120 + 56 * i), 1.35, WHITE, 3)
+    if flow.hint():                                       # what the step is waiting for, live (and how to give up on it)
+        canvas.draw_text(frame, flow.hint(), (24, 120 + 56 * len(lines) + 10), 0.95, AMBER, 2)
+        canvas.draw_text(frame, "press S to skip this step", (24, 120 + 56 * len(lines) + 48), 0.7, GREY, 1)
     bar_y, bar_w = h - 90, w - 48
     import cv2
 
@@ -97,7 +106,7 @@ def render_frame(flow, background, hand_uv, last_note, size=(W, H)):
     return frame
 
 
-COMPLAINTS = ("too ", "waving", "harder", "firmer", "on too long", "further", "both ways", "one axis")
+COMPLAINTS = ("too ", "waving", "harder", "firmer", "on too long", "further", "both ways", "one axis", "steady for")
 
 
 def is_complaint(note):
@@ -131,6 +140,14 @@ def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), fr
         print(f"cannot calibrate: {exc}", file=sys.stderr)
         return 2
     camera = source == "pose"
+    existing = None
+    if args.tilt_only:
+        existing = None if camera else profile.load(args.player, root=profile_root, source=source)
+        if existing is None:
+            print("cannot calibrate the tilt on its own: " + ("the camera has no hub to turn" if camera else
+                  f"there is no calibration for {args.player} to add it to: run ./pp calibrate_swing --player "
+                  f"{args.player} first"), file=sys.stderr)
+            return 2
     if not camera and not config.is_measured("GYRO_PER_DPS"):
         (warn or (lambda text: print(text, file=sys.stderr)))(
             "WARNING: the hub's gyro units were never measured (GYRO_PER_DPS is a guess): run './pp bench_hub "
@@ -157,11 +174,13 @@ def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), fr
         units = (posegyro.GYRO_PER_DPS, posegyro.ACCEL_PER_G, posegyro.FS_RAW) if camera else \
             (config.GYRO_PER_DPS, config.ACCEL_PER_G, config.HUB_FS_RAW)
         flow = CalibrationFlow(gyro_per_dps=units[0], hand=args.hand, accel_per_g=units[1], fs_raw=units[2],
-                               source=source)
+                               source=source, tilt=not args.no_tilt)
+        if existing is not None:
+            flow.step = "tilt"                            # the saved calibration already has everything else
         if env.threaded:
             vision.start()
         return _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, size,
-                     round(1e9 / frame_hz), posegyro.PoseGyro() if camera else None)
+                     round(1e9 / frame_hz), posegyro.PoseGyro() if camera else None, existing)
     finally:
         if vision is not None:
             vision.stop()                                 # also releases the camera
@@ -170,12 +189,13 @@ def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), fr
         hub.close()
 
 
-def _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, size, frame_ns, gyro=None):
-    """gyro: a PoseGyro when the camera is the swing sensor (the hub's own samples are then thrown away)."""
+def _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, size, frame_ns, gyro=None, existing=None):
+    """gyro: a PoseGyro when the camera is the swing sensor (the hub's own samples are then thrown away).
+    existing: the saved calibration a --tilt-only run adds the tilt to (the flow then only has the tilt step)."""
     import cv2
 
     last_pose_ns, last_note, hand, last_shown_ns = None, "", None, None
-    while not flow.finished():
+    while not (flow.finished() or (existing is not None and flow.step != "tilt")):
         if not env.threaded:
             vision.step()                                 # a synchronous environment has no camera thread
         while not hub.imu.empty():
@@ -199,10 +219,17 @@ def _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, si
             frame = vision.latest_frame()
             show(render_frame(flow, None if frame is None else cv2.flip(frame, 1), hand, last_note, size=size))
             last_shown_ns = now
-            if wait_key(1) & 0xFF in (ord("q"), 27):
+            key = wait_key(1) & 0xFF
+            if key in (ord("q"), 27):
                 return 1
+            if key == ord("s"):
+                flow.skip_tilt()
         env.sleep(0.01)
-    path = profile.save(args.player, flow.calibration(), root=profile_root)
+    if existing is not None and flow.tilt is None:
+        notify("tilt skipped: the saved calibration is unchanged")
+        return 0
+    result = dataclasses.replace(existing, tilt=flow.tilt) if existing is not None else flow.calibration()
+    path = profile.save(args.player, result, root=profile_root)
     notify(f"saved {path}")
     show(render_frame(flow, None, hand, f"saved for {args.player}", size=size))
     wait_key(1500)

@@ -45,9 +45,88 @@ def test_the_whole_tool_on_fake_hardware_saves_a_calibration_the_game_can_load(t
     assert frames and any("calibration done" in n for n in notes)
 
 
+def test_the_window_says_what_the_tilt_step_is_waiting_for_under_the_prompt(monkeypatch):
+    from pingpong import canvas
+
+    seen, real = [], canvas.draw_text
+    monkeypatch.setattr(canvas, "draw_text", lambda frame, text, *a, **k: (seen.append(text), real(frame, text, *a, **k))[1])
+    flow = CalibrationFlow(gyro_per_dps=10.0)
+    flow.step = "tilt"
+    tool.render_frame(flow, None, None, "", size=(1280, 720))
+    assert flow.hint() and flow.hint() in seen and "S to skip" in " ".join(seen)
+    seen.clear()
+    tool.render_frame(CalibrationFlow(gyro_per_dps=10.0), None, None, "", size=(1280, 720))
+    assert not any("steady" in text or "S to skip" in text for text in seen)         # no hint on the other steps
+
+
+def test_pressing_s_at_the_tilt_step_skips_it_and_the_calibration_is_saved_without_a_tilt(tmp_path):
+    env = fake_env(fakerig.CalibrationScript())
+    notes = []
+    code = tool.run(env, args_for(tmp_path), profile_root=tmp_path, show=lambda f: None, wait_key=lambda ms: ord("s"),
+                    notify=notes.append, size=(320, 180), frame_hz=5.0)
+    assert code == 0 and any("skipped" in n for n in notes)
+    cal = profile.load("rafae", root=tmp_path)
+    assert cal is not None and cal.tilt is None and cal.swing.omega_hi > cal.swing.omega_lo
+
+
+def test_no_tilt_leaves_the_step_out_altogether(tmp_path):
+    env = fake_env(fakerig.CalibrationScript())
+    notes = []
+    code = tool.run(env, args_for(tmp_path, "--no-tilt"), profile_root=tmp_path, show=lambda f: None,
+                    wait_key=lambda ms: 255, notify=notes.append, size=(320, 180), frame_hz=5.0)
+    assert code == 0 and not any("upright" in n or "tilt measured" in n or "tilt skipped" in n for n in notes)
+    assert profile.load("rafae", root=tmp_path).tilt is None
+
+
+def saved_without_a_tilt(tmp_path):
+    from pingpong.calibration import SwingCalibration
+    from pingpong.paddle import ReachBox
+
+    old = profile.Calibration(swing=SwingCalibration((0.35, 0.88, -0.32), 330.0, 1100.0),
+                              box=ReachBox(-1.3, 1.5, -1.4, 0.9), shoulder_w=0.13, hand="right")
+    profile.save("rafae", old, root=tmp_path)
+    return old
+
+
+def same_but_the_tilt(a, b):
+    """Equal up to the last bit of the re-normalised swing axis."""
+    return (a.swing.u_fwd == pytest.approx(b.swing.u_fwd, abs=1e-12)
+            and (a.swing.omega_lo, a.swing.omega_hi, a.box, a.shoulder_w, a.hand) ==
+            (b.swing.omega_lo, b.swing.omega_hi, b.box, b.shoulder_w, b.hand))
+
+
+def test_tilt_only_adds_the_tilt_to_the_saved_calibration_and_changes_nothing_else(tmp_path):
+    old, script = saved_without_a_tilt(tmp_path), fakerig.CalibrationScript()
+    notes = []
+    code = tool.run(fake_env(script), args_for(tmp_path, "--tilt-only"), profile_root=tmp_path, show=lambda f: None,
+                    wait_key=lambda ms: 255, notify=notes.append, size=(320, 180), frame_hz=5.0)
+    assert code == 0 and any("tilt measured" in n for n in notes)
+    new = profile.load("rafae", root=tmp_path)
+    assert new.tilt is not None and angle_deg(new.tilt.axis, script.tilt_axis) < 6.0
+    assert same_but_the_tilt(new, old)
+
+
+def test_tilt_only_skipped_with_s_leaves_the_saved_calibration_as_it_was(tmp_path):
+    old = saved_without_a_tilt(tmp_path)
+    notes = []
+    code = tool.run(fake_env(fakerig.CalibrationScript()), args_for(tmp_path, "--tilt-only"), profile_root=tmp_path,
+                    show=lambda f: None, wait_key=lambda ms: ord("s"), notify=notes.append, size=(320, 180), frame_hz=5.0)
+    assert code == 0 and profile.load("rafae", root=tmp_path).tilt is None
+    assert same_but_the_tilt(profile.load("rafae", root=tmp_path), old)
+
+
+def test_tilt_only_without_a_calibration_to_add_it_to_says_so_before_touching_any_hardware(tmp_path, capsys):
+    env = fake_env(fakerig.CalibrationScript())
+    code = tool.run(env, args_for(tmp_path, "--tilt-only"), profile_root=tmp_path, show=lambda f: None,
+                    wait_key=lambda ms: 255, notify=lambda n: None)
+    assert code == 2 and "calibrate_swing --player rafae" in capsys.readouterr().err
+    assert not env.hub_device.calls                                              # nothing was connected or beeped
+
+
 def test_what_the_tool_complains_about_beeps_low_and_shows_red_and_what_it_accepts_does_not():
     for complaint in ("that swing was too gentle (80 dps): swing a bit firmer", "turn it both ways: right, then left",
                       "the hub hardly turned: turn it side to side, further", "turn it about one axis, like a doorknob",
+                      "hold the hub steady for a second first, then turn it side to side",
                       "that was waving, not a swing: one clean swing at a time"):
         assert tool.is_complaint(complaint), complaint
     for fine in ("soft swing 1/5: peak 330 dps", "upright captured: now turn the hub side to side like a doorknob, right first",
