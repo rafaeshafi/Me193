@@ -5,7 +5,7 @@ import random
 import pytest
 
 import config
-from pingpong import levels, physics, shot
+from pingpong import latency, levels, physics, shot
 from pingpong.events import PaddlePose, SwingEvent
 from pingpong.judge import HitJudge
 from pingpong.mqtt_pub import ScorePublisher
@@ -16,7 +16,7 @@ from pingpong.scoring import ScoreTracker
 from pingpong.sources_fake import FakeMqttClient
 
 S = 1_000_000_000
-LAG_NS = round(0.10 * S)          # the judge's peak -> contact lag: a swing whose peak is this early makes contact on time
+LAG_NS = round(latency.Latency.from_config().contact_lag_s * S)     # the judge's peak -> contact lag: a swing whose peak is this early makes contact on time
 BOX = ReachBox(u_min=-1.0, u_max=1.0, v_min=-0.5, v_max=0.5)
 
 

@@ -109,6 +109,11 @@ class GameCore:
         return set(self._pause_reasons)
 
     @property
+    def next_cpu_contact_ns(self):
+        """When the computer next hits the ball: the serve after the countdown or a point, or its return of your shot."""
+        return {"COUNTDOWN": self._serve_at, "POINT_OVER": self.point_over_until_ns, "RALLY": self._cpu_at}.get(self.phase)
+
+    @property
     def paused_at_ns(self):
         """When the freeze began (the picture stays as it was then); None while the game is running."""
         return self._paused_at

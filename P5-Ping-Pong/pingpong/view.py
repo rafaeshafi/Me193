@@ -83,18 +83,22 @@ class View:
             return None
         out, inc = g.outgoing_leg, g.incoming_leg
         if out is not None and view >= out.t0_ns:
-            return out.position(view) if view <= out.end_ns else None
+            limit = out.arrival_ns + round(physics.FLY_ON_S * S) if out.terminal == "arrive" else out.end_ns
+            return out.position(view) if view <= limit else None       # a ball nobody returns is seen to go on by
         if inc is not None and view <= inc.arrival_ns + round(physics.FLY_ON_S * S):
             return inc.position(view)
         return None
 
     # --- the computer's paddle ----------------------------------------------------------------------------------------------
     def cpu_swing(self, view):
-        """How far through its stroke the computer's paddle is (0..1), None when it is not hitting."""
-        if self.cpu_swing_ns is None:
+        """How far through its stroke the computer's paddle is (0..1), None when it is not hitting.  The stroke is timed
+        to meet the ball exactly as it leaves (the middle of the swing), so it starts before the serve or the return."""
+        g, half = self.game, CPU_SWING_S / 2 * S
+        contacts = [t for t in (self.cpu_swing_ns, g.next_cpu_contact_ns) if t is not None]
+        near = [t for t in contacts if abs(view - t) < half]
+        if not near:
             return None
-        progress = (view - self.cpu_swing_ns) / (CPU_SWING_S * S)
-        return progress if 0.0 <= progress < 1.0 else None
+        return 0.5 + (view - min(near, key=lambda t: abs(view - t))) / (CPU_SWING_S * S)
 
     def cpu_x(self, view):
         """The computer's paddle: after its return it stands where it hit and drifts back to the middle; while it chases

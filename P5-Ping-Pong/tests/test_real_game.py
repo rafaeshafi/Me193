@@ -9,6 +9,7 @@ and its height is free), and with the new rules every one of the seven judged sw
 tests/data/real_game1_balls.json holds the swing, the ball and the poses around each of those balls.
 """
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -26,7 +27,8 @@ BALLS = {b["ball_id"]: b for b in DATA["balls"]}
 def judged(ball_id, level=1, **judge_kw):
     b = BALLS[ball_id]
     swing = SwingEvent(kind="IMPACT", **{k: (tuple(v) if isinstance(v, list) else v) for k, v in b["swing"].items()})
-    ball = BallWindow(ball_id=ball_id, t_c_ns=b["t_c_ns"], aim_ab=tuple(b["aim_ab"]), level=levels.LEVELS[level])
+    ball = BallWindow(ball_id=ball_id, t_c_ns=b["t_c_ns"], aim_ab=tuple(b["aim_ab"]),
+                      level=levels.LEVELS[level] if isinstance(level, int) else level)
     poses = [PaddlePose(t_scene_ns=p["t"], u=p["u"], v=p["v"], conf=p["c"], hand=p["h"]) for p in b["poses"]]
     judge = HitJudge(ReachBox(**DATA["box"]), t_pk=DATA["t_pk"], **judge_kw)
     return judge.judge(swing, ball, poses, b["now_ns"])
@@ -52,7 +54,8 @@ def test_the_stroke_ends_close_to_the_balls_arrival_not_the_gyros_peak():
     assert all(abs(e) < levels.LEVELS[1].early_s for e in ends)
 
 
-def test_a_stricter_level_still_asks_for_the_hand_to_be_near_the_ball_across_the_court():
-    # Pro's radius is 0.42: ball 1 (0.57 SW wide of the hand) is no longer a hit, the other six still are
-    assert judged(1, level=3).kind == "REJECTED"
-    assert all(judged(i, level=3).kind == "HIT" for i in BALLS if i != 1)
+def test_a_stricter_reach_still_asks_for_the_hand_to_be_near_the_ball_across_the_court():
+    # at Pro's reach (0.42) ball 1 (0.57 SW wide of the hand) is no longer a hit, the other six still are
+    tight = dataclasses.replace(levels.LEVELS[1], radius_sw=levels.LEVELS[3].radius_sw)
+    assert judged(1, level=tight).kind == "REJECTED"
+    assert all(judged(i, level=tight).kind == "HIT" for i in BALLS if i != 1)

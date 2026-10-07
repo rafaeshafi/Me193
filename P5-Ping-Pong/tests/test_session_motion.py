@@ -207,3 +207,17 @@ def test_the_bounce_is_heard_when_it_is_seen():
     session.clock.advance_s(0.05)
     session.tick()
     assert session.audio.played.count("bounce") == 1                               # once per bounce
+
+
+def test_a_ball_the_computer_misses_flies_on_past_its_end_instead_of_vanishing():
+    session = app.make_session(mode="match", target=5, latency=dataclasses.replace(latency.Latency.from_config(), display_s=0.0, loop_s=0.0))
+    session.game.policy.returns = lambda *a, **k: False
+    events, _ = play_into_the_zone(session)
+    out = session.game.outgoing_leg
+    session.clock.advance_s((out.arrival_ns - session.clock.now_ns()) / S + 0.2)
+    session.tick()
+    assert session.game.phase in ("POINT_OVER", "MATCH_OVER")
+    x, y, z = session.hud_state().ball
+    assert z > physics.CPU_Z_M and y < physics.STRIKE_Y_M                  # past the computer's paddle, on its way down
+    session.clock.advance_s(2.0)
+    assert session.hud_state().ball is None

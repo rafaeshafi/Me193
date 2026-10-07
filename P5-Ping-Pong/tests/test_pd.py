@@ -109,17 +109,29 @@ def test_after_its_return_the_computers_paddle_is_where_it_hit_and_drifts_back_t
     assert abs(session.hud_state().cpu_x_m) < 0.5 * abs(leg.x_end)       # on its way back
 
 
-def test_the_computer_swings_when_it_serves_or_returns_for_about_a_third_of_a_second():
+def test_the_computers_paddle_meets_the_ball_exactly_as_it_leaves_it_so_the_swing_is_half_done_at_the_serve():
     session = app.make_session(level=1, latency=LIVE)
     assert session.hud_state().cpu_swing is None
     session.on_start()
-    session.clock.advance_s(3.0)
-    session.tick()                                                       # the first serve
-    assert session.hud_state().cpu_swing == pytest.approx(0.0, abs=0.05)
-    session.clock.advance_s(0.15)
-    assert 0.4 < session.hud_state().cpu_swing < 0.6
-    session.clock.advance_s(0.5)
+    session.clock.advance_s(2.9)
+    session.tick()                                                       # 0.1 s before the first serve: the swing is on its way
+    assert 0.1 < session.hud_state().cpu_swing < 0.4
+    session.clock.advance_s(0.1)
+    session.tick()                                                       # the serve: the ball leaves the paddle
+    assert session.hud_state().cpu_swing == pytest.approx(0.5, abs=0.05)
+    session.clock.advance_s(0.1)
+    assert 0.7 < session.hud_state().cpu_swing < 0.95
+    session.clock.advance_s(0.3)
     assert session.hud_state().cpu_swing is None
+
+
+def test_the_computers_swing_for_a_return_starts_before_the_ball_gets_to_it():
+    session, leg = _wide_shot("survival", 700.0)
+    session.clock.advance_s((leg.arrival_ns - session.clock.now_ns()) / 1e9 - 0.1)
+    assert 0.1 < session.hud_state().cpu_swing < 0.4                      # 0.1 s before the return: already swinging
+    session.clock.advance_s(0.1)
+    session.tick()
+    assert session.hud_state().cpu_swing == pytest.approx(0.5, abs=0.05)
 
 
 def test_the_paddle_is_back_in_the_centre_when_the_computer_serves():

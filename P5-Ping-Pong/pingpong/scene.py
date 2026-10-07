@@ -150,7 +150,7 @@ def _zone(frame, cam, s):
     rest = s.rest or s.paddle
     x, _, z = rest
     z_far, z_near = s.zone if s.zone is not None else (z + 0.45, z - 0.15)
-    z_far, z_near = min(z_far, L + 0.25), max(z_near, -0.45)
+    z_far, z_near = min(z_far, physics.NET_Z_M), max(z_near, -0.45)         # (a ball is hit on your side of the net)
     if z_far - z_near > 0.1:
         ring = np.array(cam.ground_ellipse(x, (z_far + z_near) / 2, s.reach_m, (z_far - z_near) / 2), dtype=np.int32)
         _blend_poly(frame, ring, REACH, 0.12)

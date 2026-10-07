@@ -61,6 +61,7 @@ def test_a_fake_source_never_reaches_the_official_topic():
 def test_every_counted_hit_gets_a_cue_on_the_hub_and_the_motors_use_batched_writes():
     rig = fakerig.FakeRig()
     rig.run(until=lambda: rig.game.tracker.streak >= 5, max_s=60)
+    rig.run(seconds=0.4)                                              # (a hit's cue is sent early for the contact, a moment ahead)
     calls = [c[0] for c in rig.dev.calls]
     assert calls.count("beep") >= 5 and calls.count("light_color") >= 5
     assert calls.count("begin_batch") == calls.count("end_batch")           # never a left-open batch
@@ -202,11 +203,12 @@ def test_a_hand_that_really_swings_through_the_ball_is_still_judged_a_hit_for_an
     assert rig.game.tracker.streak >= 6
 
 
-def test_the_hardest_swing_still_hits_at_pro_the_judge_only_asks_where_the_hand_is_across_the_court():
-    # At ~11 shoulder widths a second the hand sweeps out of Pro's radius around the peak.  The judge needs the closest
-    # approach across the court (not a 2-D distance), so a hard rally holds; --set level.radius_sw is still the knob.
-    # (The scripted player is a metronome at 1.4 Hz, which the hub's shake lock takes for shaking: not what this is about.)
-    hard = fakerig.FakeRig(level=3, hand_motion=True, w_pk=1100.0)
+def test_the_hardest_swing_still_hits_at_club_the_judge_only_asks_where_the_hand_is_across_the_court():
+    # At ~11 shoulder widths a second the hand sweeps a long way around the peak.  The judge needs the closest approach
+    # across the court (not a 2-D distance), so a hard rally holds; --set level.radius_sw is still the knob.  (Not at
+    # Pro: its 0.43 s flight leaves a scripted hand no time for the glide, the backswing and the stroke; and the scripted
+    # player is a metronome the hub's shake lock takes for shaking.)
+    hard = fakerig.FakeRig(level=2, hand_motion=True, w_pk=1100.0)
     hard.rig.imu.shake = None
     hard.run(until=lambda: hard.game.tracker.streak >= 5, max_s=90)
     assert hard.game.tracker.streak >= 5

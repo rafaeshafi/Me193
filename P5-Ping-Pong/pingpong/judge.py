@@ -24,12 +24,12 @@ import math
 from collections import deque
 from dataclasses import dataclass
 
+from pingpong import latency as latency_mod
 from pingpong import physics, stage
 from pingpong.events import GateResult, Verdict
 
 S = 1_000_000_000
 MIN_PEAK_SPEED_SW_S = 0.3        # a hand that barely moves has no speed peak worth comparing
-CONTACT_LAG_S = 0.10             # from the gyro's peak to the end of the forward stroke: where the paddle meets the ball
 
 
 @dataclass(frozen=True)
@@ -70,8 +70,9 @@ def cross_sensor_offset_ms(samples, t_i_ns):
 
 class HitJudge:
     def __init__(self, box, t_pk=250.0, d95_s=0.15, min_dur_ms=60.0, max_dur_ms=2000.0, max_reversals=2,
-                 min_conf=0.6, refractory_s=0.35, max_hits_per_s=3, contact_lag_s=CONTACT_LAG_S):
-        self.box, self.t_pk, self.d95_s, self.contact_lag_s = box, t_pk, d95_s, contact_lag_s
+                 min_conf=0.6, refractory_s=0.35, max_hits_per_s=3, contact_lag_s=None):
+        self.box, self.t_pk, self.d95_s = box, t_pk, d95_s
+        self.contact_lag_s = latency_mod.Latency.from_config().contact_lag_s if contact_lag_s is None else contact_lag_s
         self.min_dur_ms, self.max_dur_ms, self.max_reversals = min_dur_ms, max_dur_ms, max_reversals
         self.min_conf, self.refractory_s, self.max_hits_per_s = min_conf, refractory_s, max_hits_per_s
         self._counted = set()

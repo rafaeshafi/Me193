@@ -8,7 +8,7 @@ high the hand is does not matter.
 
 import pytest
 
-from pingpong import levels, physics
+from pingpong import latency, levels, physics
 from pingpong.events import PaddlePose, SwingEvent
 from pingpong.judge import BallWindow, HitJudge
 from pingpong.paddle import ReachBox
@@ -17,7 +17,7 @@ S = 1_000_000_000
 CLUB = levels.LEVELS[2]
 BOX = ReachBox(u_min=-1.0, u_max=1.0, v_min=-0.5, v_max=0.5)
 T_C = 10 * S
-LAG = 0.10                                   # the judge's default peak -> contact lag, seconds
+LAG = latency.Latency.from_config().contact_lag_s       # the judge's default peak -> contact lag, seconds
 T_I = T_C - round(LAG * S)                   # the peak of a perfectly timed swing
 
 
@@ -61,8 +61,9 @@ def test_the_contact_is_the_peak_plus_the_stroke_lag_and_never_before_the_swing_
     on_time = j.judge(swing(), ball(1), poses(T_I), now_ns=T_I + 10_000_000)       # seen long before the contact
     assert on_time.e_s == pytest.approx(0.0) and on_time.contact_ns == T_C
     t_i = T_C + S
-    seen_late = judge().judge(swing(t_ns=t_i), ball(2, t_c=t_i + 100_000_000), poses(t_i), now_ns=t_i + 170_000_000)
-    assert seen_late.contact_ns == t_i + 170_000_000                                 # the ball is where it is NOW, not in the past
+    seen_late = judge().judge(swing(t_ns=t_i), ball(2, t_c=t_i + round(LAG * S)), poses(t_i),
+                              now_ns=t_i + round((LAG + 0.07) * S))
+    assert seen_late.contact_ns == t_i + round((LAG + 0.07) * S)                     # the ball is where it is NOW, not in the past
     assert seen_late.e_s == pytest.approx(0.0, abs=1e-9)                              # ... but the timing is judged on the stroke
 
 
@@ -161,9 +162,9 @@ def test_j5_one_hit_per_ball_and_a_refractory_after_a_counted_hit():
     assert j.judge(swing(), ball(1), poses(T_I), T_C).kind == "HIT"
     again = j.judge(swing(t_ns=T_C + int(0.1 * S)), ball(1), poses(T_C + int(0.1 * S)), T_C)
     assert again.kind == "REJECTED" and not gate(again, "J5").passed
-    t2 = T_C + int(0.2 * S)
+    t2 = T_C + int(0.05 * S)
     other = j.judge(swing(t_ns=t2), ball(2, t_c=t2), poses(t2), t2)
-    assert not gate(other, "J5").passed            # inside the 0.35 s refractory
+    assert not gate(other, "J5").passed            # inside the 0.35 s refractory (of the first swing, at T_I)
     t3 = T_C + int(0.5 * S)
     later = j.judge(swing(t_ns=t3), ball(3, t_c=t3), poses(t3), t3)
     assert later.kind == "HIT"

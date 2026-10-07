@@ -139,8 +139,9 @@ widens the oval, `--set level.early_s=0.6` lengthens it.
 
 **One shot.** The computer's ball bounces on your half and passes your paddle at a known instant. You swing; the swing
 detector reports the gyro's peak (back-dated to when it really peaked), the judge dates the **contact** a stroke later
-(the peak plus 0.1 s: the forward stroke of a swing ends about 0.1 s after the peak of its rate, and that is when you
-mean the paddle to meet the ball) and checks six gates (below). On a hit the **paddle lunges forward to wherever the ball
+(the peak plus 0.16 s: the forward stroke of a swing ends a median 0.20 s after the peak of its rate on my 28 recorded
+swings, that is when I mean the paddle to meet the ball, and the hub's 40 ms are already in the stamp) and checks six
+gates (below). On a hit the **paddle lunges forward to wherever the ball
 is** at the contact (so an early swing meets it further up the table), and the ball goes back from there. The peak gyro
 rate becomes the speed of your return (`3 + 11·s^0.8` m/s, `s` = 0..1 between your soft and full calibration swings), your
 hand position the aim, and at Pro and Insane a deterministic risk rule makes a net or out fault when you swing hard *and*
@@ -308,9 +309,9 @@ continuous hits goes to MQTT whenever it improves.
   comes from my hand's height rather than from how far forward I reach; the screen hides the camera's delay by
   extrapolating my hand's speed, which can overshoot for a moment when I turn it round. The hand also moves during a
   swing, so the judge looks at where it is at the impact and how close it came just before.
-- **Delays I could only estimate.** The hub's transport (~40 ms), the length of a stroke (~0.14 s), the screen (~50 ms),
+- **Delays I could only estimate.** The hub's transport (~40 ms), the length of a stroke (0.20 s measured on 28 swings), the screen (~50 ms),
   the speakers (~25 ms) and the motors (~50 ms) cannot be measured with this hardware (only the camera against the hub
-  can); they are typical values with the live recordings behind the stroke length, and every one is a knob.
+  can); they are typical values, and every one is a knob (the stroke's length, 0.20 s, is measured on my swings).
 - **The hub IMU.** About 64 Hz over Bluetooth [measured: 63.9 Hz, worst gap 93 ms] (below 25 Hz the camera
   takes over, see below), undocumented units (measured: 0.99 gyro counts per deg/s, about 1017 accelerometer
   counts per g, and the accelerometer saturates at about 8 g in a hard swing, which clips the spin features),

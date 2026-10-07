@@ -38,7 +38,7 @@ def test_the_screen_is_drawn_ahead_by_the_display_delay_and_half_a_frame():
 def test_the_defaults_are_plausible_for_this_hardware():
     lat = latency.Latency.from_config()
     assert 0.01 <= lat.imu_s <= 0.10 and 0.08 <= lat.stroke_s <= 0.25 and 0.02 <= lat.display_s <= 0.12
-    assert lat.contact_lag_s == pytest.approx(0.10, abs=0.03)           # what the live recordings measured
+    assert lat.contact_lag_s == pytest.approx(0.16, abs=0.03)           # the stroke the live recordings measured, less the hub's delay
 
 
 def test_a_negative_delay_is_refused():

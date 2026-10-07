@@ -3,7 +3,8 @@
     hand -> hub IMU -> BLE bursts -> arrival stamp          imu_s      (the hub sends no timestamps: a sample is stamped
                                                                        when it ARRIVES; the camera's poses are aligned to
                                                                        that clock by CAMERA_LAG_S, bench_cam measures it)
-    peak of the gyro's rate -> end of the forward stroke    stroke_s   (where the player means the paddle to meet the ball)
+    peak of the gyro's rate -> end of the forward stroke    stroke_s   (where the player means the paddle to meet the ball;
+                                                                       28 real swings: median 0.20 s, quartiles 0.14-0.24)
     frame drawn -> light from the screen                    display_s  (+ up to loop_s: the loop runs at ~60 Hz)
     sound written -> heard                                  audio_s
     motor command written -> the hub's motors move          haptic_s
@@ -30,7 +31,7 @@ GAIN = 0.8                  # lead by less than the full extrapolation: a hand t
 @dataclass(frozen=True)
 class Latency:
     imu_s: float = 0.040
-    stroke_s: float = 0.14
+    stroke_s: float = 0.20
     display_s: float = 0.050
     audio_s: float = 0.025
     haptic_s: float = 0.050
