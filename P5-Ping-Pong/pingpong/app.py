@@ -103,6 +103,10 @@ class Session:
             self._stats = {"hits": 0, "misses": 0, "faults": 0, "max_kmh": 0.0, "best_streak": 0}
         return self._stats
 
+    def game_stats(self):
+        """Counters of the current game: hits, misses, faults, max_kmh, best_streak (a copy)."""
+        return dict(self._game_stats())
+
     def _summary(self, e):
         g, st = self.game, self._game_stats()
         return {"mode": g.mode, "level": g.level.name, "target": g.target_points, "streak": st["best_streak"],
@@ -214,13 +218,17 @@ def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=Non
                    mqtt_status=(lambda: "ok") if client is not None and not no_publish else None)
 
 
-def play_until_hits(session, n_hits, w_pk=600.0, dt=0.01, max_sim_s=300.0, feat=None):
-    """A scripted perfect player on the session's (fake) clock; returns simulated seconds used."""
+def play_until(session, stop, w_pk=600.0, dt=0.01, max_sim_s=300.0, feat=None, du=0.0, timing_s=0.0):
+    """A scripted player on the session's (fake) clock until stop(session); returns simulated seconds used.
+
+    Perfect by default; du moves the hand off the ball by that many shoulder widths and timing_s swings
+    that many seconds off the ball's arrival (both lower the hit quality, so hard swings can fault).
+    """
     game, clock = session.game, session.clock
     if game.phase in ("LOBBY", "MATCH_OVER"):
         session.on_start()
     t_begin, swung, step = clock.now_ns(), None, 0
-    while game.tracker.streak < n_hits and game.phase != "MATCH_OVER":
+    while not stop(session):
         if (clock.now_ns() - t_begin) / S > max_sim_s:
             raise RuntimeError("scripted player ran out of simulated time")
         clock.advance_s(dt)
@@ -232,13 +240,20 @@ def play_until_hits(session, n_hits, w_pk=600.0, dt=0.01, max_sim_s=300.0, feat=
             continue
         if ball.t_c_ns - int(0.5 * S) <= now <= ball.t_c_ns + int(0.05 * S) and step % 3 == 0:
             u, v = game.judge.box.to_uv(*ball.aim_ab)
-            session.on_pose(PaddlePose(t_scene_ns=now, u=u, v=v, conf=0.9, hand="right"))
+            session.on_pose(PaddlePose(t_scene_ns=now, u=u + du, v=v, conf=0.9, hand="right"))
         if now >= ball.t_c_ns and swung != ball.ball_id:
             swung = ball.ball_id
             session.on_swing(SwingEvent(
-                kind="IMPACT", t_ns=ball.t_c_ns, w_pk=w_pk, dur_ms=150.0, n_reversals=0, axis_unit=(1, 0, 0),
-                net_rot_unit=(1, 0, 0), a_lin_unit=(0, 0, 1), clipped=False, feat=feat or (0.0,) * 12))
+                kind="IMPACT", t_ns=ball.t_c_ns + round(timing_s * S), w_pk=w_pk, dur_ms=150.0, n_reversals=0,
+                axis_unit=(1, 0, 0), net_rot_unit=(1, 0, 0), a_lin_unit=(0, 0, 1), clipped=False,
+                feat=feat or (0.0,) * 12))
     return (clock.now_ns() - t_begin) / S
+
+
+def play_until_hits(session, n_hits, w_pk=600.0, dt=0.01, max_sim_s=300.0, feat=None):
+    """A scripted perfect player returns balls until n_hits in a row (or the game ends)."""
+    return play_until(session, lambda s: s.game.tracker.streak >= n_hits or s.game.phase == "MATCH_OVER",
+                      w_pk=w_pk, dt=dt, max_sim_s=max_sim_s, feat=feat)
 
 
 def run_scripted(n_hits, *, level=1, client=None, source="live", seed=1, mode="survival"):

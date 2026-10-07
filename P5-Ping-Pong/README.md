@@ -137,6 +137,8 @@ your first hit. Fake, simulated and demo values go to `ME193-pp/RafaeShafi/demo/
 
 ```bash
 mosquitto_sub -h test.mosquitto.org -t 'ME193/Rogers/#' -v
+./pp watch_score --secs 120      # the same, kept in recordings/watch_score.log as durable evidence
+./pp republish_best --yes        # if the broker lost the retained value: re-send the best once (dry run without --yes)
 ```
 
 ## What it shows and records
@@ -154,6 +156,10 @@ mosquitto_sub -h test.mosquitto.org -t 'ME193/Rogers/#' -v
 - **Sounds**: a pop whose pitch tells you the hit quality, a buzz for a miss, arpeggios for a point or
   record, countdown ticks (`--no-audio` to turn off). `--no-record` and `--no-store` switch the
   recordings and the leaderboard off.
+
+**Tuning the levels.** `./pp sim` plays the whole game loop with a scripted player and prints, per level and
+swing strength, how often the computer misses a ball, how often you would fault, and how long rallies last
+(`--quality 0.4` for a sloppier player: hard swings start to fault where the level's threshold is low).
 
 ## When something goes wrong
 
@@ -174,7 +180,7 @@ pingpong/   the game: sensing (hub, imu_worker, swing, shake, vision, pose, tags
             rules, policy, levels, spin), output (haptics, feedback, audio, hud, canvas), glue (live, app, profile,
             spinflow, store, recorder, replay, sessionreport, fakerig, sources_fake)
 tools/      scan_hubs  env_check  bench_hub  bench_cam  bench_haptics  calibrate_swing  reset_hub
-            report  replay  train_spin  make_cards
+            report  replay  train_spin  sim  watch_score  republish_best  make_cards
 tests/      one file per module; the whole pipeline also runs on fake hardware (test_fakerig.py)
 docs/       PLAN.md (the full design), JOURNAL.md (one line per surprise), diagram.md, cards/
 data/ recordings/ calibration*.json config_local.json   (never committed: players, videos, measurements)

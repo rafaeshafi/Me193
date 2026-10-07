@@ -45,6 +45,9 @@ case "$cmd" in
 ./pp reset_hub                      free a hub still 'connected' to a dead run (~24 s ghost)
 ./pp train_spin --player NAME       teach the game your spin: 12 flat, 12 top, 12 back swings (after calibrate_swing)
 ./pp calibrate_swing --player NAME  guided calibration: shoulders, reach corners, 5 soft + 5 full swings
+./pp watch_score [--secs N]          log what the broker holds on ME193/Rogers/# (durable evidence of the score)
+./pp republish_best [--yes]         re-send your best value to the official topic once (dry run unless --yes)
+./pp sim [--quality 0.4]            how the levels and swing strengths play out (no sensors)
 ./pp report [DIR]                   summarise a recorded session (hits, timing, gate rejections, hub health)
 ./pp replay DIR --set level.late_s=0.4   re-run a recorded session through the real code, with changed settings
 ./pp make_cards                     (re)generate the printable AprilTag cards in docs/cards/

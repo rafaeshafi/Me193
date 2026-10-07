@@ -263,7 +263,9 @@ class FakeMqttClient:
         self.published = []         # {"topic", "payload", "qos", "retain"}
         self.config_calls = []      # will_set / reconnect_delay_set / connect_async / loop_start
         self.log = []               # chronological ("publish", topic, payload) / ("disconnect",) / ("loop_stop",)
+        self.subscriptions = []     # (topic, qos)
         self.on_connect = None
+        self.on_message = None
         self.connected = False
 
     def publish(self, topic, payload, qos=0, retain=False):
@@ -273,6 +275,14 @@ class FakeMqttClient:
 
     def is_connected(self):
         return self.connected
+
+    def subscribe(self, topic, qos=0):
+        self.subscriptions.append((topic, qos))
+
+    def deliver(self, topic, payload, retain=False, qos=1):
+        """What the broker does when a message arrives for one of our subscriptions."""
+        data = payload if isinstance(payload, bytes) else str(payload).encode()
+        self.on_message(self, None, SimpleNamespace(topic=topic, payload=data, retain=retain, qos=qos))
 
     def disconnect(self):
         self.connected = False
