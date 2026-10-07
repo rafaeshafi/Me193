@@ -67,6 +67,7 @@ not trust are reported and **not** written. Do these from Terminal.app:
 ./pp bench_cam                 # pose fps, tag read rate at 1.8 m, camera-vs-IMU lag, hub rate under load
 ./pp bench_haptics             # which motor pulses you feel, and how long the IMU rings after one
 ./pp calibrate_swing --player rafae   # shoulders, four reach corners, 5 soft + 5 full swings (~3 minutes)
+./pp train_spin --player rafae        # optional: 12 flat, 12 top, 12 back swings -> your spin model (~3 minutes)
 ```
 
 The card is saved in `config_local.json` after `env_check` connects (or pass
@@ -110,6 +111,10 @@ its peak (back-dated to when the gyro really peaked), and the judge checks six g
 hit turns the peak gyro rate into speed (`3 + 11·s^0.8` m/s, `s` = 0..1 between your soft and full
 calibration swings), your hand position into aim, and a deterministic risk rule into a net or out
 fault when you swing hard *and* sloppily (`s·(1 − quality) > threshold`; a near-perfect hit never faults).
+With a trained **spin model** the swing's own rotation and acceleration decide flat, topspin or backspin:
+topspin shortens the ball's flight after the bounce, backspin lengthens it, and in Match more spin makes the
+computer more likely to miss. Without a model (or one that did not reach 75% cross-validated accuracy) every
+ball is flat; `--no-spin` ignores the model.
 
 **The six gates** (the x-ray shows each one with its reason): **J1** timing inside the level's window ·
 **J2** your hand near the ball over the last 0.3 s, and still near it at detection · **J3** swing big and
@@ -166,10 +171,10 @@ mosquitto_sub -h test.mosquitto.org -t 'ME193/Rogers/#' -v
 ```
 play.py  config.py  pp  requirements.txt  README.md
 pingpong/   the game: sensing (hub, imu_worker, swing, shake, vision, pose, tags), game (judge, shot, physics,
-            rules, policy, levels), output (haptics, feedback, audio, hud, canvas), glue (live, app, profile,
-            store, recorder, replay, sessionreport, fakerig, sources_fake)
+            rules, policy, levels, spin), output (haptics, feedback, audio, hud, canvas), glue (live, app, profile,
+            spinflow, store, recorder, replay, sessionreport, fakerig, sources_fake)
 tools/      scan_hubs  env_check  bench_hub  bench_cam  bench_haptics  calibrate_swing  reset_hub
-            report  replay  make_cards
+            report  replay  train_spin  make_cards
 tests/      one file per module; the whole pipeline also runs on fake hardware (test_fakerig.py)
 docs/       PLAN.md (the full design), JOURNAL.md (one line per surprise), diagram.md, cards/
 data/ recordings/ calibration*.json config_local.json   (never committed: players, videos, measurements)
@@ -232,9 +237,10 @@ continuous hits goes to MQTT whenever it improves.
 | FFT shake discriminator | `shake.py` | The last second of gyro is resampled and run through `rfft`; a narrow, strong peak between 3 and 8 Hz with several full cycles is a shake. It locks the paddle for a second, while a single swing's smooth spectrum does not. |
 | PD controller | `policy.py` | Its command is Kp·error + Kd·error rate, saturated at a per-level speed after a reaction delay. Whether the computer reaches a ball is physical, not a coin flip. |
 | Softmax (Boltzmann) policy | `policy.py` | Each of nine target zones gets a utility and is sampled ∝ exp(utility / temperature). Lower temperature plays sharper at higher levels. |
+| StandardScaler + Logistic Regression | `spin.py`, `spinflow.py` | It standardises 12 swing features (the unit directions of the gyro peak, the net rotation and the linear acceleration, plus peak rate, duration and backswing ratio) and learns a linear softmax boundary between flat, top and back from my own labelled swings. The three probabilities become continuous topspin or backspin, and the model only ships if its cross-validated accuracy is at least 75%. |
 | Cross-correlation | `benchstats.py` | Wrist speed from the camera is correlated against gyro magnitude over a hand wave to find how much later the camera sees the same motion. That lag aligns the two sensors. |
 
-Not built (so not claimed): a logistic-regression spin classifier and a Q-learning opponent. See `docs/PLAN.md`.
+Not built (so not claimed): a Q-learning opponent. See `docs/PLAN.md`.
 
 ### Reflection questions (Notion template)
 

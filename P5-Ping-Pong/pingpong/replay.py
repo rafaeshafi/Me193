@@ -189,6 +189,8 @@ def replay(loaded, *, overrides=None, record_dir=None):
     hub, lag_ns = ReplayHub(), round(meta["camera_lag_s"] * S)
     hub._clock = clock
     vision = ReplayVision(lag_ns)
+    probs_by_feat = {tuple(e["d"]["feat"]): e["d"]["spin_probs"] for e in loaded.events
+                     if e["k"] == "swing" and "spin_probs" in e["d"]}
     inner = recorder_mod.Recorder(record_dir, {**meta, "source": "replay", "overrides": overrides}, clock=clock) \
         if record_dir else None
     collector = _Collector(inner)
@@ -197,7 +199,8 @@ def replay(loaded, *, overrides=None, record_dir=None):
         calibration=Calibration.from_json(json.dumps(meta["calibration"])), level=meta["level"], mode=meta["mode"],
         target=meta["target"], seed=meta["seed"], source="replay", scope=meta["scope"], no_motor=meta["no_motor"],
         gyro_per_dps=units["gyro_per_dps"], accel_per_g=units["accel_per_g"], fs_raw=units["fs_raw"],
-        stale_ms=meta["stale_ms"], threaded=False, log=lambda *_: None)
+        stale_ms=meta["stale_ms"], threaded=False, log=lambda *_: None,
+        spin_probs_fn=(lambda feat: probs_by_feat.get(tuple(feat))) if probs_by_feat else None)
     _apply_settings(rig, overrides)
     poses = sorted(loaded.poses, key=lambda p: p.t_scene_ns)
     starts, seen = [], set()

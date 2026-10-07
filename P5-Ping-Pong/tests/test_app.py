@@ -176,3 +176,40 @@ def test_the_end_screen_shows_the_leaderboard_the_session_was_given():
     assert session.game.phase == "MATCH_OVER" and session.hud_state().leaderboard == (("maya", 15), ("rafae", 12))
     session.on_start()
     assert session.hud_state().leaderboard == ()                     # only shown on the end screen
+
+
+TOP = {"flat": 0.05, "top": 0.90, "back": 0.05}
+BACK = {"flat": 0.05, "top": 0.05, "back": 0.90}
+
+
+def _first_hit(session):
+    events = []
+    original = session.on_swing
+    session.on_swing = lambda swing: events.extend(original(swing)) or events
+    app.play_until_hits(session, 1)
+    return next(e for e in events if e.kind == "hit")
+
+
+def test_a_spin_model_turns_a_top_swing_into_topspin_and_a_back_swing_into_backspin():
+    top = _first_hit(app.make_session(spin_probs_fn=lambda feat: TOP))
+    back = _first_hit(app.make_session(spin_probs_fn=lambda feat: BACK))
+    assert top.data["topspin"] > 0.3 and back.data["topspin"] < -0.3
+
+
+def test_without_a_spin_model_every_ball_is_flat_and_the_hud_shows_no_spin_word():
+    session = app.make_session()
+    hit = _first_hit(session)
+    assert hit.data["topspin"] == 0.0 and session.hud_state().spin_text == ""
+
+
+def test_the_hud_names_the_spin_of_the_last_shot():
+    session = app.make_session(spin_probs_fn=lambda feat: TOP)
+    _first_hit(session)
+    assert "TOPSPIN" in session.hud_state().spin_text
+
+
+def test_the_features_of_the_swing_reach_the_spin_model():
+    seen = []
+    session = app.make_session(spin_probs_fn=lambda feat: seen.append(tuple(feat)) or TOP)
+    app.play_until_hits(session, 1, feat=tuple(range(12)))
+    assert seen[-1] == tuple(range(12))

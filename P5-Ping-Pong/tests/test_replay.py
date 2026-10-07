@@ -100,3 +100,17 @@ def test_the_tool_prints_the_original_and_the_replayed_headlines(tmp_path, capsy
 
 def test_the_tool_selftest_is_green():
     assert replay_tool.main(["--selftest"]) == 0
+
+
+def test_a_session_played_with_spin_replays_exactly_because_the_recorded_probabilities_are_reused(tmp_path):
+    top = lambda feat: {"flat": 0.0, "top": 1.0, "back": 0.0}                     # noqa: E731
+    rig = fakerig.FakeRig(record_dir=tmp_path / "orig", spin_probs_fn=top)
+    rig.run(until=lambda: rig.game.tracker.streak >= 6, max_s=90)
+    rig.close()
+    original = recorder.load(tmp_path / "orig")
+    swings = [e for e in original.events if e["k"] == "swing"]
+    assert swings and all(e["d"]["spin_probs"]["top"] == 1.0 for e in swings)
+    result = replay.replay(original, record_dir=tmp_path / "again")
+    assert decisions(recorder.load(tmp_path / "again")) == decisions(original)
+    assert result.hits == 6
+    assert any(e["d"]["topspin"] > 0.3 for e in original.events if e["k"] == "hit")      # spin really was in play

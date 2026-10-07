@@ -159,3 +159,34 @@ def test_audio_is_started_for_a_live_game_unless_it_is_switched_off(tmp_path):
     assert loud.audio.enabled is False                                  # torn down with the rig
     quiet = live.build_live(live_args("--player", "rafae", "--no-audio"), FakeEnv(), player_root=tmp_path)
     assert quiet.audio is None and quiet.session.audio is None
+
+
+def _trained_model(tmp_path, player="rafae", good=True):
+    import numpy as np
+
+    from pingpong import fakerig, spin
+
+    if good:
+        X, y = fakerig.spin_dataset(10, seed=4)
+    else:
+        rng = np.random.default_rng(0)
+        X, y = [rng.normal(0, 1, 12) for _ in range(30)], [spin.CLASSES[i % 3] for i in range(30)]
+    model, report = spin.train(X, y)
+    spin.save(player, model, report, root=tmp_path / "players")
+    return model
+
+
+def test_a_trained_spin_model_is_loaded_for_the_player_and_no_spin_ignores_it(tmp_path):
+    _trained_model(tmp_path)
+    rig = live.build_live(live_args("--player", "rafae"), FakeEnv(), player_root=tmp_path / "players")
+    assert rig.session.game.spin_probs_fn is not None
+    ignored = live.build_live(live_args("--player", "rafae", "--no-spin"), FakeEnv(), player_root=tmp_path / "players")
+    assert ignored.session.game.spin_probs_fn is None
+
+
+def test_no_model_or_one_below_the_bar_means_flat_balls(tmp_path):
+    none = live.build_live(live_args("--player", "rafae"), FakeEnv(), player_root=tmp_path / "players")
+    assert none.session.game.spin_probs_fn is None
+    _trained_model(tmp_path, good=False)
+    weak = live.build_live(live_args("--player", "rafae"), FakeEnv(), player_root=tmp_path / "players")
+    assert weak.session.game.spin_probs_fn is None

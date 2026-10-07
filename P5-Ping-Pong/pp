@@ -14,7 +14,7 @@ cmd="${1:-help}"
 [ $# -gt 0 ] && shift
 
 case "$cmd" in
-  env_check|scan_hubs|reset_hub|bench_hub|bench_cam|bench_haptics|make_cards|calibrate_swing|watch_score|republish_best|sim|report|replay)
+  env_check|scan_hubs|reset_hub|bench_hub|bench_cam|bench_haptics|make_cards|calibrate_swing|train_spin|watch_score|republish_best|sim|report|replay)
     if [ ! -f "tools/$cmd.py" ]; then echo "tools/$cmd.py is not built yet" >&2; exit 1; fi
     exec "$PY" "tools/$cmd.py" "$@"
     ;;
@@ -43,6 +43,7 @@ case "$cmd" in
 ./pp bench_cam                      camera: fps, tag read rate at 1.8 m, camera-vs-IMU lag, hub rate under load
 ./pp bench_haptics                  which motor pulses you feel + how long the IMU rings (blanking time)
 ./pp reset_hub                      free a hub still 'connected' to a dead run (~24 s ghost)
+./pp train_spin --player NAME       teach the game your spin: 12 flat, 12 top, 12 back swings (after calibrate_swing)
 ./pp calibrate_swing --player NAME  guided calibration: shoulders, reach corners, 5 soft + 5 full swings
 ./pp report [DIR]                   summarise a recorded session (hits, timing, gate rejections, hub health)
 ./pp replay DIR --set level.late_s=0.4   re-run a recorded session through the real code, with changed settings

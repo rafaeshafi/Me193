@@ -202,19 +202,19 @@ def _spin_text(top, side):
 
 def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=None, client=None,
                  source="live", scope="record_session", no_publish=False, seed=1, box=None,
-                 omega_lo=300.0, omega_hi=1200.0, t_pk=250.0):
+                 omega_lo=300.0, omega_hi=1200.0, t_pk=250.0, spin_probs_fn=None):
     clock = clock or FakeClock(start_ns=1_000_000_000)
     box = box or DEFAULT_BOX
     tracker = ScoreTracker(scope=scope)
     publisher = ScorePublisher(client, scope=scope, source=source, no_publish=no_publish) if client else None
     game = GameCore(judge=HitJudge(box, t_pk=t_pk), tracker=tracker, policy=CpuPolicy(random.Random(seed)),
                     publisher=publisher, level=levels.LEVELS[level], mode=mode, target_points=target,
-                    omega_lo=omega_lo, omega_hi=omega_hi)
+                    omega_lo=omega_lo, omega_hi=omega_hi, spin_probs_fn=spin_probs_fn)
     return Session(game, clock, actuator=actuator,
                    mqtt_status=(lambda: "ok") if client is not None and not no_publish else None)
 
 
-def play_until_hits(session, n_hits, w_pk=600.0, dt=0.01, max_sim_s=300.0):
+def play_until_hits(session, n_hits, w_pk=600.0, dt=0.01, max_sim_s=300.0, feat=None):
     """A scripted perfect player on the session's (fake) clock; returns simulated seconds used."""
     game, clock = session.game, session.clock
     if game.phase in ("LOBBY", "MATCH_OVER"):
@@ -237,7 +237,7 @@ def play_until_hits(session, n_hits, w_pk=600.0, dt=0.01, max_sim_s=300.0):
             swung = ball.ball_id
             session.on_swing(SwingEvent(
                 kind="IMPACT", t_ns=ball.t_c_ns, w_pk=w_pk, dur_ms=150.0, n_reversals=0, axis_unit=(1, 0, 0),
-                net_rot_unit=(1, 0, 0), a_lin_unit=(0, 0, 1), clipped=False, feat=(0.0,) * 12))
+                net_rot_unit=(1, 0, 0), a_lin_unit=(0, 0, 1), clipped=False, feat=feat or (0.0,) * 12))
     return (clock.now_ns() - t_begin) / S
 
 

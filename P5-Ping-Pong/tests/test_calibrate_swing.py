@@ -34,7 +34,7 @@ def test_the_whole_tool_on_fake_hardware_saves_a_calibration_the_game_can_load(t
     env = fake_env(script)
     frames, notes = [], []
     code = tool.run(env, args_for(tmp_path), profile_root=tmp_path, show=frames.append,
-                    wait_key=lambda ms: 255, notify=notes.append, size=(320, 180))
+                    wait_key=lambda ms: 255, notify=notes.append, size=(320, 180), frame_hz=5.0)
     assert code == 0
     cal = profile.load("rafae", root=tmp_path)
     assert cal is not None and cal.calibrated and cal.hand == "right"
@@ -49,7 +49,7 @@ def test_pressing_q_cancels_without_saving_and_lets_the_hub_go(tmp_path):
     env = fake_env(script)
     presses = iter([255, 255, ord("q")])
     code = tool.run(env, args_for(tmp_path), profile_root=tmp_path, show=lambda f: None,
-                    wait_key=lambda ms: next(presses, ord("q")), notify=lambda n: None, size=(320, 180))
+                    wait_key=lambda ms: next(presses, ord("q")), notify=lambda n: None, size=(320, 180), frame_hz=5.0)
     assert code == 1 and profile.load("rafae", root=tmp_path) is None
     assert [c[0] for c in env.hub_device.calls][-2:] == ["motor_stop", "disconnect"]
 

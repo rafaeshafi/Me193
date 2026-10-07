@@ -31,7 +31,6 @@ from pingpong.calibflow import CORNER_NAMES, CalibrationFlow  # noqa: E402
 W, H = 1280, 720
 TITLE = "P5 calibration  (Q to cancel)"
 AMBER, GREEN, WHITE, GREY, RED = (40, 170, 255), (80, 220, 80), (255, 255, 255), (170, 170, 170), (70, 70, 240)
-FRAME_NS = 33_000_000
 MAP_U, MAP_V = (-2.5, 2.5), (-2.0, 1.5)             # the part of the hand's (u, v) plane the map shows
 
 
@@ -107,7 +106,7 @@ def _beep(hub, note):
         pass
 
 
-def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H)):
+def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), frame_hz=30.0):
     """-> 0 saved, 1 cancelled, 2 could not start."""
     from pingpong.vision import VisionWorker
 
@@ -136,7 +135,7 @@ def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H)):
                                fs_raw=config.HUB_FS_RAW)
         if env.threaded:
             vision.start()
-        return _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, size)
+        return _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, size, round(1e9 / frame_hz))
     finally:
         if vision is not None:
             vision.stop()                                 # also releases the camera
@@ -145,7 +144,7 @@ def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H)):
         hub.close()
 
 
-def _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, size):
+def _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, size, frame_ns):
     import cv2
 
     last_pose_ns, last_note, hand, last_shown_ns = None, "", None, None
@@ -163,7 +162,7 @@ def _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, si
             notify(note)
             _beep(hub, note)
         now = env.clock.now_ns()
-        if last_shown_ns is None or now - last_shown_ns >= FRAME_NS:       # the camera is 30 fps: draw at 30 fps
+        if last_shown_ns is None or now - last_shown_ns >= frame_ns:         # the camera is 30 fps: draw at 30 fps
             frame = vision.latest_frame()
             show(render_frame(flow, None if frame is None else cv2.flip(frame, 1), hand, last_note, size=size))
             last_shown_ns = now
@@ -192,7 +191,7 @@ def _selftest():
     with tempfile.TemporaryDirectory() as tmp:
         args = parse_args(["--card-color", "red", "--card-serial", "1131", "--player", "selftest"])
         code = run(env, args, profile_root=Path(tmp), show=lambda frame: None, wait_key=lambda ms: 255,
-                   notify=lambda note: None, size=(320, 180))
+                   notify=lambda note: None, size=(320, 180), frame_hz=2.0)
         cal = profile.load("selftest", root=Path(tmp))
     assert code == 0 and cal is not None and cal.calibrated, (code, cal)
     dot = sum(a * b for a, b in zip(cal.swing.u_fwd, script.u_true))

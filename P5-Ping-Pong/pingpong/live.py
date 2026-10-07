@@ -27,7 +27,7 @@ from pathlib import Path
 
 import sqlite3
 
-from pingpong import app, mqtt_link, profile
+from pingpong import app, mqtt_link, profile, spin
 from pingpong import recorder as recorder_mod
 from pingpong import store as store_mod
 from pingpong.haptics import Actuator, ActuatorCore
@@ -132,7 +132,10 @@ class LiveRig:
         for swing in self.imu.poll():
             if swing.kind == "IMPACT":
                 self.n_impacts += 1
-                self._record("swing", swing.t_ns, dataclasses.asdict(swing))
+                data = dataclasses.asdict(swing)
+                if self.session.game.spin_probs_fn is not None:           # what the game used: a replay reuses it
+                    data["spin_probs"] = self.session.game.spin_probs_fn(swing.feat)
+                self._record("swing", swing.t_ns, data)
                 self._game_events(self.session.on_swing(swing))
         self._game_events(self.session.tick(data_ns=self.hub.last_rx_ns))
         if not self.threaded and hasattr(self.actuator, "process"):
@@ -267,7 +270,8 @@ class LiveRig:
 def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None, mqtt_client=None, level=1,
              mode="survival", target=7, seed=1, source="live", scope=None, no_publish=False, no_motor=False,
              threaded=False, lag_s=None, gyro_per_dps=None, accel_per_g=None, fs_raw=None, stale_ms=None,
-             to_image=None, record_dir=None, player="rafae", vision=None, recorder=None, log=print):
+             to_image=None, record_dir=None, player="rafae", vision=None, recorder=None, spin_probs_fn=None,
+             log=print):
     """Wire every piece into one LiveRig.  The real play.py and the fake rig both come through here,
     so the wiring that matters on hardware (haptic blank windows, phase-gated tag search, the pose
     lock, status lights) is exactly the wiring the tests run."""
@@ -289,7 +293,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         level=level, mode=mode, target=target, clock=clock, actuator=actuator,
         client=mqtt_client if publishing else None, source=source, scope=scope or config.RECORD_SCOPE,
         no_publish=no_publish, seed=seed, box=calibration.box, omega_lo=calibration.swing.omega_lo,
-        omega_hi=calibration.swing.omega_hi, t_pk=params.t_pk)
+        omega_hi=calibration.swing.omega_hi, t_pk=params.t_pk, spin_probs_fn=spin_probs_fn)
     if vision is None:
         lock = PoseLock()
         if calibration.shoulder_w:
@@ -357,6 +361,11 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
     no_publish = bool(args.no_publish or guest)                  # a guest must never touch the owner's score
     record_dir = None if args.no_record else Path(record_root or recorder_mod.default_root()) / \
         recorder_mod.session_name(args.player)
+    try:
+        model = None if args.no_spin else spin.load_for(args.player, root=player_root)
+    except ValueError as exc:                                     # a damaged model file: say so, play without spin
+        log(f"spin disabled: {exc}")
+        model = None
     hub = env.make_hub(config.NOTIFY_MS, card)
     try:
         hub.connect()
@@ -375,7 +384,8 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
             tag_detector=env.make_tag_detector(), mqtt_client=None if no_publish else env.make_mqtt_client(),
             level=args.level, mode=args.mode, target=args.target, seed=args.seed, source="live",
             no_publish=no_publish, no_motor=args.no_motor, threaded=env.threaded,
-            to_image=getattr(env, "to_image", None), record_dir=record_dir, player=args.player, log=log)
+            to_image=getattr(env, "to_image", None), record_dir=record_dir, player=args.player,
+            spin_probs_fn=None if model is None else model.probs, log=log)
     except BaseException:
         if capture is not None:
             capture.release()

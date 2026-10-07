@@ -121,7 +121,7 @@ class VibratingMotor(FakeDoubleMotor):
 class FakeRig:
     def __init__(self, *, level=1, mode="survival", target=7, seed=1, calibration=None, source="live",
                  scope="record_session", w_pk=600.0, timing_s=0.0, cards=None, hz=66.0, fps=30.0, lag_s=0.10,
-                 stale_ms=300.0, vibration=False, no_motor=False, record_dir=None):
+                 stale_ms=300.0, vibration=False, no_motor=False, record_dir=None, spin_probs_fn=None):
         self.clock = FakeClock(start_ns=1_000_000_000)
         self.origin_ns = self.clock.now_ns()
         calibration = calibration or Calibration.default()
@@ -142,7 +142,7 @@ class FakeRig:
             tag_detector=tags, mqtt_client=self.client, level=level, mode=mode, target=target, seed=seed,
             source=source, scope=scope, no_motor=no_motor, threaded=False, lag_s=lag_s, gyro_per_dps=GPD,
             accel_per_g=1000.0, fs_raw=32767, stale_ms=stale_ms, to_image=lambda frame: frame,
-            record_dir=record_dir, player="fake", log=lambda *_: None)
+            record_dir=record_dir, player="fake", spin_probs_fn=spin_probs_fn, log=lambda *_: None)
         self.session, self.game = self.rig.session, self.rig.session.game
         self._dt = S // 240
         self._imu_period, self._frame_period, self._pump_period = round(S / hz), round(S / fps), S // 60
@@ -283,3 +283,97 @@ def wave_speed(t):
     """How fast that hand is moving (what a gyro would feel), in shoulder widths per second."""
     return abs(0.8 * 2 * math.pi * 1.1 * math.cos(2 * math.pi * 1.1 * t)
                + 0.5 * 2 * math.pi * 1.9 * math.cos(2 * math.pi * 1.9 * t + 0.7))
+
+
+def _lobe(t, t0, dur, peak):
+    return peak * math.sin(math.pi * (t - t0) / dur) if t0 <= t <= t0 + dur else 0.0
+
+
+def spin_swing_samples(label, rng, *, u_fwd=(1.0, 0.0, 0.0), u_roll=(0.0, 1.0, 0.0), u_up=(0.0, 0.0, 1.0), peak=700.0,
+                       gpd=GPD, hz=66.0, t0_ns=5 * S):
+    """Raw IMU samples of ONE swing of a spin class: 0.8 s of rest, a backswing, the forward stroke, 0.7 s of rest.
+
+    flat pushes straight through; top rolls the wrist forward-up while lifting (rotation about u_roll,
+    acceleration along +u_up); back rolls the other way while chopping down.  Every swing varies a little.
+    """
+    peak *= rng.uniform(0.85, 1.15)
+    roll = {"flat": 0.0, "top": 0.5, "back": -0.5}[label] + rng.gauss(0, 0.08)
+    lift_g = {"flat": 0.0, "top": 0.6, "back": -0.6}[label] + rng.gauss(0, 0.1)
+    fwd_g = 0.5 + rng.gauss(0, 0.1)
+    out = []
+    for i in range(int(1.9 * hz)):
+        t = i / hz
+        fwd = _lobe(t, 1.02, 0.15, peak) - _lobe(t, 0.80, 0.20, 0.4 * peak)
+        stroke = _lobe(t, 1.02, 0.15, 1.0)
+        g = [fwd * u_fwd[k] + roll * peak * stroke * u_roll[k] + rng.gauss(0, 3.0) for k in range(3)]
+        a = [(1000.0 if k == 2 else 0.0) + 1000.0 * stroke * (fwd_g * u_fwd[k] + lift_g * u_up[k]) for k in range(3)]
+        out.append(ImuSample(t_ns=t0_ns + round(t * S), g=tuple(round(v * gpd) for v in g),
+                             a=tuple(round(v) for v in a)))
+    return out
+
+
+def spin_dataset(n_per_class=12, seed=0, **kw):
+    """(features, labels): simulated swings of each spin class, run through the REAL swing detector."""
+    from pingpong.swing import SwingDetector, SwingParams
+
+    rng = random.Random(seed)
+    X, y = [], []
+    for _ in range(n_per_class):
+        for label in ("flat", "top", "back"):                     # interleaved, like the guided collection
+            detector = SwingDetector(SwingParams(u_fwd=kw.get("u_fwd", (1.0, 0.0, 0.0)), gyro_per_dps=GPD, t_pk=250.0))
+            impacts = [e for s in spin_swing_samples(label, rng, **kw) for e in detector.feed(s) if e.kind == "IMPACT"]
+            if impacts:
+                X.append(impacts[-1].feat)
+                y.append(label)
+    return X, y
+
+
+class SpinScript:
+    """A scripted player doing one spin swing after another, as a function of time (for the guided collection).
+
+    `labels[k]` is the class of the k-th swing; swings are `spacing_s` apart after `lead_s` of rest (the
+    detector needs half a second of quiet to warm up).  With `scramble=True` the swings come out in a
+    shuffled order, so they no longer match what the collection tool asked for.
+    """
+
+    def __init__(self, labels, *, seed=0, spacing_s=2.4, lead_s=1.6, u_fwd=(1.0, 0.0, 0.0), u_roll=(0.0, 1.0, 0.0),
+                 u_up=(0.0, 0.0, 1.0), peak=700.0, gpd=GPD, scramble=False):
+        self.rng = random.Random(seed)
+        self.labels = list(labels)
+        if scramble:
+            self.rng.shuffle(self.labels)
+        self.spacing_s, self.lead_s, self.gpd = spacing_s, lead_s, gpd
+        self.u_fwd, self.u_roll, self.u_up = u_fwd, u_roll, u_up
+        self.params = [self._draw(label, peak) for label in self.labels]
+        self.duration = lead_s + spacing_s * len(self.labels) + 1.0
+
+    def _draw(self, label, peak):
+        rng = self.rng
+        return {"peak": peak * rng.uniform(0.85, 1.15), "fwd_g": 0.5 + rng.gauss(0, 0.1),
+                "roll": {"flat": 0.0, "top": 0.5, "back": -0.5}[label] + rng.gauss(0, 0.08),
+                "lift_g": {"flat": 0.0, "top": 0.6, "back": -0.6}[label] + rng.gauss(0, 0.1)}
+
+    def imu_raw(self, t):
+        """Raw (ax, ay, az, gx, gy, gz) at time t."""
+        k = int((t - self.lead_s) // self.spacing_s) if t >= self.lead_s else -1
+        g, a = [0.0, 0.0, 0.0], [0.0, 0.0, 1000.0]
+        if 0 <= k < len(self.params):
+            p, tt = self.params[k], (t - self.lead_s) - k * self.spacing_s
+            fwd = _lobe(tt, 0.22, 0.15, p["peak"]) - _lobe(tt, 0.0, 0.20, 0.4 * p["peak"])
+            stroke = _lobe(tt, 0.22, 0.15, 1.0)
+            for i in range(3):
+                g[i] = fwd * self.u_fwd[i] + p["roll"] * p["peak"] * stroke * self.u_roll[i]
+                a[i] += 1000.0 * stroke * (p["fwd_g"] * self.u_fwd[i] + p["lift_g"] * self.u_up[i])
+        g = [v + self.rng.gauss(0, 3.0) for v in g]
+        return (round(a[0]), round(a[1]), round(a[2]), *(round(v * self.gpd) for v in g))
+
+
+def spin_stream(labels, *, hz=66.0, t0_ns=5 * S, **kw):
+    """Every IMU sample of a SpinScript, in order: what the hub would deliver."""
+    script = SpinScript(labels, **kw)
+    out = []
+    for i in range(int(script.duration * hz)):
+        t = i / hz
+        raw = script.imu_raw(t)
+        out.append(ImuSample(t_ns=t0_ns + round(t * S), g=raw[3:], a=raw[:3]))
+    return out, script
