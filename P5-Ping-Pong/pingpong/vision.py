@@ -54,6 +54,7 @@ class VisionWorker:
         self._last_tag_ns = None
         self.n_no_pose = self.n_locked_out = 0
         self._last_pose_read_ns = None
+        self.last_shoulder_w = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="vision", daemon=True)
 
@@ -79,8 +80,10 @@ class VisionWorker:
         landmarks = result.pose_landmarks[0] if result.pose_landmarks else None
         if landmarks is None:
             self.n_no_pose += 1
+            self.last_shoulder_w = None
             return
-        if self.lock is not None and not self.lock.accepts(pose.shoulder_width_norm(landmarks, sw, sh)):
+        self.last_shoulder_w = pose.shoulder_width_norm(landmarks, sw, sh)    # calibration reads this
+        if self.lock is not None and not self.lock.accepts(self.last_shoulder_w):
             self.n_locked_out += 1
             return
         uv = pose.paddle_uv(landmarks, self.hand, sw, sh)

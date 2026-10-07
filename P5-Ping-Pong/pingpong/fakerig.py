@@ -12,9 +12,11 @@ the hub or hide the player to exercise the pause logic.
 """
 
 import math
+import random
 
 from pingpong import live
 from pingpong.clock import FakeClock
+from pingpong.events import ImuSample
 from pingpong.hub import HubLink
 from pingpong.profile import Calibration
 from pingpong.sources_fake import (FakeCamera, FakeDoubleMotor, FakeLandmarker, FakeMqttClient,
@@ -189,3 +191,84 @@ class FakeRig:
 
     def close(self):
         self.rig.close()
+
+
+class CalibrationScript:
+    """A scripted person doing the whole calibration, with the hub mounted at an arbitrary angle.
+
+    Stand still, hold four reach corners, then soft and full swings (each a backswing lobe followed
+    by the forward stroke along u_true).  Everything is reproducible from `seed`.
+    """
+
+    def __init__(self, *, u_true=(0.35, 0.88, -0.32), shoulder_w=0.21, hand="right",
+                 corners=((-1.1, 0.7), (1.1, 0.7), (1.1, -0.6), (-1.1, -0.6)),
+                 soft=(330, 360, 300, 350, 320), full=(1100, 1050, 1200, 1150, 1000), back_ratios=None,
+                 gpd=GPD, seed=1):
+        norm = math.sqrt(sum(c * c for c in u_true))
+        self.u_true = tuple(c / norm for c in u_true)
+        self.shoulder_w, self.hand, self.corners = shoulder_w, hand, [tuple(c) for c in corners]
+        self.soft, self.full, self.gpd = tuple(soft), tuple(full), gpd
+        peaks = self.soft + self.full
+        back = back_ratios or (0.5,) * len(peaks)
+        self.rng = random.Random(seed)
+        rest = (0.0, -0.9)
+        self._segments, self._lobes = [], []                 # hand moves (t0, t1, from, to); gyro lobes (t0, dur, peak)
+        t, pos = 2.2, rest                                   # 2.2 s of standing still
+        for corner in self.corners:
+            self._segments.append((t, t + 0.6, pos, corner))
+            pos, t = corner, t + 2.0                         # 0.6 s to get there, 1.4 s held still
+        self._segments.append((t, t + 0.6, pos, rest))
+        t += 1.1
+        for peak, b in zip(peaks, back):
+            t += 1.2
+            self._lobes += [(t, 0.20, -b * peak), (t + 0.22, 0.15, peak)]
+            t += 0.72
+        self.duration = t + 1.0
+
+    def hand_uv(self, t):
+        for t0, t1, a, b in reversed(self._segments):
+            if t >= t0:
+                f = _smoothstep((t - t0) / (t1 - t0))
+                return (a[0] + f * (b[0] - a[0]) + self.rng.gauss(0, 0.004),
+                        a[1] + f * (b[1] - a[1]) + self.rng.gauss(0, 0.004))
+        return (0.0 + self.rng.gauss(0, 0.004), -0.9 + self.rng.gauss(0, 0.004))
+
+    def imu_raw(self, t):
+        rate = sum(peak * math.sin(math.pi * (t - t0) / dur) for t0, dur, peak in self._lobes if t0 <= t <= t0 + dur)
+        return tuple(round((rate * c + self.rng.gauss(0, 2.0)) * self.gpd) for c in self.u_true)
+
+
+def drive_calibration(script, flow, *, on_step=None, on_note=None, stop_after_notes=(), imu_hz=66.0, pose_hz=30.0):
+    """Feed a CalibrationFlow from a CalibrationScript in time order (240 Hz steps)."""
+    t0_ns = 5 * S
+    last, t, next_imu, next_pose = None, 0.0, 0.0, 0.0
+
+    def notes():
+        for note in flow.take_notes():
+            if on_note:
+                on_note(note)
+            if any(tag in note for tag in stop_after_notes):
+                return True
+        return False
+
+    while t <= script.duration:
+        if flow.step != last:
+            last = flow.step
+            if on_step:
+                on_step(last)
+        if flow.finished():
+            break
+        now = t0_ns + round(t * S)
+        if t >= next_imu:
+            flow.feed_imu(ImuSample(t_ns=now, g=script.imu_raw(t), a=(0, 0, GRAVITY)))
+            next_imu += 1.0 / imu_hz
+        if t >= next_pose:
+            u, v = script.hand_uv(t)
+            flow.feed_pose(now, u, v, 0.9, script.shoulder_w + script.rng.gauss(0, 0.002))
+            next_pose += 1.0 / pose_hz
+        if notes():
+            return
+        t += 1.0 / 240
+    notes()
+    if flow.step != last and on_step:
+        on_step(flow.step)

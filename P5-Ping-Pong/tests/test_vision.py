@@ -208,3 +208,14 @@ def test_pose_age_reports_how_stale_the_last_hand_reading_is():
     assert worker.pose_age_s(clock.now_ns()) == pytest.approx(0.0, abs=1e-9)
     clock.advance_s(2.5)
     assert worker.pose_age_s(clock.now_ns()) == pytest.approx(2.5)
+
+
+def test_the_latest_shoulder_width_is_exposed_for_calibration():
+    worker, clock, *_ = make()
+    assert worker.last_shoulder_w is None
+    tick(worker, clock)
+    assert worker.last_shoulder_w == pytest.approx(0.20)               # shoulders at x = 0.4 and 0.6
+    nobody = FakeLandmarker(scripted=lambda i: None)
+    worker2, clock2, *_ = make(landmarker=nobody)
+    tick(worker2, clock2)
+    assert worker2.last_shoulder_w is None

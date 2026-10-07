@@ -317,7 +317,7 @@ def require_card(args):
         raise LiveSetupError(f"{exc} (see './pp scan_hubs')") from exc
 
 
-def _request_720p(capture):
+def request_720p(capture):
     setter = getattr(capture, "set", None)
     if setter is not None:
         setter(cv2.CAP_PROP_FRAME_WIDTH, 1280)
@@ -348,7 +348,7 @@ def build_live(args, env, *, player_root=None, record_root=None, log=print):
             raise LiveSetupError(f"could not open the camera (index {config.CAMERA_INDEX}): allow Camera for this "
                                  "terminal in System Settings > Privacy & Security, quit apps using it, and turn "
                                  "Continuity Camera off on your iPhone")
-        _request_720p(capture)
+        request_720p(capture)
         rig = assemble(
             hub=hub, capture=capture, landmarker=env.make_landmarker(), calibration=calibration, clock=env.clock,
             tag_detector=env.make_tag_detector(), mqtt_client=None if no_publish else env.make_mqtt_client(),
