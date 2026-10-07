@@ -29,13 +29,13 @@ FLASH = {"perfect": ((255, 255, 255), 0.25), "good": ((0, 200, 0), 0.18), "early
 
 
 class Session:
-    def __init__(self, game, clock, actuator=None, mqtt_status=None, hub_status=None, latency=None):
+    def __init__(self, game, clock, actuator=None, mqtt_status=None, hub_status=None, latency=None, hand_model=None):
         self.game, self.clock, self.actuator = game, clock, actuator
         self._mqtt_status = mqtt_status or (lambda: "off")
         self._hub_status = hub_status or (lambda: "ok")
         self.latency = latency or latency_mod.Latency.from_config()
         self.poses = deque(maxlen=90)
-        self.view = View(game, self.latency, self.poses)
+        self.view = View(game, self.latency, self.poses, hand_model)
         self.xray = False
         self._gates, self._last_kmh, self._last_label, self._spin = (), None, "", ""
         self._message, self._message_until = "", 0
@@ -252,7 +252,7 @@ def _spin_text(top, side):
 def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=None, client=None,
                  source="live", scope="record_session", no_publish=False, seed=1, box=None,
                  omega_lo=300.0, omega_hi=1200.0, t_pk=250.0, spin_probs_fn=None, learner=None, resume=False,
-                 latency=None):
+                 latency=None, hand_model=None):
     clock = clock or FakeClock(start_ns=1_000_000_000)
     latency = latency or latency_mod.Latency.from_config()
     box = box or DEFAULT_BOX
@@ -263,7 +263,7 @@ def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=Non
                     policy=CpuPolicy(random.Random(seed), learner=learner),
                     publisher=publisher, level=levels.LEVELS[level], mode=mode, target_points=target,
                     omega_lo=omega_lo, omega_hi=omega_hi, spin_probs_fn=spin_probs_fn)
-    return Session(game, clock, actuator=actuator, latency=latency,
+    return Session(game, clock, actuator=actuator, latency=latency, hand_model=hand_model,
                    mqtt_status=(lambda: "ok") if client is not None and not no_publish else None)
 
 

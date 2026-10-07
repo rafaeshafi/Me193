@@ -2,7 +2,7 @@
 
     recordings/<session>/session.json   seed, level, mode, calibration, units, start time
                          imu.jsonl      every hub sample, raw counts, arrival-stamped
-                         pose.jsonl     every accepted paddle pose (already lag-stamped)
+                         pose.jsonl     every accepted paddle pose (already lag-stamped; with the reading before the filter, "r")
                          events.jsonl   game events, tags, pauses -- verdicts with all six gates
 
 That is enough to replay the session through the real code (pingpong/replay.py) and to write a
@@ -41,13 +41,13 @@ def session_name(player, wall=None):
 
 
 def session_meta(*, source, player, seed, level, mode, target, scope, t0_ns, calibration, gyro_per_dps,
-                 accel_per_g, fs_raw, lag_s, stale_ms, no_motor, learn=False, overrides=None, latency=None):
+                 accel_per_g, fs_raw, lag_s, stale_ms, no_motor, learn=False, overrides=None, latency=None, pose_model=None):
     """Everything a replay needs to rebuild the same game."""
     return {"source": source, "player": player, "seed": seed, "level": level, "mode": mode, "target": target,
             "scope": scope, "t0_ns": t0_ns, "calibration": json.loads(calibration.to_json()),
             "units": {"gyro_per_dps": gyro_per_dps, "accel_per_g": accel_per_g, "fs_raw": fs_raw},
             "camera_lag_s": lag_s, "stale_ms": stale_ms, "no_motor": no_motor, "learn": learn,
-            "overrides": overrides or {}, "latency": latency or {}}
+            "overrides": overrides or {}, "latency": latency or {}, "pose_model": pose_model or {}}
 
 
 def _plain(obj):
@@ -131,7 +131,10 @@ class Recorder:
                 row["s"] = item.src                  # "pose": the camera's samples, not the hub's
             return row
         if name == "pose":
-            return {"t": item.t_scene_ns, "u": item.u, "v": item.v, "c": item.conf, "h": item.hand}
+            row = {"t": item.t_scene_ns, "u": item.u, "v": item.v, "c": item.conf, "h": item.hand}
+            if item.raw is not None:
+                row["r"] = [item.raw[0], item.raw[1]]            # the reading before the filter (to train a filter on)
+            return row
         return item
 
     def close(self):
@@ -165,5 +168,6 @@ def load(directory):
         return [json.loads(line) for line in path.read_text().splitlines() if line] if path.exists() else []
 
     imu = [ImuSample(t_ns=r["t"], g=tuple(r["g"]), a=tuple(r["a"]), src=r.get("s", "hub")) for r in rows("imu")]
-    poses = [PaddlePose(t_scene_ns=r["t"], u=r["u"], v=r["v"], conf=r["c"], hand=r["h"]) for r in rows("pose")]
+    poses = [PaddlePose(t_scene_ns=r["t"], u=r["u"], v=r["v"], conf=r["c"], hand=r["h"],
+                        raw=tuple(r["r"]) if "r" in r else None) for r in rows("pose")]
     return Loaded(meta=meta, imu=imu, poses=poses, events=rows("events"))

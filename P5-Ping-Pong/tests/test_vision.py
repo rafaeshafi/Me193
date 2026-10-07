@@ -278,3 +278,74 @@ def test_a_repeating_error_is_reported_once_with_a_count_not_on_every_frame():
     worker.stop()
     assert worker.n_errors >= 60 and 1 <= len(printed) <= 3
     assert "model blew up" in printed[0]
+
+
+# --- the body tracker instead of the width lock ---------------------------------------------------------------------------
+from pingpong import body as body_mod                                      # noqa: E402
+
+
+def tracked(**kw):
+    return make(body=body_mod.BodyTracker(ref=kw.pop("ref", 0.20)), **kw)
+
+
+def test_a_player_nearer_than_at_calibration_keeps_every_frame_that_the_old_lock_refused():
+    near = lambda i: body(sh=(0.635, 0.365))                                # 0.27 of the frame: 1.35 x the calibrated 0.20  # noqa: E731
+    old_lock = PoseLock()
+    old_lock.calibrate(0.20)
+    old, clock, *_ = make(landmarker=FakeLandmarker(scripted=near), lock=old_lock)
+    new, clock2, *_ = tracked(landmarker=FakeLandmarker(scripted=near))
+    for _ in range(30):
+        tick(old, clock)
+        tick(new, clock2)
+    assert len(old.snapshot()) == 0 and old.n_locked_out == 30               # what the first live games lost
+    assert len(new.snapshot()) == 30 and new.n_locked_out == 0
+
+
+def test_the_hand_is_measured_in_the_players_shoulder_widths_at_the_players_distance():
+    near = lambda i: body(sh=(0.635, 0.365), wrist=(0.4, 0.40))             # shoulders 0.27 wide, the hand 0.1 from the midpoint
+    worker, clock, *_ = tracked(landmarker=FakeLandmarker(scripted=near), ref=0.27)
+    for _ in range(40):
+        tick(worker, clock)
+    assert worker.snapshot()[-1].u == pytest.approx(0.1 / 0.27, abs=0.02)   # not 0.1 / 0.20: the unit follows the distance
+
+
+def test_a_shoulder_hidden_for_a_few_frames_does_not_leave_a_hole_in_the_track():
+    def no_shoulder():
+        lm = body()
+        lm[12] = SimpleNamespace(x=0.4, y=0.4, visibility=0.1)             # the hand is still seen, one shoulder is not
+        return lm
+
+    frames = [body() for _ in range(10)] + [no_shoulder() for _ in range(4)] + [body() for _ in range(5)]
+    worker, clock, *_ = tracked(landmarker=FakeLandmarker(scripted=lambda i: frames[i]))
+    for _ in range(len(frames)):
+        tick(worker, clock)
+    poses = worker.snapshot()
+    assert len(poses) == len(frames)                                          # every frame has a hand reading
+    held = poses[11]
+    assert held.conf <= body_mod.HELD_CONF + 1e-9 and held.u == pytest.approx(poses[9].u)
+    assert worker.stats()["lock"]["held"] == 4
+
+
+def test_a_spectator_is_still_refused_and_the_reason_is_counted():
+    spectator = lambda i: body(sh=(0.675, 0.325))                            # twice as wide as the calibrated body  # noqa: E731
+    worker, clock, *_ = tracked(landmarker=FakeLandmarker(scripted=spectator))
+    for _ in range(4):
+        tick(worker, clock)
+    assert worker.snapshot() == () and worker.n_locked_out == 4
+    assert worker.stats()["lock"]["size"] == 4
+
+
+def test_the_stats_say_how_the_body_was_tracked():
+    worker, clock, *_ = tracked()
+    for _ in range(5):
+        tick(worker, clock)
+    lock = worker.stats()["lock"]
+    assert lock["ok"] == 5 and lock["held"] == 0 and lock["rejected"] == 0
+
+
+def test_the_unfiltered_reading_is_kept_beside_the_filtered_one_for_training():
+    worker, clock, *_ = tracked()
+    for _ in range(3):
+        tick(worker, clock)
+    sample = worker.snapshot()[-1]
+    assert sample.raw == pytest.approx((sample.u, sample.v), abs=1e-6)       # a still hand: nothing to filter away

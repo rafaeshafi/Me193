@@ -51,10 +51,10 @@ class RealEnv:
 
         return cv2.VideoCapture(index)
 
-    def make_landmarker(self):
+    def make_landmarker(self, model="lite"):
         from pingpong.pose_features import make_landmarker
 
-        return make_landmarker()
+        return make_landmarker(model=model)
 
     def make_tag_detector(self):
         from pingpong.tags import TagDetector

@@ -26,13 +26,15 @@ import cv2
 import config
 from pingpong import app, mqtt_link, posegyro
 from pingpong import latency as latency_mod
+from pingpong import posemodel
 from pingpong import overrides as overrides_mod
 from pingpong import recorder as recorder_mod
 from pingpong.calibration import POSE_SHAKE_SETTINGS
 from pingpong.haptics import Actuator, ActuatorCore
 from pingpong.imu_worker import ImuWorker
 from pingpong.livebuild import LiveSetupError, build_live, request_720p, require_card  # noqa: F401  (the setup half)
-from pingpong.pose import PoseLock, hand_xy
+from pingpong.body import BodyTracker
+from pingpong.pose import hand_xy
 from pingpong.shake import ShakeMonitor
 from pingpong.swing import SwingDetector
 from pingpong.tilt import TiltEstimator
@@ -319,7 +321,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
              mode="survival", target=7, seed=1, source="live", scope=None, no_publish=False, no_motor=False,
              threaded=False, lag_s=None, gyro_per_dps=None, accel_per_g=None, fs_raw=None, stale_ms=None,
              to_image=None, record_dir=None, player="rafae", vision=None, recorder=None, spin_probs_fn=None,
-             learner=None, pose_gyro=None, resume=False, overrides=None, latency=None, log=print):
+             learner=None, pose_gyro=None, resume=False, overrides=None, latency=None, pose_model=None, log=print):
     """Wire every piece into one LiveRig.  The real play.py and the fake rig both come through here,
     so the wiring that matters on hardware (haptic blank windows, phase-gated tag search, the pose
     lock, status lights) is exactly the wiring the tests run.
@@ -329,6 +331,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
     passes none, because the recorded pose-derived samples arrive through the replay hub like hub samples."""
     camera = calibration.swing.source == "pose"
     latency = latency or latency_mod.Latency.from_config()
+    pose_model = pose_model or posemodel.PoseModel.default()
     if pose_gyro is not None and not camera:
         raise ValueError("a PoseGyro needs a camera calibration (swing source 'pose'), not a hub one")
     gpd = config.GYRO_PER_DPS if gyro_per_dps is None else gyro_per_dps
@@ -344,7 +347,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         scope=scope or config.RECORD_SCOPE, t0_ns=clock.now_ns(), calibration=calibration, gyro_per_dps=gpd,
         accel_per_g=apg, fs_raw=fs, lag_s=config.CAMERA_LAG_S if lag_s is None else lag_s,
         stale_ms=config.STALE_MS if stale_ms is None else stale_ms, no_motor=no_motor, learn=learner is not None,
-        overrides=overrides, latency=dataclasses.asdict(latency), clock=clock)
+        overrides=overrides, latency=dataclasses.asdict(latency), pose_model=pose_model.to_json(), clock=clock)
     tilt = (TiltEstimator(calibration.tilt, gpd, apg, nominal_hz=config.HUB_RATE_HZ or 64.0)
             if calibration.tilt is not None and not camera else None)
     imu = ImuWorker(hub.imu if pose_gyro is None else queue.SimpleQueue(), SwingDetector(params), shake=shake,
@@ -360,13 +363,11 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         client=mqtt_client if publishing else None, source=source, scope=scope or config.RECORD_SCOPE,
         no_publish=no_publish, seed=seed, box=calibration.box, omega_lo=calibration.swing.omega_lo,
         omega_hi=calibration.swing.omega_hi, t_pk=params.t_pk, spin_probs_fn=spin_probs_fn, learner=learner,
-        resume=resume, latency=latency)
+        resume=resume, latency=latency, hand_model=pose_model.predictor)
     if vision is None:
-        lock = PoseLock()
-        if calibration.shoulder_w:
-            lock.calibrate(calibration.shoulder_w)
         vision = VisionWorker(capture, landmarker, clock=clock, hand=calibration.hand, lag_s=lag_s,
-                              tag_detector=tag_detector, phase_fn=lambda: session.game.phase, lock=lock,
+                              tag_detector=tag_detector, phase_fn=lambda: session.game.phase,
+                              body=BodyTracker(ref=calibration.shoulder_w or None), filter_params=pose_model.filter,
                               to_image=to_image, log=log)
     rig = LiveRig(session, hub=hub, imu=imu, vision=vision, actuator=actuator,
                   mqtt_client=mqtt_client if publishing else None, clock=clock, threaded=threaded,

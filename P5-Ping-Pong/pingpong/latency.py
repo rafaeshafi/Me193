@@ -22,10 +22,11 @@ from dataclasses import dataclass
 import config
 
 MAX_SPEED_SW_S = 5.0        # the hand is never extrapolated faster than this (a glitch must not fling the paddle)
-MAX_LEAD_S = 0.25           # ... nor further ahead than this
+MAX_LEAD_S = 0.25           # ... nor further ahead than this (or than a trained model is asked for)
 MAX_AGE_S = 0.4             # a reading older than this is not extrapolated at all
 FIT_S = 0.15                # the hand's velocity is fitted over this much of its latest history
-GAIN = 0.8                  # lead by less than the full extrapolation: a hand that turns round must not overshoot
+GAIN = 0.0                  # no extrapolation unless asked: on the player's recorded tracks, extrapolating 0.17 s ahead by the
+                            # recent speed was no more accurate than holding the hand (+3% error) and shimmered 4x as much
 
 
 @dataclass(frozen=True)
@@ -58,19 +59,25 @@ class Latency:
         return self.display_s + self.loop_s / 2
 
 
-def predict_hand(poses, now_ns, lat, *, min_conf=0.5, gain=GAIN):
+def predict_hand(poses, now_ns, lat, *, min_conf=0.5, gain=GAIN, model=None):
     """Where the hand will be when the frame being drawn now reaches the eye, from its latest readings: (u, v) or None.
 
     The newest reading is its own age old (the camera, the pose model and the loop), was taken imu_s before its stamp
-    says (the stamps are on the hub's arrival clock) and will be seen display_s from now; the hand's velocity over
-    the last FIT_S carries it across that gap, capped and damped."""
+    says (the stamps are on the hub's arrival clock) and will be seen display_s from now.  What to do about that gap:
+    a trained `model` (posemodel.HandPredictor) predicts it; failing that `gain` > 0 extrapolates the hand's velocity over
+    the last FIT_S, capped and damped; and by default (gain 0) the hand is drawn where it was last read."""
     good = [p for p in poses if p.conf >= min_conf]
     if not good:
         return None
     last = good[-1]
     age = (now_ns - last.t_scene_ns) / 1e9
+    lead = min(MAX_LEAD_S, max(0.0, age) + lat.imu_s + lat.view_ahead_s)
+    if model is not None and age <= MAX_AGE_S:
+        answer = model.predict(good, lead)
+        if answer is not None:
+            return answer
     recent = [p for p in good if p.t_scene_ns >= last.t_scene_ns - round(FIT_S * 1e9)]
-    if age > MAX_AGE_S or len(recent) < 2:
+    if gain <= 0.0 or age > MAX_AGE_S or len(recent) < 2:
         return last.u, last.v
     ts = [(p.t_scene_ns - last.t_scene_ns) / 1e9 for p in recent]
     mean = sum(ts) / len(ts)
@@ -82,5 +89,4 @@ def predict_hand(poses, now_ns, lat, *, min_conf=0.5, gain=GAIN):
     speed = math.hypot(vu, vv)
     if speed > MAX_SPEED_SW_S:
         vu, vv = vu * MAX_SPEED_SW_S / speed, vv * MAX_SPEED_SW_S / speed
-    lead = min(MAX_LEAD_S, max(0.0, age) + lat.imu_s + lat.view_ahead_s)
     return last.u + gain * vu * lead, last.v + gain * vv * lead

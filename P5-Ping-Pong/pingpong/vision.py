@@ -19,10 +19,11 @@ from collections import deque
 import cv2
 
 import config
+from pingpong import body as body_mod
 from pingpong import pose
 from pingpong.clock import Clock
 from pingpong.events import PaddlePose
-from pingpong.oneeuro import OneEuro2D
+from pingpong.posemodel import PoseFilter
 from pingpong.tags import TagVoter
 
 POSE_WIDTH = 640
@@ -32,7 +33,8 @@ TAG_PHASES = ("LOBBY", "MATCH_OVER")
 
 class VisionWorker:
     def __init__(self, capture, landmarker, *, clock=None, hand="right", lag_s=None, tag_detector=None,
-                 voter=None, phase_fn=None, lock=None, to_image=None, history=64, tag_hz=10.0, log=print):
+                 voter=None, phase_fn=None, lock=None, body=None, filter_params=None, to_image=None, history=64,
+                 tag_hz=10.0, log=print):
         self.capture, self.landmarker = capture, landmarker
         self.clock = clock or Clock()
         self.hand = hand
@@ -41,9 +43,11 @@ class VisionWorker:
         self.voter = voter or TagVoter()
         self.phase_fn = phase_fn or (lambda: "LOBBY")
         self.lock = lock
+        self.body = body                         # a BodyTracker: the shoulders as the hand's steady reference (replaces lock)
+        self.hand_tracker = body_mod.HandTracker(hand) if body is not None else None
         self.to_image = to_image or _default_to_image
         self.history, self.tag_period_ns = history, round(1e9 / tag_hz)
-        self._filter = OneEuro2D()
+        self._filter = PoseFilter(filter_params)         # One-Euro (trained settings, if any) behind a landmark-glitch gate
         self._poses = ()
         self._frame = None
         self._tags = queue.SimpleQueue()
@@ -85,6 +89,8 @@ class VisionWorker:
             self.n_no_pose += 1
             self.last_shoulder_w = None
             return
+        if self.body is not None:
+            return self._tracked_pose(landmarks, sw, sh, t_read)
         self.last_shoulder_w = pose.shoulder_width_norm(landmarks, sw, sh)    # calibration reads this
         if self.lock is not None and not self.lock.accepts(self.last_shoulder_w):
             self.n_locked_out += 1
@@ -93,8 +99,29 @@ class VisionWorker:
         if uv is None:
             self.n_no_pose += 1
             return
-        u, v = self._filter((uv[0], uv[1]), t_read / 1e9)
-        sample = PaddlePose(t_scene_ns=t_read - self.lag_ns, u=u, v=v, conf=uv[2], hand=self.hand)
+        self._emit(t_read, uv[0], uv[1], uv[2])
+
+    def _tracked_pose(self, landmarks, sw, sh, t_read):
+        """The hand from a steady body anchor: refused only when the body is someone else."""
+        t_s = t_read / 1e9
+        found = self.body.update(landmarks, t_s, sh / sw)
+        self.last_shoulder_w = self.body.last_width              # calibration reads this
+        if found is None:
+            if self.body.reason in ("size", "jump"):
+                self.n_locked_out += 1
+            else:
+                self.n_no_pose += 1
+            return
+        hand = self.hand_tracker.update(landmarks, t_s)
+        if hand is None:
+            self.n_no_pose += 1
+            return
+        u, v = body_mod.hand_uv(found, hand[0], hand[1], sh / sw)
+        self._emit(t_read, u, v, min(hand[2], found.conf))
+
+    def _emit(self, t_read, u_raw, v_raw, conf):
+        u, v = self._filter((u_raw, v_raw), t_read / 1e9)
+        sample = PaddlePose(t_scene_ns=t_read - self.lag_ns, u=u, v=v, conf=conf, hand=self.hand, raw=(u_raw, v_raw))
         self._poses = (self._poses + (sample,))[-self.history:]    # immutable tuple, swapped by reference
         self._last_pose_read_ns = t_read
 
@@ -143,7 +170,8 @@ class VisionWorker:
         return {"fps": fps,
                 "infer_p50_ms": inferred[len(inferred) // 2] if inferred else 0.0,
                 "infer_p95_ms": inferred[int(len(inferred) * 0.95) - 1] if len(inferred) > 1 else 0.0,
-                "no_pose": self.n_no_pose, "locked_out": self.n_locked_out, "frames": self.n_frames}
+                "no_pose": self.n_no_pose, "locked_out": self.n_locked_out, "frames": self.n_frames,
+                "lock": dict(self.body.counts) if self.body is not None else None}
 
     # --- thread --------------------------------------------------------------------------------------------
     def start(self):

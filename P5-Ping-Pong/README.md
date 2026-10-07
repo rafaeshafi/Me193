@@ -75,6 +75,7 @@ not trust are reported and **not** written. Do these from Terminal.app:
 ./pp calibrate_swing --player rafae   # shoulders, four reach corners, hub upright + turned side to side, 5 soft + 5 full swings (~4 minutes)
 ./pp calibrate_swing --player rafae --tilt-only   # just the paddle turning with the hub (~15 s; the rest is kept)
 ./pp train_spin --player rafae        # optional: 12 flat, 12 top, 12 back swings -> your spin model (~3 minutes)
+./pp train_pose --player rafae --record   # optional: a 95 s guided take -> your pose model, a steadier hand (~3 minutes)
 ```
 
 If `env_check` or `bench_hub` measure the hub's IMU **below 25 Hz** (too slow to see a quick swing), `play` and
@@ -89,6 +90,22 @@ default; `imu` or `pose` forces one). That needs its own calibration, a separate
 The card is saved in `config_local.json` after `env_check` connects (or pass
 `--card-color red --card-serial 1131`). If a killed run left the hub invisible
 (it stays "connected" for ~24 s), `./pp reset_hub` frees it.
+
+**A steadier, more accurate hand.** The paddle is your hand measured from your shoulders, so anything that makes the
+shoulders or the hand jump makes the paddle jump. The game follows a smoothed shoulder midpoint (`body.py`: the unit is
+the 80th percentile of your shoulder width over the last 2 s, so turning your torso in a swing does not shrink it; it keeps
+the anchor for a second when a shoulder is hidden, and only refuses a body that jumps or changes size for good), holds each
+finger's position from the wrist when a finger point flickers, and filters the hand with a One-Euro filter behind a gate
+that drops a one-frame landmark flip (`posemodel.py`). `./pp train_pose --player rafae --record` makes that fit *you*:
+you follow the screen for 95 s (stand still, slide, lift, follow an imaginary ball, swing) while the camera is recorded, and
+the same footage is then run through MediaPipe's light and its full pose model, so the one with the least noise that still
+keeps up with 30 frames a second is chosen on your camera, room and body; the filter's three settings are tuned so the live
+(causal) filter follows a zero-phase smoothing of your own raw readings; and a ridge-regression predictor of where the hand
+will be when the frame is seen is trained on your tracks, but only used if it cuts the error against simply holding the hand
+by 10% on tracks it was not trained on without making the paddle shimmer more than 1.5 times as much. On the six games
+I had recorded when I first trained it, it did not (0% better), so the paddle is drawn where the camera read the hand. The result is
+`data/players/<name>/pose_model.json`; `./pp train_pose --dry-run` shows it without saving, and every game keeps the readings
+before and after the filter, so more games make the next training better. `./pp report` says how the shoulders were followed.
 
 ## Playing
 
@@ -156,9 +173,10 @@ judged and what you feel line up (`pingpong/latency.py`, tunable with `--set lat
 `config_local.json`): the hub's samples are stamped when they *arrive*, about 40 ms after your hand did it, and the
 swing is dated accordingly; the screen shows a frame 50 ms after it is drawn, so the ball and the computer's paddle (whose
 flights are known exactly) are **drawn ahead** by that much and what you see is where the ball is; your hand (the camera
-pipeline is 100 ms or more behind it) is **extrapolated** by its speed across that gap so the paddle keeps up with
-your hand, with a cap and damping so a turn does not overshoot; and the thump of a hit and its sound are **sent early**
-by the motors' and the speakers' delays so they arrive when the picture shows the contact. The camera's own lag is the
+pipeline is 100 ms or more behind it) is drawn where the camera read it, because extrapolating its speed across that gap,
+which is what I first did, was no more accurate than holding it on my recorded games (3% worse) and made the paddle shimmer four
+times as much (a trained predictor can lead it again, see `./pp train_pose`); and the thump of a hit and its sound are **sent
+early** by the motors' and the speakers' delays so they arrive when the picture shows the contact. The camera's own lag is the
 one delay measured on this hardware (`./pp bench_cam`).
 
 **The six gates** (the x-ray shows each one with its reason): **J1** the contact inside the level's window around that moment ·
@@ -260,9 +278,9 @@ play.py  config.py  pp  requirements.txt  README.md
 pingpong/   the game: sensing (hub, imu_worker, swing, shake, vision, pose, tags), game (judge, shot, physics,
             rules, policy, pd, qbandit, levels, spin), output (haptics, feedback, audio, hud, canvas), glue (live, app, profile,
             spinflow, store, recorder, replay, sessionreport, overrides, livebuild, posegyro, fakerig, threadrig,
-            sources_fake)
+            sources_fake), the hand (body, posemodel, posetrain, posetake)
 tools/      scan_hubs  env_check  bench_hub  bench_cam  bench_haptics  calibrate_swing  reset_hub
-            report  replay  train_spin  sim  watch_score  republish_best  make_cards
+            report  replay  train_spin  train_pose  sim  watch_score  republish_best  make_cards
 tests/      one file per module; the whole pipeline also runs on fake hardware (test_fakerig.py)
 docs/       PLAN.md (the full design), JOURNAL.md (one line per surprise), diagram.md, cards/
 data/ recordings/ calibration*.json config_local.json   (never committed: players, videos, measurements)
@@ -306,9 +324,10 @@ continuous hits goes to MQTT whenever it improves.
 
 - **Camera lag and one camera.** Pose trails the IMU by roughly 70–150 ms [measured: ___ ms] and a
   single webcam gives no depth, so "the paddle is at the ball" is judged across the table only and the paddle's depth
-  comes from my hand's height rather than from how far forward I reach; the screen hides the camera's delay by
-  extrapolating my hand's speed, which can overshoot for a moment when I turn it round. The hand also moves during a
-  swing, so the judge looks at where it is at the impact and how close it came just before.
+  comes from my hand's height rather than from how far forward I reach; the screen does not hide the camera's delay for
+  the hand (extrapolating its speed was no more accurate on my recordings and made the paddle shimmer), so the paddle trails
+  my hand by the camera's lag. The hand also moves during a swing, so the judge looks at where it is at the impact and how
+  close it came just before.
 - **Delays I could only estimate.** The hub's transport (~40 ms), the length of a stroke (0.20 s measured on 28 swings), the screen (~50 ms),
   the speakers (~25 ms) and the motors (~50 ms) cannot be measured with this hardware (only the camera against the hub
   can); they are typical values, and every one is a knob (the stroke's length, 0.20 s, is measured on my swings).

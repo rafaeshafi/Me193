@@ -3,8 +3,8 @@
 The game runs on one clock; a frame drawn now is seen display_s later (and up to a loop's period after what it shows),
 the hand's newest reading is already old, and the hub's stamps are late.  View puts every moving thing where the
 PLAYER will see it: the ball and the computer's paddle (deterministic) are drawn ahead by the display's delay, the hand
-is extrapolated across its whole pipeline, and a swing is a lunge that reaches the ball exactly when the picture shows
-the contact.  Nothing here changes the game: it only decides what to draw.
+is drawn where it was read (or where a trained predictor says it is going), and a swing is a lunge that reaches the ball
+exactly when the picture shows the contact.  Nothing here changes the game: it only decides what to draw.
 """
 
 import dataclasses
@@ -18,8 +18,9 @@ CPU_RECOVER_S = 0.6        # ... and to drift back to the middle after a return
 
 
 class View:
-    def __init__(self, game, lat, poses):
+    def __init__(self, game, lat, poses, hand_model=None):
         self.game, self.latency, self.poses = game, lat, poses
+        self.hand_model = hand_model                     # a trained posemodel.HandPredictor, or None: the hand is drawn as read
         self.paddle_angle = 0.0                          # degrees: how far the hub is turned in the hand (set each frame)
         self._stroke = None
         self.cpu_swing_ns = None                         # when the computer last hit the ball
@@ -34,7 +35,7 @@ class View:
 
     # --- your paddle ---------------------------------------------------------------------------------------------------
     def hand(self, now):
-        return latency_mod.predict_hand(self.poses, now, self.latency)
+        return latency_mod.predict_hand(self.poses, now, self.latency, model=self.hand_model)
 
     def rest(self, now):
         """Where the hand puts the paddle (None until a hand has been seen)."""

@@ -45,6 +45,7 @@ class PaddlePose:
     v: float
     conf: float          # landmark visibility 0..1
     hand: str            # "right" | "left"
+    raw: Optional[tuple] = None   # (u, v) before the filter: what a filter is trained on (None: not kept)
 
 
 @dataclass(frozen=True)

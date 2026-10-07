@@ -72,20 +72,41 @@ def test_a_moving_hand_is_drawn_ahead_by_its_speed_times_the_whole_delay():
     assert u == pytest.approx(poses[-1].u + 2.0 * lead, abs=0.01) and v == pytest.approx(0.0)
 
 
-def test_the_default_gain_leads_by_less_than_the_full_amount_so_a_turn_does_not_overshoot():
+def test_by_default_the_hand_is_drawn_where_it_was_last_read_because_extrapolating_it_measured_worse():
+    # on the player's own recorded tracks, extrapolating the hand 0.17 s ahead by its recent speed was no more accurate than
+    # holding it (+3% error) and made the paddle shimmer four times as much: smooth and honest beats clever
     poses = moving(2.0)
     now = round(1.06 * S)
+    assert latency.predict_hand(poses, now, LAT) == pytest.approx((poses[-1].u, poses[-1].v))
+    some = latency.predict_hand(poses, now, LAT, gain=0.5)[0] - poses[-1].u
     full = latency.predict_hand(poses, now, LAT, gain=1.0)[0] - poses[-1].u
-    less = latency.predict_hand(poses, now, LAT)[0] - poses[-1].u
-    assert 0.5 * full < less < full
+    assert 0.0 < some < full and some == pytest.approx(0.5 * full, rel=1e-6)
+
+
+def test_a_trained_model_is_asked_for_the_hand_at_the_lead_the_pipeline_has():
+    class Model:
+        def __init__(self, answer):
+            self.answer, self.asked = answer, []
+
+        def predict(self, poses, lead_s):
+            self.asked.append(lead_s)
+            return self.answer
+
+    poses = moving(2.0)
+    now = round(1.06 * S)
+    model = Model((9.0, 8.0))
+    assert latency.predict_hand(poses, now, LAT, model=model) == (9.0, 8.0)
+    assert model.asked == [pytest.approx(0.06 + LAT.imu_s + LAT.view_ahead_s)]
+    nothing = Model(None)                                                      # a hole in the readings: no answer
+    assert latency.predict_hand(poses, now, LAT, model=nothing) == pytest.approx((poses[-1].u, poses[-1].v))
 
 
 def test_the_lead_and_the_speed_are_capped_so_a_glitch_cannot_fling_the_paddle():
     fast = moving(40.0)
-    u, _ = latency.predict_hand(fast, round(1.06 * S), LAT)
+    u, _ = latency.predict_hand(fast, round(1.06 * S), LAT, gain=1.0)
     assert u - fast[-1].u <= latency.MAX_SPEED_SW_S * latency.MAX_LEAD_S + 1e-9
     stale = moving(2.0)
-    far_future = latency.predict_hand(stale, round(3.0 * S), LAT)             # nothing for 2 s: no extrapolation at all
+    far_future = latency.predict_hand(stale, round(3.0 * S), LAT, gain=1.0)             # nothing for 2 s: no extrapolation at all
     assert far_future == pytest.approx((stale[-1].u, 0.0))
 
 

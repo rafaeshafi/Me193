@@ -11,7 +11,7 @@ from pathlib import Path
 import cv2
 
 import config
-from pingpong import benchstats, posegyro, profile, qbandit, spin
+from pingpong import benchstats, posegyro, posemodel, profile, qbandit, spin
 from pingpong import overrides as overrides_mod
 from pingpong import recorder as recorder_mod
 from pingpong import store as store_mod
@@ -77,6 +77,12 @@ def _save_game(db, player, summary, log):
         log(f"could not save the game to the leaderboard: {exc}")
 
 
+def _landmarker(env, pose_model):
+    """The pose model that reads the camera: the one the player's training chose (the light one without any)."""
+    name = "lite" if pose_model is None else pose_model.landmarker
+    return env.make_landmarker() if name == "lite" else env.make_landmarker(model=name)
+
+
 def build_live(args, env, *, player_root=None, record_root=None, store_path=None, log=print):
     """Everything a live session needs, from the command line and an environment (real or fake).
 
@@ -112,6 +118,11 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
             model = None if args.no_spin else spin.load_for(args.player, root=player_root)
         except ValueError as exc:                                 # a damaged model file: say so, play without spin
             log(f"spin disabled: {exc}")
+    pose_model = None if guest else posemodel.load_for(args.player, root=player_root)
+    if pose_model is not None:
+        log("pose model: " + ("trained filter" if pose_model.filter != posemodel.FilterParams() else "default filter")
+            + (", trained hand predictor" if pose_model.predictor is not None else "")
+            + (", the full pose model" if pose_model.landmarker != "lite" else ""))
     learner = None
     if args.learn:
         try:
@@ -136,13 +147,14 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
                                  "Continuity Camera off on your iPhone")
         request_720p(capture)
         rig = assemble(
-            hub=hub, capture=capture, landmarker=env.make_landmarker(), calibration=calibration, clock=env.clock,
+            hub=hub, capture=capture, landmarker=_landmarker(env, pose_model), calibration=calibration, clock=env.clock,
             tag_detector=env.make_tag_detector(), mqtt_client=None if no_publish else env.make_mqtt_client(),
             level=args.level, mode=args.mode, target=args.target, seed=args.seed, source="live",
             no_publish=no_publish, no_motor=args.no_motor, threaded=env.threaded,
             to_image=getattr(env, "to_image", None), record_dir=record_dir, player=args.player,
             spin_probs_fn=None if model is None else model.probs, learner=learner,
-            pose_gyro=posegyro.PoseGyro() if camera else None, resume=bool(getattr(args, "resume", False)), overrides=settings, log=log)
+            pose_gyro=posegyro.PoseGyro() if camera else None, resume=bool(getattr(args, "resume", False)), overrides=settings,
+            pose_model=pose_model, log=log)
     except BaseException:
         if capture is not None:
             capture.release()

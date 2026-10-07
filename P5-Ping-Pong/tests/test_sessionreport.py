@@ -80,6 +80,25 @@ def test_the_pose_lock_refusals_come_from_the_summary_and_are_named_in_the_repor
     assert "Pose lock: refused 751 of 2358 camera frames (32%)" in sessionreport.format_report(s)
 
 
+def test_how_the_body_tracker_followed_the_shoulders_is_reported_when_something_was_lost(tmp_path):
+    # the first live games lost 20-39% of the camera frames; the report has to say which kind of loss it was
+    rig = record(tmp_path)
+    rig.close()
+    s = summarise(tmp_path)
+    t = s["pose_tracking"]
+    assert t["ok"] == t["frames"] > 100 and t["held"] == t["rejected"] == t["no_shoulders"] == 0
+    assert "Pose tracking" not in sessionreport.format_report(s)                   # every frame followed: nothing to say
+    s["pose_tracking"] = {"ok": 1900, "held": 120, "rejected": 40, "no_shoulders": 30, "size": 25, "jump": 15, "frames": 2358}
+    text = sessionreport.format_report(s)
+    assert "Pose tracking: 1900 of 2358 camera frames followed the shoulders" in text
+    assert "120 more kept the last position through hidden shoulders" in text
+    assert "40 refused as another body (25 the wrong size, 15 a jump)" in text
+    assert "30 with the shoulders out of view for over a second" in text
+    s["pose_tracking"] = None                                                       # a session from before the body tracker
+    s["pose_lock"] = {"locked_out": 751, "frames": 2358}
+    assert "a turned torso" in sessionreport.format_report(s)
+
+
 def test_the_text_report_names_the_numbers_a_person_looks_for(tmp_path):
     rig = record(tmp_path)
     rig.close()

@@ -129,11 +129,16 @@ class FakeCamera:
 
 
 def body_landmarks(u, v, *, hand="right", vis=0.95, width=640, height=360, shoulder_x=(0.6, 0.4),
-                   shoulder_y=0.4):
-    """33 pose-landmark stand-ins for which pose.paddle_uv() returns exactly (u, v)."""
+                   shoulder_y=0.4, full_body=False):
+    """33 pose-landmark stand-ins for which pose.paddle_uv() returns exactly (u, v).  full_body: the head and hips
+    are in the picture too (the preview's 'in position')."""
     lm = [SimpleNamespace(x=0.5, y=0.5, visibility=0.0) for _ in range(33)]
     lm[11] = SimpleNamespace(x=shoulder_x[0], y=shoulder_y, visibility=vis)
     lm[12] = SimpleNamespace(x=shoulder_x[1], y=shoulder_y, visibility=vis)
+    if full_body:
+        lm[0] = SimpleNamespace(x=0.5, y=0.2, visibility=vis)
+        lm[23] = SimpleNamespace(x=shoulder_x[0], y=0.8, visibility=vis)
+        lm[24] = SimpleNamespace(x=shoulder_x[1], y=0.8, visibility=vis)
     sw_px = abs(shoulder_x[0] - shoulder_x[1]) * width
     wrist = 16 if hand == "right" else 15
     lm[wrist] = SimpleNamespace(x=(shoulder_x[0] + shoulder_x[1]) / 2 - u * sw_px / width,
@@ -147,15 +152,15 @@ class FakeLandmarker:
     lag_s: the frame shows the scene as it was lag_s ago, like a real camera pipeline.
     """
 
-    def __init__(self, hand_fn, clock, *, lag_s=0.0, hand="right"):
-        self.hand_fn, self.clock, self.hand = hand_fn, clock, hand
+    def __init__(self, hand_fn, clock, *, lag_s=0.0, hand="right", full_body=False):
+        self.hand_fn, self.clock, self.hand, self.full_body = hand_fn, clock, hand, full_body
         self.lag_ns = round(lag_s * 1e9)
 
     def detect_for_video(self, image, ts_ms):
         uv = self.hand_fn(self.clock.now_ns() - self.lag_ns)
         if uv is None:
             return SimpleNamespace(pose_landmarks=[])
-        return SimpleNamespace(pose_landmarks=[body_landmarks(uv[0], uv[1], hand=self.hand)])
+        return SimpleNamespace(pose_landmarks=[body_landmarks(uv[0], uv[1], hand=self.hand, full_body=self.full_body)])
 
 
 class FakeTagDetector:
@@ -225,7 +230,7 @@ class FakeEnv:
     def to_image(frame):
         return frame
 
-    def make_landmarker(self):
+    def make_landmarker(self, model="lite"):
         return FakeLandmarker(lambda t_ns: (0.0, -0.4), self.clock)
 
     def make_tag_detector(self):

@@ -4,10 +4,10 @@ leave nothing open (a leaked hub connection would hide the hub from the next run
 import pytest
 
 import play
-from pingpong import live, profile
+from pingpong import live, posemodel, profile
 from pingpong.calibration import SwingCalibration
 from pingpong.paddle import ReachBox
-from pingpong.sources_fake import FakeEnv
+from pingpong.sources_fake import FakeEnv, FakeLandmarker
 from pingpong.tilt import TiltCalibration
 
 
@@ -232,3 +232,47 @@ def test_a_damaged_q_table_is_reported_and_learning_starts_afresh(tmp_path):
     rig = live.build_live(live_args("--player", "rafae", "--learn"), FakeEnv(), player_root=tmp_path / "players",
                           log=messages.append)
     assert rig.session.game.policy.learner.games == 0 and any("qtable" in m for m in messages)
+
+
+def landmarker_log(env):
+    """Make the env's landmarker factory record which pose model it was asked for."""
+    asked = []
+
+    def factory(model="lite"):
+        asked.append(model)
+        return FakeLandmarker(lambda t_ns: (0.0, -0.4), env.clock)
+
+    env.make_landmarker = factory
+    return asked
+
+
+def test_the_pose_model_the_player_trained_for_is_the_one_that_reads_the_camera(tmp_path):
+    posemodel.save_for("rafae", posemodel.PoseModel(landmarker="full"), root=tmp_path)
+    env = FakeEnv()
+    asked = landmarker_log(env)
+    logged = []
+    live.build_live(live_args("--player", "rafae"), env, player_root=tmp_path, log=logged.append)
+    assert asked == ["full"] and any("full pose model" in line for line in logged)
+
+
+def test_without_a_trained_model_a_guest_or_a_light_one_the_light_pose_model_runs(tmp_path):
+    posemodel.save_for("rafae", posemodel.PoseModel(landmarker="full"), root=tmp_path)
+    for player in ("newbie", "guest"):                                  # nothing trained / never uses a trained model
+        env = FakeEnv()
+        asked = landmarker_log(env)
+        live.build_live(live_args("--player", player), env, player_root=tmp_path)
+        assert asked == ["lite"], player
+    posemodel.save_for("maya", posemodel.PoseModel(landmarker="lite"), root=tmp_path)
+    env = FakeEnv()
+    asked = landmarker_log(env)
+    live.build_live(live_args("--player", "maya"), env, player_root=tmp_path)
+    assert asked == ["lite"]
+
+
+def test_a_pose_model_with_an_unreadable_file_is_the_default_one_not_a_crash(tmp_path):
+    (tmp_path / "rafae").mkdir()
+    (tmp_path / "rafae" / posemodel.FILE).write_text("{not json")
+    env = FakeEnv()
+    asked = landmarker_log(env)
+    live.build_live(live_args("--player", "rafae"), env, player_root=tmp_path)
+    assert asked == ["lite"]

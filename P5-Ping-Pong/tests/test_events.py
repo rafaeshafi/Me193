@@ -12,7 +12,7 @@ EXPECTED_FIELDS = {
     "GestureEvent": ["t_ns", "gesture"],
     "SwingEvent": ["kind", "t_ns", "w_pk", "dur_ms", "n_reversals", "axis_unit",
                    "net_rot_unit", "a_lin_unit", "clipped", "feat", "src"],
-    "PaddlePose": ["t_scene_ns", "u", "v", "conf", "hand"],
+    "PaddlePose": ["t_scene_ns", "u", "v", "conf", "hand", "raw"],
     "TagEvent": ["role", "value", "t_ns"],
     "GateResult": ["name", "passed", "note"],
     "Verdict": ["kind", "q_pos", "e_s", "d_min_sw", "gates", "contact_ns"],

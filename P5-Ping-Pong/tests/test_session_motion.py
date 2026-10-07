@@ -79,13 +79,21 @@ def test_the_paddle_is_where_the_hand_puts_it_across_the_table_and_up_the_table(
     assert st.paddle == pytest.approx(expect) and st.rest == pytest.approx(expect)
 
 
-def test_a_moving_hand_is_drawn_ahead_of_its_last_reading():
+def test_a_moving_hand_is_drawn_where_it_was_last_read_unless_a_trained_model_says_where_it_will_be():
     session = app.make_session()
     for k in range(8):
         hand(session, -0.6 + 1.5 * k / 30, 0.0, 1.0 + k / 30)                      # 1.5 shoulder widths a second to the right
     session.clock.advance_s(0.0)
-    last_rest = stage.rest_position(session.game.judge.box, -0.6 + 1.5 * 7 / 30, 0.0)
-    assert session.hud_state().rest[0] > last_rest[0]
+    box = session.game.judge.box
+    last_u = -0.6 + 1.5 * 7 / 30
+    assert session.hud_state().rest == pytest.approx(stage.rest_position(box, last_u, 0.0))      # smooth, no guessing
+
+    class Model:
+        def predict(self, poses, lead_s):
+            return poses[-1].u + 1.5 * lead_s, poses[-1].v
+
+    session.view.hand_model = Model()
+    assert session.hud_state().rest[0] > stage.rest_position(box, last_u, 0.0)[0]
 
 
 def test_the_tilt_of_the_hub_turns_the_paddle_on_screen():

@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import config  # noqa: E402
 from pingpong import canvas, live, livebuild, posegyro, profile  # noqa: E402
+from pingpong.body import BodyTracker  # noqa: E402
 from pingpong.calibflow import CORNER_NAMES, CalibrationFlow  # noqa: E402
 from pingpong.hub import NoHub  # noqa: E402
 
@@ -169,7 +170,7 @@ def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), fr
                   "apps using it, turn Continuity Camera off)", file=sys.stderr)
             return 2
         live.request_720p(capture)
-        vision = VisionWorker(capture, env.make_landmarker(), clock=env.clock, hand=args.hand,
+        vision = VisionWorker(capture, env.make_landmarker(), clock=env.clock, hand=args.hand, body=BodyTracker(),
                               to_image=getattr(env, "to_image", None))
         units = (posegyro.GYRO_PER_DPS, posegyro.ACCEL_PER_G, posegyro.FS_RAW) if camera else \
             (config.GYRO_PER_DPS, config.ACCEL_PER_G, config.HUB_FS_RAW)
