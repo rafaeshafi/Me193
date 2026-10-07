@@ -14,7 +14,7 @@ cmd="${1:-help}"
 [ $# -gt 0 ] && shift
 
 case "$cmd" in
-  env_check|scan_hubs|reset_hub|bench_hub|bench_cam|bench_haptics|make_cards|calibrate_swing|watch_score|republish_best|sim|report)
+  env_check|scan_hubs|reset_hub|bench_hub|bench_cam|bench_haptics|make_cards|calibrate_swing|watch_score|republish_best|sim|report|replay)
     if [ ! -f "tools/$cmd.py" ]; then echo "tools/$cmd.py is not built yet" >&2; exit 1; fi
     exec "$PY" "tools/$cmd.py" "$@"
     ;;
@@ -41,6 +41,8 @@ case "$cmd" in
 ./pp env_check [--card-color C --card-serial NNNN] [--skip camera,mqtt,hub]   first contact with the hardware
 ./pp scan_hubs                      find your hub's card colour + serial (passive BLE scan)
 ./pp calibrate_swing --player NAME  guided calibration: shoulders, reach corners, 5 soft + 5 full swings
+./pp report [DIR]                   summarise a recorded session (hits, timing, gate rejections, hub health)
+./pp replay DIR --set level.late_s=0.4   re-run a recorded session through the real code, with changed settings
 ./pp make_cards                     (re)generate the printable AprilTag cards in docs/cards/
 ./pp ready                          imports + pytest + every tool --selftest (run before each block)
 ./pp play [--fake|--player NAME|--level N|--mode M]   the game (live: Double Motor + camera + AprilTags)

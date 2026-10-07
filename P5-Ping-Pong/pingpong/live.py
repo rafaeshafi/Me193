@@ -260,7 +260,7 @@ class LiveRig:
 def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None, mqtt_client=None, level=1,
              mode="survival", target=7, seed=1, source="live", scope=None, no_publish=False, no_motor=False,
              threaded=False, lag_s=None, gyro_per_dps=None, accel_per_g=None, fs_raw=None, stale_ms=None,
-             to_image=None, record_dir=None, player="rafae", log=print):
+             to_image=None, record_dir=None, player="rafae", vision=None, recorder=None, log=print):
     """Wire every piece into one LiveRig.  The real play.py and the fake rig both come through here,
     so the wiring that matters on hardware (haptic blank windows, phase-gated tag search, the pose
     lock, status lights) is exactly the wiring the tests run."""
@@ -269,12 +269,11 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
     fs = config.HUB_FS_RAW if fs_raw is None else fs_raw
     params = calibration.swing_params(gpd, apg, fs)
     shake = ShakeMonitor(gyro_per_dps=gpd, rms_min_dps=0.35 * params.t_pk)     # motion smaller than this is tremor
-    recorder = _start_recording(record_dir, log, source=source, player=player, seed=seed, level=level, mode=mode,
-                                target=target, scope=scope or config.RECORD_SCOPE, t0_ns=clock.now_ns(),
-                                calibration=calibration, gyro_per_dps=gpd, accel_per_g=apg, fs_raw=fs,
-                                lag_s=config.CAMERA_LAG_S if lag_s is None else lag_s,
-                                stale_ms=config.STALE_MS if stale_ms is None else stale_ms, no_motor=no_motor,
-                                clock=clock)
+    recorder = recorder or _start_recording(
+        record_dir, log, source=source, player=player, seed=seed, level=level, mode=mode, target=target,
+        scope=scope or config.RECORD_SCOPE, t0_ns=clock.now_ns(), calibration=calibration, gyro_per_dps=gpd,
+        accel_per_g=apg, fs_raw=fs, lag_s=config.CAMERA_LAG_S if lag_s is None else lag_s,
+        stale_ms=config.STALE_MS if stale_ms is None else stale_ms, no_motor=no_motor, clock=clock)
     imu = ImuWorker(hub.imu, SwingDetector(params), shake=shake, recorder=recorder)
     core = ActuatorCore(hub.dev, clock=clock, no_motor=no_motor, on_blank=imu.blank)   # the pulse blanks the IMU
     actuator = Actuator(core, log=log) if threaded else core
@@ -284,12 +283,13 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         client=mqtt_client if publishing else None, source=source, scope=scope or config.RECORD_SCOPE,
         no_publish=no_publish, seed=seed, box=calibration.box, omega_lo=calibration.swing.omega_lo,
         omega_hi=calibration.swing.omega_hi, t_pk=params.t_pk)
-    lock = PoseLock()
-    if calibration.shoulder_w:
-        lock.calibrate(calibration.shoulder_w)
-    vision = VisionWorker(capture, landmarker, clock=clock, hand=calibration.hand, lag_s=lag_s,
-                          tag_detector=tag_detector, phase_fn=lambda: session.game.phase, lock=lock,
-                          to_image=to_image)
+    if vision is None:
+        lock = PoseLock()
+        if calibration.shoulder_w:
+            lock.calibrate(calibration.shoulder_w)
+        vision = VisionWorker(capture, landmarker, clock=clock, hand=calibration.hand, lag_s=lag_s,
+                              tag_detector=tag_detector, phase_fn=lambda: session.game.phase, lock=lock,
+                              to_image=to_image)
     rig = LiveRig(session, hub=hub, imu=imu, vision=vision, actuator=actuator,
                   mqtt_client=mqtt_client if publishing else None, clock=clock, threaded=threaded,
                   stale_ms=stale_ms, recorder=recorder, log=log)
