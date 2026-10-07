@@ -172,7 +172,8 @@ mosquitto_sub -h test.mosquitto.org -t 'ME193/Rogers/#' -v
   `./pp replay <session> --set level.late_s=0.4` re-runs the recorded sensor data through the real code
   with changed settings, so a tuning question never needs another round of swinging.
 - **Sounds**: a pop whose pitch tells you the hit quality, a buzz for a miss, arpeggios for a point or
-  record, countdown ticks (`--no-audio` to turn off). `--no-record` and `--no-store` switch the
+  record, countdown ticks (`--no-audio` to turn off). Use the Mac's built-in speakers: Bluetooth headphones add
+  150-250 ms of delay (the cues would arrive after the swing) and share the radio with the hub. `--no-record` and `--no-store` switch the
   recordings and the leaderboard off.
 
 **Tuning without editing code.** `./pp play --set level.radius_sw=0.8 --set level.late_s=0.25` changes the hit

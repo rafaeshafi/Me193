@@ -188,11 +188,12 @@ class FakeSound:
     """sounddevice-shaped: OutputStream(...) gives a stream whose callback a test can pull from."""
 
     def __init__(self, fail=False):
-        self.fail, self.stream = fail, None
+        self.fail, self.stream, self.options = fail, None, {}
 
     def OutputStream(self, **kwargs):
         if self.fail:
             raise OSError("no output device")
+        self.options = kwargs
         self.stream = FakeStream(kwargs["callback"])
         return self.stream
 

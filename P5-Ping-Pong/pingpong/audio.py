@@ -79,6 +79,18 @@ def _default_backend():
     return sounddevice
 
 
+def pick_output_device(devices):
+    """The index of the built-in speakers ("MacBook Pro Speakers", ...), or None to use the system default.
+
+    Bluetooth headphones add 150-250 ms (the cue would arrive after the swing) and share the radio with the hub,
+    so the sounds go to the speakers even when headphones happen to be the system's default output.
+    """
+    for index, device in enumerate(devices):
+        if device.get("max_output_channels", 0) > 0 and "speakers" in str(device.get("name", "")).lower():
+            return index
+    return None
+
+
 class Audio:
     def __init__(self, backend=None, log=print):
         self.backend, self.log = backend, log
@@ -88,8 +100,14 @@ class Audio:
     def start(self):
         try:
             backend = self.backend or _default_backend()
+            options = {}
+            listing = getattr(backend, "query_devices", None)
+            device = pick_output_device(listing()) if listing is not None else None
+            if device is not None:
+                options["device"] = device
+                self.log(f"sounds on {listing()[device]['name']}")
             self._stream = backend.OutputStream(samplerate=RATE, channels=1, dtype="float32", blocksize=256,
-                                                latency="low", callback=self._callback)
+                                                latency="low", callback=self._callback, **options)
             self._stream.start()
             self.enabled = True
         except Exception as exc:                      # no output device, no permission, no sounddevice

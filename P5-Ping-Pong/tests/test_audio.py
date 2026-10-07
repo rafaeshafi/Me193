@@ -127,3 +127,35 @@ def test_the_s_key_toggles_the_sound():
     assert session.audio.muted is True
     keys.handle_key(session, ord("s"), fake=False)
     assert session.audio.muted is False
+
+
+# --- the built-in speakers, not Bluetooth headphones -------------------------------------------------------------------------
+DEVICES = [{"name": "MacBook Pro Microphone", "max_output_channels": 0}, {"name": "AirPods Pro", "max_output_channels": 2},
+           {"name": "ZoomAudioDevice", "max_output_channels": 2}, {"name": "MacBook Pro Speakers", "max_output_channels": 2}]
+
+
+def test_the_built_in_speakers_are_preferred_over_whatever_the_system_default_is():
+    assert audio.pick_output_device(DEVICES) == 3
+    assert audio.pick_output_device(list(reversed(DEVICES))) == 0
+    assert audio.pick_output_device([DEVICES[0], DEVICES[1], DEVICES[2]]) is None            # none: use the default
+    assert audio.pick_output_device([]) is None
+    assert audio.pick_output_device([{"name": "Studio Speakers", "max_output_channels": 0}]) is None   # input only
+
+
+def test_the_stream_opens_on_the_built_in_speakers_and_says_so():
+    class Sound(FakeSound):
+        def query_devices(self):
+            return DEVICES
+
+    sound, messages = Sound(), []
+    a = audio.Audio(backend=sound, log=messages.append)
+    a.start()
+    assert a.enabled and sound.options["device"] == 3
+    assert any("MacBook Pro Speakers" in m for m in messages)
+
+
+def test_a_backend_that_cannot_list_devices_still_plays_on_the_default():
+    sound = FakeSound()
+    a = audio.Audio(backend=sound)
+    a.start()
+    assert a.enabled and sound.options.get("device") is None
