@@ -9,6 +9,7 @@
 |     + AprilTag search in the lobby -> TagVoter (4 of 6 frames; START held 0.4 s)               |
 | [H] legoeducation loop thread: callback ONLY parses + stamps arrival time -> queue             |
 | [I] ImuWorker thread: SwingDetector (signed axis) + ShakeMonitor (FFT, gate J6) -> events      |
+|     samples = the hub's gyro, or (hub < 25 Hz / --no-hub) PoseGyro: hand velocity from poses   |
 | [A] Actuator thread: the ONLY sender of hub commands (<= 10 writes/s); blank windows -> [I]    |
 |                                                                                                |
 | MAIN ~60 Hz  LiveRig.pump():  poses -> sensor health (pause / reconnect) -> tags -> swings     |

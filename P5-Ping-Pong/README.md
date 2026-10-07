@@ -9,6 +9,7 @@ virtual table over your webcam picture and the computer serves a ball at you.
 
 - **Pose (MediaPipe)** says *where* your paddle is: your hand, relative to your shoulders.
 - **The hub's IMU** says *when* you swung and *how hard*: the gyro peak sets the speed of your return.
+  (If the bench finds the hub too slow to see a swing, the camera's hand speed does this job instead.)
 - **AprilTag cards** start the game (card 0) and set the level (cards 1–3 = Rookie, Club, Pro),
   which sets how fast the computer's balls come.
 - **MQTT** carries your score live: the best streak of continuous hits goes to
@@ -70,6 +71,15 @@ not trust are reported and **not** written. Do these from Terminal.app:
 ./pp train_spin --player rafae        # optional: 12 flat, 12 top, 12 back swings -> your spin model (~3 minutes)
 ```
 
+If `env_check` or `bench_hub` measure the hub's IMU **below 25 Hz** (too slow to see a 150 ms swing), `play` and
+`calibrate_swing` switch by themselves to the camera's hand speed as the swing sensor (`--swing-source auto` is the
+default; `imu` or `pose` forces one). That needs its own calibration, a separate file that never replaces the hub's:
+
+```bash
+./pp calibrate_swing --player rafae --swing-source pose     # the hub stays on for haptics and beeps
+./pp calibrate_swing --player rafae --no-hub                # camera only (implies --swing-source pose)
+```
+
 The card is saved in `config_local.json` after `env_check` connects (or pass
 `--card-color red --card-serial 1131`). If a killed run left the hub invisible
 (it stays "connected" for ~24 s), `./pp reset_hub` frees it.
@@ -83,6 +93,8 @@ The card is saved in `config_local.json` after `env_check` connects (or pass
 ./pp play --player guest                 # no saved calibration; never publishes the score
 ./pp play --fake                         # no hardware: mouse is the paddle, SPACE/J/K swing
 ./pp play --no-publish --no-motor        # rehearse without the broker / without motor pulses
+./pp play --player rafae --swing-source pose   # the camera's hand speed detects swings (auto if the hub is < 25 Hz)
+./pp play --no-hub                       # camera only: no hub, no haptics (bring-up, or a flat battery)
 ./pp play --board                        # the leaderboard and nothing else
 ```
 
@@ -146,7 +158,8 @@ mosquitto_sub -h test.mosquitto.org -t 'ME193/Rogers/#' -v
 
 - **The screen**: your camera picture (mirrored) with the table, the ball and its shadow, a ring where
   the ball will arrive, a ring at your hand, the streak and best, km/h of your last shot and its quality.
-  A strip chart shows the **IMU swing rate with the threshold line**; **X** adds the x-ray gate list.
+  A strip chart shows the **IMU swing rate with the threshold line** ("CAMERA SWING" when the camera is the
+  sensor); **X** adds the x-ray gate list.
 - **Leaderboard**: every finished live game is saved to `data/pingpong.db` (Survival by best streak,
   Match by wins); the end screen shows the top five and highlights you.
 - **Recordings**: each live session writes `recordings/<time>-<player>/` (`session.json`, every raw IMU
@@ -166,7 +179,8 @@ swing strength, how often the computer misses a ball, how often you would fault,
 
 | Problem | What the game does |
 |---|---|
-| hub goes silent | the ball clock **pauses** (never a miss or a fault) and resumes where it was; it tries to reconnect |
+| hub goes silent | the ball clock **pauses** (never a miss or a fault) and resumes where it was; it tries to reconnect (with the camera as the swing sensor the game carries on: only the haptics go quiet) |
+| the hub's IMU is too slow (< 25 Hz at the bench) | the camera's hand speed detects swings instead (`--swing-source`); spin is off then |
 | you leave the camera view for more than 0.6 s | paused, with "PAUSED: pose lost" on screen |
 | tags unreadable | SPACE starts, 1–3 set the level |
 | broker unreachable | the game runs; the score is sent when it reconnects |
@@ -200,7 +214,8 @@ detector, vision worker, tag voter and haptics on a simulated clock (`./pp play 
 
 My game is a stack of small explicit rules that I can test without hardware. **Perception** turns raw
 sensors into events: a state machine projects the hub's gyro onto my learned forward-swing axis, arms
-on a threshold, fires at the peak, and ignores backswings and waving; AprilTag ids must be seen in 4 of
+on a threshold, fires at the peak, and ignores backswings and waving (when the hub is too slow the same machine
+runs on the camera's hand velocity); AprilTag ids must be seen in 4 of
 6 frames (START also held 0.4 s) before they count; pose is used only when the landmarks are visible.
 **The hit judge** is a conjunction of five deciding gates: the swing's back-dated time inside a window
 around the ball's known arrival, my hand (from pose, shifted by the measured camera lag) within a
@@ -223,9 +238,16 @@ continuous hits goes to MQTT whenever it improves.
 - **Camera lag and one camera.** Pose trails the IMU by roughly 70–150 ms [measured: ___ ms] and a
   single webcam gives no depth, so the "paddle is at the ball" test is a 2-D approximation, lenient at
   Rookie.
-- **The hub IMU.** About 66 Hz over Bluetooth [measured: ___ Hz], undocumented units, no timestamps
+- **The hub IMU.** About 66 Hz over Bluetooth [measured: ___ Hz] (below 25 Hz the camera takes over, see
+  below), undocumented units, no timestamps
   (samples are stamped on arrival), so the swing peak is only good to ~15 ms and a swing is reported
   35–80 ms after it happened. Shot speed is a calibrated relative measure, not true racket speed.
+- **The camera as a swing sensor (the fallback).** It sees only the hand's motion across the picture, so a
+  swing straight at the camera barely registers, and a quick sideways reposition of the hand can look like a
+  swing (the duration limits and the judge's timing and pose gates stop most of those, not all). It runs at 15-30
+  Hz, its peak is about 30 ms later than the hub's, the camera lag cannot be measured against an IMU it replaces,
+  there is no accelerometer so there is no spin, and a very hard swing carries the hand out of the ball's radius.
+  Best at Rookie and Club.
 - **Haptics.** The motors are weak unless the hub has some inertia on it; their vibration shakes the
   hub's own IMU, so the detector ignores a short window after every pulse [measured: ___ ms]; the felt
   pulse arrives 100–200 ms after the swing peak, so timing cues are dropped at the fastest levels.
@@ -243,7 +265,7 @@ continuous hits goes to MQTT whenever it improves.
 | MediaPipe BlazePose landmarker (a pre-trained CNN) | `pose_features.py`, `pose.py`, `vision.py` | A convolutional network regresses 33 body landmarks per frame and tracks them between frames. I use the wrist, index and pinky, normalised by shoulder width, as the paddle position. |
 | AprilTag / ArUco 36h11 detection | `tags.py` | It thresholds the image, finds square quads and decodes a Hamming-protected bit grid into an id and corners. I vote over frames before an id counts as START or LEVEL. |
 | One-Euro filter | `oneeuro.py` | A low-pass filter whose cutoff rises with signal speed. The paddle point is smooth when I am still and nearly lag-free in a swing. |
-| Signed-axis swing detector (a threshold state machine; the axis comes from an SVD) | `swing.py`, `calibration.py` | It projects the gyro onto the forward axis learned from my calibration swings, arms on a threshold, tracks the peak and fires on the falling edge with an oscillation guard. A backswing projects negative, so it never fires. |
+| Signed-axis swing detector (a threshold state machine; the axis comes from an SVD) | `swing.py`, `calibration.py`, `posegyro.py` | It projects the gyro onto the forward axis learned from my calibration swings, arms on a threshold, tracks the peak and fires on the falling edge with an oscillation guard. A backswing projects negative, so it never fires; with a slow hub the same detector runs on the camera's hand velocity. |
 | FFT shake discriminator | `shake.py` | The last second of gyro is resampled and run through `rfft`; a narrow, strong peak between 3 and 8 Hz with several full cycles is a shake. It locks the paddle for a second, while a single swing's smooth spectrum does not. |
 | PD controller | `pd.py`, `policy.py` | Its velocity command is Kp·error + Kd·(filtered error rate), saturated at a per-level paddle speed and only starting after a reaction delay. Whether the computer reaches a ball is simulated physics, and the screen draws the paddle chasing (or missing) my shot. |
 | Softmax (Boltzmann) policy | `policy.py` | Each of nine target zones gets a utility and is sampled ∝ exp(utility / temperature). Lower temperature plays sharper at higher levels. |

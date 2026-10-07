@@ -17,7 +17,7 @@ import random
 from pingpong import live, posegyro
 from pingpong.clock import FakeClock
 from pingpong.events import ImuSample
-from pingpong.hub import HubLink
+from pingpong.hub import HubLink, NoHub
 from pingpong.profile import Calibration
 from pingpong.sources_fake import (FakeCamera, FakeDoubleMotor, FakeLandmarker, FakeMqttClient,
                                    FakeTagDetector)
@@ -162,7 +162,7 @@ class FakeRig:
     def __init__(self, *, level=1, mode="survival", target=7, seed=1, calibration=None, source="live",
                  scope="record_session", w_pk=600.0, timing_s=0.0, cards=None, hz=66.0, fps=30.0, lag_s=0.10,
                  stale_ms=300.0, vibration=False, no_motor=False, record_dir=None, spin_probs_fn=None, learner=None,
-                 swing_source="imu"):
+                 swing_source="imu", no_hub=False):
         self.clock = FakeClock(start_ns=1_000_000_000)
         self.origin_ns = self.clock.now_ns()
         camera = swing_source == "pose"                                # the camera, not the hub's gyro, detects swings
@@ -170,12 +170,12 @@ class FakeRig:
         cards = [(0.6, 2.4, 0)] if cards is None else cards            # the START card, held 1.8 s
         self.player = ScriptedPlayer(calibration.box, w_pk=w_pk, timing_s=timing_s, cards=cards, pose_motion=camera)
         self.player.origin_ns = self.origin_ns
-        self.dev = VibratingMotor(self.player, self.clock, vibration)
+        self.dev = None if no_hub else VibratingMotor(self.player, self.clock, vibration)
         self.client = FakeMqttClient()
         self.hub_blackouts, self.pose_blackouts = [], []
         self.shake_windows, self.wave_windows = self.player.shake_windows, self.player.wave_windows
         self.pause_reasons_seen = set()
-        hub = HubLink(self.dev, notify_ms=15, clock=self.clock)
+        hub = NoHub() if no_hub else HubLink(self.dev, notify_ms=15, clock=self.clock)
         hub.connect()
         landmarker = FakeLandmarker(self._hand_if_visible, self.clock, lag_s=lag_s, hand=calibration.hand)
         tags = FakeTagDetector(self.player.card_ids, self.clock)
@@ -208,7 +208,7 @@ class FakeRig:
         now = self.clock.now_ns()
         self.player.watch(self.game, now)
         while self._next_imu <= now:
-            if not self._within(self.hub_blackouts, now):             # a silent hub delivers nothing at all
+            if self.dev is not None and not self._within(self.hub_blackouts, now):   # a silent hub delivers nothing
                 self.dev.emit(imu=self.player.imu(now))
             self._next_imu += self._imu_period
         while self._next_frame <= now:
@@ -246,9 +246,11 @@ class CalibrationScript:
     def __init__(self, *, u_true=(0.35, 0.88, -0.32), shoulder_w=0.21, hand="right",
                  corners=((-1.1, 0.7), (1.1, 0.7), (1.1, -0.6), (-1.1, -0.6)),
                  soft=(330, 360, 300, 350, 320), full=(1100, 1050, 1200, 1150, 1000), back_ratios=None,
-                 gpd=GPD, seed=1):
+                 gpd=GPD, seed=1, camera=False):
         norm = math.sqrt(sum(c * c for c in u_true))
         self.u_true = tuple(c / norm for c in u_true)
+        self.camera = camera                                 # the hand itself swings (u_true is then a direction in u, v)
+        self._swings = []                                    # camera mode: (forward start, duration, speed, back ratio)
         self.shoulder_w, self.hand, self.corners = shoulder_w, hand, [tuple(c) for c in corners]
         self.soft, self.full, self.gpd = tuple(soft), tuple(full), gpd
         peaks = self.soft + self.full
@@ -265,26 +267,40 @@ class CalibrationScript:
         for peak, b in zip(peaks, back):
             t += 1.2
             self._lobes += [(t, 0.20, -b * peak), (t + 0.22, 0.15, peak)]
+            self._swings.append((t + 0.22, 0.15, peak / posegyro.DPS_PER_SW_S, b))
             t += 0.72
         self.duration = t + 1.0
 
     def hand_uv(self, t):
+        u, v = 0.0, -0.9
         for t0, t1, a, b in reversed(self._segments):
             if t >= t0:
                 f = _smoothstep((t - t0) / (t1 - t0))
-                return (a[0] + f * (b[0] - a[0]) + self.rng.gauss(0, 0.004),
-                        a[1] + f * (b[1] - a[1]) + self.rng.gauss(0, 0.004))
-        return (0.0 + self.rng.gauss(0, 0.004), -0.9 + self.rng.gauss(0, 0.004))
+                u, v = a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1])
+                break
+        if self.camera:
+            travel = sum(swing_offset(t, t0, dur, vpk, back=back) for t0, dur, vpk, back in self._swings
+                         if abs(t - t0) < 2.0)
+            norm = math.hypot(self.u_true[0], self.u_true[1])
+            u, v = u + travel * self.u_true[0] / norm, v + travel * self.u_true[1] / norm
+        return u + self.rng.gauss(0, 0.004), v + self.rng.gauss(0, 0.004)
 
     def imu_raw(self, t):
         rate = sum(peak * math.sin(math.pi * (t - t0) / dur) for t0, dur, peak in self._lobes if t0 <= t <= t0 + dur)
         return tuple(round((rate * c + self.rng.gauss(0, 2.0)) * self.gpd) for c in self.u_true)
 
 
-def drive_calibration(script, flow, *, on_step=None, on_note=None, stop_after_notes=(), imu_hz=66.0, pose_hz=30.0):
-    """Feed a CalibrationFlow from a CalibrationScript in time order (240 Hz steps)."""
+def drive_calibration(script, flow, *, on_step=None, on_note=None, stop_after_notes=(), imu_hz=66.0, pose_hz=30.0,
+                      camera=False):
+    """Feed a CalibrationFlow from a CalibrationScript in time order (240 Hz steps).
+
+    camera=True: no hub at all; the swing samples are what PoseGyro makes of the (One-Euro filtered) poses."""
+    from pingpong.events import PaddlePose
+    from pingpong.oneeuro import OneEuro2D
+
     t0_ns = 5 * S
     last, t, next_imu, next_pose = None, 0.0, 0.0, 0.0
+    smooth, gyro = OneEuro2D(), posegyro.PoseGyro()
 
     def notes():
         for note in flow.take_notes():
@@ -302,12 +318,17 @@ def drive_calibration(script, flow, *, on_step=None, on_note=None, stop_after_no
         if flow.finished():
             break
         now = t0_ns + round(t * S)
-        if t >= next_imu:
+        if t >= next_imu and not camera:
             flow.feed_imu(ImuSample(t_ns=now, g=script.imu_raw(t), a=(0, 0, GRAVITY)))
             next_imu += 1.0 / imu_hz
         if t >= next_pose:
             u, v = script.hand_uv(t)
             flow.feed_pose(now, u, v, 0.9, script.shoulder_w + script.rng.gauss(0, 0.002))
+            if camera:
+                fu, fv = smooth((u, v), now / S)
+                sample = gyro.feed(PaddlePose(t_scene_ns=now, u=fu, v=fv, conf=0.9, hand=script.hand))
+                if sample is not None:
+                    flow.feed_imu(sample)
             next_pose += 1.0 / pose_hz
         if notes():
             return

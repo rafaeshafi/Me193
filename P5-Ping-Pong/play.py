@@ -8,6 +8,8 @@ Usage:
     ./pp play --player rafae --level 2 --mode match
     ./pp play --player guest          # no saved calibration, never publishes to the score topic
     ./pp play --no-publish --no-motor # rehearse without the broker / without motor pulses
+    ./pp play --swing-source pose     # the camera's hand speed detects swings (auto when the hub measured < 25 Hz)
+    ./pp play --no-hub                # camera only: no hub, no haptics (bring-up, or a flat battery)
     ./pp play --board                 # the leaderboard (best streaks, match wins) and nothing else
 
 Keys:  SPACE start (and swing in --fake)  1-3 level  M mode  X x-ray  D motors  S sound  R reconnect hub  Q/ESC quit
@@ -48,6 +50,9 @@ def make_parser():
     ap.add_argument("--player", default="rafae", help="player profile; 'guest' = no saved calibration, never publishes")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--no-window", action="store_true")
+    from pingpong import livebuild
+
+    livebuild.add_swing_source_args(ap)
     return ap
 
 
@@ -77,6 +82,14 @@ def selftest():
     rig.close()
     print(f"live pipeline selftest OK: fake hub + camera + tags + haptics -> 10 hits in {rig.now_s():.1f} "
           f"simulated s, one detected swing per swing made despite the motor pulses, published {sent[0]}...{sent[-1]}")
+
+    cam = fakerig.FakeRig(level=1, swing_source="pose", hz=8.0)         # a hub far too slow to see a swing
+    cam.run(until=lambda: cam.game.tracker.streak >= 10, max_s=120)
+    sent = [p["payload"] for p in cam.client.published if p["topic"] == config.SCORE_TOPIC]
+    assert sent == [f"{n}.0" for n in range(1, 11)], sent
+    cam.close()
+    print(f"camera pipeline selftest OK: the hand's own speed is the swing sensor (hub at 8 Hz ignored) -> 10 hits in "
+          f"{cam.now_s():.1f} simulated s, published {sent[0]}...{sent[-1]}")
     return 0
 
 
@@ -149,8 +162,9 @@ def run_live(args):
     from pingpong.realenv import RealEnv
 
     try:
-        live.require_card(args)                       # cheap and hardware-free: fail fast with the fix
-        hostcheck.require_host("Camera and Bluetooth")
+        if not args.no_hub:
+            live.require_card(args)                   # cheap and hardware-free: fail fast with the fix
+        hostcheck.require_host("Camera" if args.no_hub else "Camera and Bluetooth")
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))    # a kill still runs the teardown
         rig = live.build_live(args, RealEnv())
     except live.LiveSetupError as exc:
@@ -159,7 +173,10 @@ def run_live(args):
     cv2.namedWindow(TITLE)
     try:
         rig.start()
-        print(f"live: player {rig.player!r}, hub ready, camera on. SPACE or the START card begins; Q quits.")
+        sensor = "camera" if rig.swing_source == "pose" else "hub gyro"
+        hub = "no hub" if rig.hub_status() == "off" else "hub ready"
+        print(f"live: player {rig.player!r}, swings from the {sensor}, {hub}, camera on. "
+              "SPACE or the START card begins; Q quits.")
         run_loop(rig, show=lambda frame: cv2.imshow(TITLE, frame), wait_key=cv2.waitKey)
     except KeyboardInterrupt:
         pass

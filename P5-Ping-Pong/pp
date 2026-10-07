@@ -53,6 +53,7 @@ case "$cmd" in
 ./pp make_cards                     (re)generate the printable AprilTag cards in docs/cards/
 ./pp ready                          imports + pytest + every tool --selftest (run before each block)
 ./pp play [--fake|--player NAME|--level N|--mode M]   the game (live: Double Motor + camera + AprilTags)
+./pp play --swing-source pose|--no-hub   the camera's hand speed detects swings (auto when the hub is < 25 Hz)
 Camera and Bluetooth tools must be run from Terminal.app, not from the Claude app.
 EOF
     ;;

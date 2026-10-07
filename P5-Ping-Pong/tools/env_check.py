@@ -179,8 +179,9 @@ def _check_hub_rate(env, link, secs, notify_ms, skip, add, prompt, config_path):
               f"{stats['worst_gap_ms']:.0f} ms, p99.9 {stats['p999_gap_ms']:.0f} ms, gaps >100 ms: "
               f"{stats['gaps_over_100ms']} -> {verdict}")
     if verdict == "NO-GO":
-        detail += (". Below 25 Hz the swing source switches to the pose wrist-speed detector "
-                   "(hub kept for haptics); re-run closer to the laptop and with other BLE devices off first")
+        detail += (". Below 25 Hz `play` and `calibrate_swing` take the swing from the camera's hand speed "
+                   "(--swing-source auto; run './pp calibrate_swing --swing-source pose' once, the hub stays for "
+                   "haptics); re-run closer to the laptop and with other BLE devices off first")
     elif verdict == "WARN":
         detail += ". Use NOTIFY_MS 20-30 and widen the swing windows x1.3 (plan section 5)"
     add("hub_rate", {"GO": "PASS", "WARN": "WARN", "NO-GO": "FAIL"}[verdict], detail)

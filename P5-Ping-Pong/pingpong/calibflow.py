@@ -37,8 +37,9 @@ class CalibrationFlow:
     def __init__(self, *, gyro_per_dps, hand="right", accel_per_g=1000.0, fs_raw=32767, n_soft=5, n_full=5,
                  stand_s=1.0, hold_s=0.8, still_sw=0.08, min_corner_gap_sw=0.35, min_span=(0.6, 0.4),
                  swing_start_dps=80.0, swing_end_dps=40.0, quiet_s=0.25, min_peak_dps=150.0, max_take_s=1.2,
-                 lead_s=0.8, max_reversals=3):
+                 lead_s=0.8, max_reversals=3, source="imu"):
         self.gpd, self.hand, self.accel_per_g, self.fs_raw = gyro_per_dps, hand, accel_per_g, fs_raw
+        self.source = source                                     # "pose": the samples are the camera's hand speed
         self.n_soft, self.n_full = n_soft, n_full
         self.stand_ns, self.hold_ns, self.still_sw, self.min_gap = round(stand_s * S), round(hold_s * S), still_sw, min_corner_gap_sw
         self.min_span = min_span
@@ -201,7 +202,8 @@ class CalibrationFlow:
         takes = [samples for _, samples in self.soft + self.full]
         axis, _ = cal.fit_forward_axis(takes, self.gpd)
         calibration = Calibration(
-            swing=cal.SwingCalibration(u_fwd=axis, omega_lo=strengths["omega_lo"], omega_hi=strengths["omega_hi"]),
+            swing=cal.SwingCalibration(u_fwd=axis, omega_lo=strengths["omega_lo"], omega_hi=strengths["omega_hi"],
+                                       source=self.source),
             box=ReachBox.fit(self.corners), shoulder_w=self._shoulder_w, hand=self.hand)
         self.self_check = (self._detected(calibration, takes), len(takes))
         self._calibration, self.step = calibration, "done"

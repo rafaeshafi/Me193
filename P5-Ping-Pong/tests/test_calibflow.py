@@ -165,3 +165,32 @@ def test_the_result_is_independent_of_the_hub_unit_scale():
     flow = CalibrationFlow(gyro_per_dps=100.0)
     fakerig.drive_calibration(script, flow)
     assert angle_deg(flow.calibration().swing.u_fwd, script.u_true) < 4.0
+
+
+# --- the camera as the swing sensor ---------------------------------------------------------------------------------
+def camera_flow(**kw):
+    from pingpong import posegyro
+
+    return CalibrationFlow(gyro_per_dps=posegyro.GYRO_PER_DPS, accel_per_g=posegyro.ACCEL_PER_G,
+                           fs_raw=posegyro.FS_RAW, source="pose", **kw)
+
+
+def test_the_flow_can_calibrate_from_the_hand_speed_alone():
+    script = fakerig.CalibrationScript(u_true=(0.8, 0.6, 0.0), camera=True)
+    flow = camera_flow()
+    steps = []
+    fakerig.drive_calibration(script, flow, on_step=steps.append, camera=True)
+    cal = flow.calibration()
+    assert steps == ["stand", "corners", "soft", "full", "done"]
+    assert cal.swing.source == "pose" and angle_deg(cal.swing.u_fwd, script.u_true) < 8.0
+    assert cal.swing.omega_hi > 1.5 * cal.swing.omega_lo
+    detected, total = flow.self_check
+    assert total == 10 and detected >= 9                   # the camera-source detector finds its own calibration swings
+    assert cal.shoulder_w == pytest.approx(script.shoulder_w, abs=0.01)
+
+
+def test_a_flow_for_the_camera_never_produces_a_hub_calibration():
+    assert camera_flow().prompt().lower().startswith("stand still")
+    flow = camera_flow()
+    fakerig.drive_calibration(fakerig.CalibrationScript(u_true=(0.8, 0.6, 0.0), camera=True), flow, camera=True)
+    assert flow.calibration().swing_source == "pose"

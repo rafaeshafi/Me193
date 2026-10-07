@@ -76,3 +76,43 @@ def test_a_missing_card_is_reported_before_any_hardware_is_touched(capsys):
 
 def test_the_selftest_is_green():
     assert tool.main(["--selftest"]) == 0
+
+
+# --- the camera as the swing sensor ---------------------------------------------------------------------------------
+def camera_env(script):
+    env = FakeEnv(hz=66.0)
+    t0 = env.clock.now_ns()
+    env.make_landmarker = lambda: FakeLandmarker(lambda t_ns: script.hand_uv((t_ns - t0) / S), env.clock)
+    return env
+
+
+def run_camera(tmp_path, env, *extra):
+    return tool.run(env, args_for(tmp_path, "--swing-source", "pose", *extra), profile_root=tmp_path,
+                    show=lambda f: None, wait_key=lambda ms: 255, notify=lambda n: None, size=(320, 180), frame_hz=5.0)
+
+
+def test_the_tool_calibrates_from_the_camera_alone_and_saves_a_camera_calibration(tmp_path):
+    script = fakerig.CalibrationScript(u_true=(0.8, 0.6, 0.0), camera=True)
+    env = camera_env(script)
+    assert run_camera(tmp_path, env, "--no-hub") == 0
+    cal = profile.load("rafae", root=tmp_path, source="pose")
+    assert cal is not None and cal.calibrated and cal.swing.source == "pose"
+    assert angle_deg(cal.swing.u_fwd, script.u_true) < 8.0
+    assert profile.load("rafae", root=tmp_path) is None                     # no hub calibration was invented
+    assert env.hub_device.calls == []                                       # and no hub was touched
+
+
+def test_with_a_hub_the_camera_calibration_still_beeps_the_captures_and_ignores_the_hubs_gyro(tmp_path):
+    script = fakerig.CalibrationScript(u_true=(0.8, 0.6, 0.0), camera=True)
+    env = camera_env(script)
+    env.scenario = lambda now: (0, 0, 1000, 3000, -2000, 500)               # a hub reading nonsense the whole time
+    assert run_camera(tmp_path, env) == 0
+    assert any(c[0] == "beep" for c in env.hub_device.calls)
+    assert profile.load("rafae", root=tmp_path, source="pose").swing.source == "pose"
+
+
+def test_no_hub_with_an_explicit_hub_gyro_is_refused_before_anything_starts(tmp_path):
+    env = FakeEnv()
+    code = tool.run(env, args_for(tmp_path, "--no-hub", "--swing-source", "imu"), profile_root=tmp_path,
+                    show=lambda f: None, wait_key=lambda ms: 255, notify=lambda n: None)
+    assert code == 2 and env.hub_device.calls == []

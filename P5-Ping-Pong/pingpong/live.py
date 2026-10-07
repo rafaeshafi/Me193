@@ -24,16 +24,11 @@ from collections import deque
 import cv2
 
 import config
-from pathlib import Path
-
-import sqlite3
-
-from pingpong import app, mqtt_link, posegyro, profile, qbandit, spin
+from pingpong import app, mqtt_link, posegyro
 from pingpong import recorder as recorder_mod
-from pingpong import store as store_mod
 from pingpong.haptics import Actuator, ActuatorCore
-from pingpong.hub import card_kwargs
 from pingpong.imu_worker import ImuWorker
+from pingpong.livebuild import LiveSetupError, build_live, request_720p, require_card  # noqa: F401  (the setup half)
 from pingpong.pose import PoseLock
 from pingpong.shake import ShakeMonitor
 from pingpong.swing import SwingDetector
@@ -45,10 +40,6 @@ POSE_STALE_S = 0.6            # no hand reading for this long -> paused ("pose")
 RECONNECT_AFTER_S = 2.0       # hub silent this long (after it went stale) -> try to reconnect
 RECONNECT_COOLDOWN_S = 10.0   # ... then at most one attempt per this
 MAX_RECONNECTS = 3            # per outage; then the HUD says LOST until the player presses R
-
-
-class LiveSetupError(Exception):
-    """Something the player can fix (card, camera, hub asleep); the message says how."""
 
 
 class LiveRig:
@@ -359,100 +350,3 @@ def _start_recording(record_dir, log, *, clock, **meta):
     except OSError as exc:
         log(f"recording disabled: {exc}")
         return None
-
-
-def require_card(args):
-    """The Connection Card filter from --card-color/--card-serial or config_local.json."""
-    color = getattr(args, "card_color", None) or config.CARD_COLOR
-    serial = getattr(args, "card_serial", None) or config.CARD_SERIAL
-    if not color or not serial:
-        raise LiveSetupError("no hub card configured: wake the Double Motor, run './pp scan_hubs' to read its card "
-                             "colour and serial, then pass --card-color/--card-serial (env_check saves them)")
-    try:
-        return card_kwargs(color, serial)
-    except ValueError as exc:
-        raise LiveSetupError(f"{exc} (see './pp scan_hubs')") from exc
-
-
-def request_720p(capture):
-    setter = getattr(capture, "set", None)
-    if setter is not None:
-        setter(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        setter(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-
-
-def _save_game(db, player, summary, log):
-    """A finished game goes on file; a database problem must never reach the game."""
-    try:
-        db.record_game(player, {**summary, "source": "live"})
-    except Exception as exc:
-        log(f"could not save the game to the leaderboard: {exc}")
-
-
-def build_live(args, env, *, player_root=None, record_root=None, store_path=None, log=print):
-    """Everything a live session needs, from the command line and an environment (real or fake).
-
-    A failure after the hub connected lets the hub go again: a leaked connection would keep the
-    hub invisible to the next run for about 24 seconds.
-    """
-    card = require_card(args)
-    guest = profile.slug(args.player) == "guest"
-    calibration = (None if guest else profile.load(args.player, root=player_root)) or profile.Calibration.default()
-    no_publish = bool(args.no_publish or guest)                  # a guest must never touch the owner's score
-    record_dir = None if args.no_record else Path(record_root or recorder_mod.default_root()) / \
-        recorder_mod.session_name(args.player)
-    try:
-        model = None if args.no_spin else spin.load_for(args.player, root=player_root)
-    except ValueError as exc:                                     # a damaged model file: say so, play without spin
-        log(f"spin disabled: {exc}")
-        model = None
-    learner = None
-    if args.learn:
-        try:
-            learner = qbandit.load_for(args.player, root=player_root) or qbandit.QBandit()
-        except ValueError as exc:
-            log(f"learning starts afresh: {exc}")
-            learner = qbandit.QBandit()
-    hub = env.make_hub(config.NOTIFY_MS, card)
-    try:
-        hub.connect()
-    except ConnectionError as exc:
-        raise LiveSetupError(str(exc)) from exc
-    capture = None
-    try:
-        capture = env.open_camera(config.CAMERA_INDEX)
-        if not capture.isOpened():
-            raise LiveSetupError(f"could not open the camera (index {config.CAMERA_INDEX}): allow Camera for this "
-                                 "terminal in System Settings > Privacy & Security, quit apps using it, and turn "
-                                 "Continuity Camera off on your iPhone")
-        request_720p(capture)
-        rig = assemble(
-            hub=hub, capture=capture, landmarker=env.make_landmarker(), calibration=calibration, clock=env.clock,
-            tag_detector=env.make_tag_detector(), mqtt_client=None if no_publish else env.make_mqtt_client(),
-            level=args.level, mode=args.mode, target=args.target, seed=args.seed, source="live",
-            no_publish=no_publish, no_motor=args.no_motor, threaded=env.threaded,
-            to_image=getattr(env, "to_image", None), record_dir=record_dir, player=args.player,
-            spin_probs_fn=None if model is None else model.probs, learner=learner, log=log)
-    except BaseException:
-        if capture is not None:
-            capture.release()
-        hub.close()
-        raise
-    rig.calibration, rig.player, rig.session.player = calibration, args.player, args.player
-    if learner is not None:
-        rig.closers.append(("learner", lambda: qbandit.save_for(args.player, learner, root=player_root)))
-    if not args.no_audio:
-        rig.audio = rig.session.audio = env.make_audio()
-        rig.audio.start()
-    if not args.no_store:
-        try:
-            db = store_mod.Store(store_path)
-        except (OSError, sqlite3.Error) as exc:
-            log(f"leaderboard disabled: {exc}")
-        else:
-            rig.store = db
-            rig.session.on_game_over = lambda summary: _save_game(db, args.player, summary, log)
-            rig.session.leaderboard_fn = lambda: tuple(db.leaderboard(rig.session.game.mode, limit=5))
-    if not calibration.calibrated:
-        rig.session.set_notice(f"UNCALIBRATED: run ./pp calibrate_swing --player {args.player}")
-    return rig

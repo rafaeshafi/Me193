@@ -4,6 +4,8 @@ Usage (from Terminal.app: camera and Bluetooth are not available to the Claude a
     cd ~/ME193/P5-Ping-Pong
     ./pp calibrate_swing --player rafae            # the card comes from config_local.json
     ./pp calibrate_swing --player rafae --hand left
+    ./pp calibrate_swing --player rafae --swing-source pose   # the camera's hand speed instead of the hub's gyro
+    ./pp calibrate_swing --player rafae --no-hub              # camera only (implies --swing-source pose)
     ./pp calibrate_swing --selftest                # no hardware needed
 
 Stand about 1.8 m from the laptop with the hub in your fist, as you will play.  The window
@@ -12,7 +14,7 @@ tells you what to do and the hub beeps at each capture (you are too far away to 
   2. hold the hub still at four corners of where you can comfortably reach
   3. five SOFT swings, then five FULL swings
 The result (forward axis, soft/full strengths, reach box) is saved to
-data/players/<name>/calibration.json and `./pp play --player <name>` uses it.
+data/players/<name>/calibration.json (calibration-pose.json for the camera) and `./pp play --player <name>` uses it.
 Q cancels without saving.
 """
 
@@ -25,8 +27,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import config  # noqa: E402
-from pingpong import canvas, live, profile  # noqa: E402
+from pingpong import canvas, live, livebuild, posegyro, profile  # noqa: E402
 from pingpong.calibflow import CORNER_NAMES, CalibrationFlow  # noqa: E402
+from pingpong.hub import NoHub  # noqa: E402
 
 W, H = 1280, 720
 TITLE = "P5 calibration  (Q to cancel)"
@@ -41,6 +44,7 @@ def parse_args(argv=None):
     ap.add_argument("--player", default="rafae")
     ap.add_argument("--hand", choices=("right", "left"), default="right")
     ap.add_argument("--selftest", action="store_true")
+    livebuild.add_swing_source_args(ap)
     return ap.parse_args(argv)
 
 
@@ -111,16 +115,21 @@ def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), fr
     from pingpong.vision import VisionWorker
 
     try:
-        card = live.require_card(args)
+        source = livebuild.resolve_swing_source(args)
+        card = None if args.no_hub else live.require_card(args)
     except live.LiveSetupError as exc:
         print(f"cannot calibrate: {exc}", file=sys.stderr)
         return 2
-    hub = env.make_hub(config.NOTIFY_MS, card)
-    try:
-        hub.connect()
-    except ConnectionError as exc:
-        print(f"cannot calibrate: {exc}", file=sys.stderr)
-        return 2
+    camera = source == "pose"
+    if args.no_hub:
+        hub = NoHub()
+    else:
+        hub = env.make_hub(config.NOTIFY_MS, card)
+        try:
+            hub.connect()
+        except ConnectionError as exc:
+            print(f"cannot calibrate: {exc}", file=sys.stderr)
+            return 2
     capture = vision = None
     try:
         capture = env.open_camera(config.CAMERA_INDEX)
@@ -131,11 +140,14 @@ def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), fr
         live.request_720p(capture)
         vision = VisionWorker(capture, env.make_landmarker(), clock=env.clock, hand=args.hand,
                               to_image=getattr(env, "to_image", None))
-        flow = CalibrationFlow(gyro_per_dps=config.GYRO_PER_DPS, hand=args.hand, accel_per_g=config.ACCEL_PER_G,
-                               fs_raw=config.HUB_FS_RAW)
+        units = (posegyro.GYRO_PER_DPS, posegyro.ACCEL_PER_G, posegyro.FS_RAW) if camera else \
+            (config.GYRO_PER_DPS, config.ACCEL_PER_G, config.HUB_FS_RAW)
+        flow = CalibrationFlow(gyro_per_dps=units[0], hand=args.hand, accel_per_g=units[1], fs_raw=units[2],
+                               source=source)
         if env.threaded:
             vision.start()
-        return _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, size, round(1e9 / frame_hz))
+        return _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, size,
+                     round(1e9 / frame_hz), posegyro.PoseGyro() if camera else None)
     finally:
         if vision is not None:
             vision.stop()                                 # also releases the camera
@@ -144,7 +156,8 @@ def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), fr
         hub.close()
 
 
-def _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, size, frame_ns):
+def _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, size, frame_ns, gyro=None):
+    """gyro: a PoseGyro when the camera is the swing sensor (the hub's own samples are then thrown away)."""
     import cv2
 
     last_pose_ns, last_note, hand, last_shown_ns = None, "", None, None
@@ -152,11 +165,17 @@ def _loop(env, hub, vision, flow, args, profile_root, show, wait_key, notify, si
         if not env.threaded:
             vision.step()                                 # a synchronous environment has no camera thread
         while not hub.imu.empty():
-            flow.feed_imu(hub.imu.get_nowait())
+            sample = hub.imu.get_nowait()
+            if gyro is None:
+                flow.feed_imu(sample)
         for pose in vision.snapshot():
             if last_pose_ns is None or pose.t_scene_ns > last_pose_ns:
                 flow.feed_pose(pose.t_scene_ns, pose.u, pose.v, pose.conf, vision.last_shoulder_w)
                 last_pose_ns, hand = pose.t_scene_ns, (pose.u, pose.v)
+                if gyro is not None:
+                    camera_sample = gyro.feed(pose)
+                    if camera_sample is not None:
+                        flow.feed_imu(camera_sample)
         for note in flow.take_notes():
             last_note = note
             notify(note)
@@ -197,6 +216,32 @@ def _selftest():
     dot = sum(a * b for a, b in zip(cal.swing.u_fwd, script.u_true))
     assert dot > 0.99, f"forward axis off by more than 8 degrees (cos {dot:.3f})"
     print(f"calibrate_swing selftest OK: axis cos {dot:.4f}, omega {cal.swing.omega_lo:.0f}/{cal.swing.omega_hi:.0f} dps")
+    return _selftest_camera()
+
+
+def _selftest_camera():
+    """The same calibration with the camera's hand speed as the swing sensor and no hub at all."""
+    import tempfile
+
+    from pingpong import fakerig
+    from pingpong.sources_fake import FakeEnv, FakeLandmarker
+
+    S = 1_000_000_000
+    script = fakerig.CalibrationScript(u_true=(0.8, 0.6, 0.0), camera=True)
+    env = FakeEnv(hz=66.0)
+    t0 = env.clock.now_ns()
+    env.make_landmarker = lambda: FakeLandmarker(lambda t_ns: script.hand_uv((t_ns - t0) / S), env.clock)
+    with tempfile.TemporaryDirectory() as tmp:
+        args = parse_args(["--player", "selftest", "--no-hub"])
+        code = run(env, args, profile_root=Path(tmp), show=lambda frame: None, wait_key=lambda ms: 255,
+                   notify=lambda note: None, size=(320, 180), frame_hz=2.0)
+        cal = profile.load("selftest", root=Path(tmp), source="pose")
+        assert profile.load("selftest", root=Path(tmp)) is None            # nothing was saved as a hub calibration
+    assert code == 0 and cal is not None and cal.swing.source == "pose", (code, cal)
+    dot = sum(a * b for a, b in zip(cal.swing.u_fwd, script.u_true))
+    assert dot > 0.98, f"forward axis off by more than 12 degrees (cos {dot:.3f})"
+    print(f"calibrate_swing camera selftest OK: axis cos {dot:.4f}, hand speed {cal.swing.omega_lo:.0f}/"
+          f"{cal.swing.omega_hi:.0f} pseudo-dps")
     return 0
 
 

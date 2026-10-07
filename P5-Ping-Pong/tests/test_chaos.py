@@ -16,12 +16,13 @@ from pingpong import fakerig, recorder
 S = 1_000_000_000
 
 
-def chaos_session(seed, tmp_path, seconds=25.0):
+def chaos_session(seed, tmp_path, seconds=25.0, swing_source="imu"):
     rng = random.Random(seed)
     rig = fakerig.FakeRig(
         level=rng.choice([1, 2, 3]), mode=rng.choice(["survival", "match"]), seed=seed, target=rng.choice([3, 5]),
         timing_s=rng.choice([0.0, 0.0, 0.05, 0.12, 0.3]), w_pk=rng.choice([600.0, 600.0, 900.0, 120.0]),
-        vibration=rng.random() < 0.5, stale_ms=rng.choice([300.0, 500.0]), record_dir=tmp_path / f"s{seed}")
+        vibration=rng.random() < 0.5, stale_ms=rng.choice([300.0, 500.0]), record_dir=tmp_path / f"s{seed}",
+        swing_source=swing_source)
     t = 0.0
     while t < seconds:
         chunk = rng.uniform(0.5, 2.0)
@@ -32,7 +33,7 @@ def chaos_session(seed, tmp_path, seconds=25.0):
         elif roll < 0.35:
             rig.pose_blackouts.append((now + rng.uniform(0, 0.5), now + rng.uniform(0.3, 2.0)))
         elif roll < 0.45:
-            rig.shake_windows.append((now, now + rng.uniform(1.0, 2.5)))
+            (rig.shake_windows if swing_source == "imu" else rig.wave_windows).append((now, now + rng.uniform(1.0, 2.5)))
         if rig.game.phase in ("LOBBY", "MATCH_OVER") and rng.random() < 0.8:
             rig.session.on_start()                                      # a key press: (re)start
         rig.run(seconds=chunk)
@@ -41,9 +42,10 @@ def chaos_session(seed, tmp_path, seconds=25.0):
     return rig, recorder.load(tmp_path / f"s{seed}")
 
 
+@pytest.mark.parametrize("swing_source", ("imu", "pose"))
 @pytest.mark.parametrize("seed", range(10))
-def test_invariants_hold_under_random_sensor_trouble(seed, tmp_path):
-    rig, loaded = chaos_session(seed, tmp_path)
+def test_invariants_hold_under_random_sensor_trouble(seed, swing_source, tmp_path):
+    rig, loaded = chaos_session(seed, tmp_path, swing_source=swing_source)
     # 1. the published score rises strictly, as "N.0", and never exceeds the record
     sent = [p["payload"] for p in rig.client.published if p["topic"] == config.SCORE_TOPIC]
     assert all(re.fullmatch(r"\d+\.0", x) for x in sent)
