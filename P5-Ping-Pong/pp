@@ -24,6 +24,7 @@ case "$cmd" in
     ;;
   ready)
     # The gate every student block starts from: imports, unit tests, every tool's --selftest.
+    export PP_NO_LOCAL=1       # ignore config_local.json (measured bench numbers) so the gate is hermetic
     echo "== imports =="
     "$PY" -c "import mediapipe, cv2, legoeducation, bleak, paho.mqtt.client, sounddevice, sklearn; assert cv2.aruco.DICT_APRILTAG_36h11; print('imports OK')"
     echo "== pytest =="
@@ -41,7 +42,7 @@ case "$cmd" in
 ./pp scan_hubs                      find your hub's card colour + serial (passive BLE scan)
 ./pp make_cards                     (re)generate the printable AprilTag cards in docs/cards/
 ./pp ready                          imports + pytest + every tool --selftest (run before each block)
-./pp play [...]                     the game (not built yet)
+./pp play [--fake|--player NAME|--level N|--mode M]   the game (live: Double Motor + camera + AprilTags)
 Camera and Bluetooth tools must be run from Terminal.app, not from the Claude app.
 EOF
     ;;

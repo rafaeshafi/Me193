@@ -100,7 +100,11 @@ class ActuatorCore:
         self._motor_log = deque()          # (t_ns, ms) of executed motor pulses
         self._batch_open = False
         self._closed = False
+        # Two locks, so the 60 Hz game thread never waits behind a BLE write: _lock guards the
+        # schedule and is only ever held for a few microseconds; _exec_lock serialises the
+        # device writes (and the rate/duty bookkeeping they update) on the actuator thread.
         self._lock = threading.RLock()
+        self._exec_lock = threading.RLock()
 
     # --- control --------------------------------------------------------------------
     def arm(self):
@@ -111,7 +115,7 @@ class ActuatorCore:
         """Stop the motors NOW and keep them quiet (key D). Beep and light still work."""
         with self._lock:
             self._armed = False
-            self.dev.motor_stop(motor=le.MOTOR_BOTH, blocking=False)
+        self.dev.motor_stop(motor=le.MOTOR_BOTH, blocking=False)
 
     def submit(self, name, fire_at_ns=None):
         """Schedule a pattern; False if it was dropped (<= 1 pattern per 100 ms at equal/lower priority)."""
@@ -132,28 +136,30 @@ class ActuatorCore:
 
     def process(self, now_ns):
         """Execute everything due; return the next wake-up time in ns, or None when idle."""
-        with self._lock:
-            while self._heap and not self._closed:
-                due = self._heap[0][0]
-                if due > now_ns:
-                    return due
-                wake = self._write_allowed_at(now_ns)
-                if wake > now_ns:
-                    return wake
-                _, _, _, step = heapq.heappop(self._heap)
-                self._execute(step, now_ns)
-            return None
+        with self._exec_lock:
+            while True:
+                with self._lock:
+                    if not self._heap or self._closed:
+                        return None
+                    due = self._heap[0][0]
+                    if due > now_ns:
+                        return due
+                    wake = self._write_allowed_at(now_ns)
+                    if wake > now_ns:
+                        return wake
+                    _, _, _, step = heapq.heappop(self._heap)
+                self._execute(step, now_ns)                 # the slow BLE write runs outside _lock
 
     def close(self):
         with self._lock:
             self._closed = True
             self._heap.clear()
-            if self._batch_open:
-                try:
-                    self.dev.cancel_batch()
-                except Exception:
-                    pass
-                self._batch_open = False
+        if self._batch_open:                                 # best effort: never wait on a hung write
+            try:
+                self.dev.cancel_batch()
+            except Exception:
+                pass
+            self._batch_open = False
 
     # --- internals ------------------------------------------------------------------------
     def _write_allowed_at(self, now_ns):

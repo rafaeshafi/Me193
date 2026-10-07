@@ -110,6 +110,48 @@ class FakeCamera:
         pass
 
 
+def body_landmarks(u, v, *, hand="right", vis=0.95, width=640, height=360, shoulder_x=(0.6, 0.4),
+                   shoulder_y=0.4):
+    """33 pose-landmark stand-ins for which pose.paddle_uv() returns exactly (u, v)."""
+    lm = [SimpleNamespace(x=0.5, y=0.5, visibility=0.0) for _ in range(33)]
+    lm[11] = SimpleNamespace(x=shoulder_x[0], y=shoulder_y, visibility=vis)
+    lm[12] = SimpleNamespace(x=shoulder_x[1], y=shoulder_y, visibility=vis)
+    sw_px = abs(shoulder_x[0] - shoulder_x[1]) * width
+    wrist = 16 if hand == "right" else 15
+    lm[wrist] = SimpleNamespace(x=(shoulder_x[0] + shoulder_x[1]) / 2 - u * sw_px / width,
+                                y=shoulder_y - v * sw_px / height, visibility=vis)
+    return lm
+
+
+class FakeLandmarker:
+    """MediaPipe-shaped: the body is placed by hand_fn(t_ns) -> (u, v), or None for nobody in frame.
+
+    lag_s: the frame shows the scene as it was lag_s ago, like a real camera pipeline.
+    """
+
+    def __init__(self, hand_fn, clock, *, lag_s=0.0, hand="right"):
+        self.hand_fn, self.clock, self.hand = hand_fn, clock, hand
+        self.lag_ns = round(lag_s * 1e9)
+
+    def detect_for_video(self, image, ts_ms):
+        uv = self.hand_fn(self.clock.now_ns() - self.lag_ns)
+        if uv is None:
+            return SimpleNamespace(pose_landmarks=[])
+        return SimpleNamespace(pose_landmarks=[body_landmarks(uv[0], uv[1], hand=self.hand)])
+
+
+class FakeTagDetector:
+    """TagDetector-shaped: the cards in view at the clock's current time come from ids_fn(t_ns)."""
+
+    def __init__(self, ids_fn, clock):
+        self.ids_fn, self.clock = ids_fn, clock
+
+    def detect(self, frame):
+        from pingpong.tags import Tag
+
+        return [Tag(i, ((0, 0),) * 4, (0.0, 0.0), 0.0) for i in sorted(self.ids_fn(self.clock.now_ns()))]
+
+
 class FakeEnv:
     """Everything env_check/bench tools need from the outside world, simulated.
 
@@ -128,6 +170,22 @@ class FakeEnv:
         self.hub_device = FakeDoubleMotor(fail_connect=not hub_found)
         self._next_emit_ns = None   # absolute schedule, so the rate is exact across sleep() calls
         self.scenario = None        # optional callable(now_ns) -> (ax, ay, az, gx, gy, gz) raw counts
+        self.threaded = False       # play.py's live mode is threaded on real hardware, synchronous here
+        self.mqtt_client = None
+
+    @staticmethod
+    def to_image(frame):
+        return frame
+
+    def make_landmarker(self):
+        return FakeLandmarker(lambda t_ns: (0.0, -0.4), self.clock)
+
+    def make_tag_detector(self):
+        return FakeTagDetector(lambda t_ns: set(), self.clock)
+
+    def make_mqtt_client(self):
+        self.mqtt_client = FakeMqttClient()
+        return self.mqtt_client
 
     def make_hub(self, notify_ms, card):
         from pingpong.hub import HubLink
@@ -154,17 +212,37 @@ class FakeEnv:
         return self.mqtt_rtt_ms if self.mqtt_ok else None
 
 
+class _Published:
+    """What paho's publish() returns: something you can wait on."""
+
+    def wait_for_publish(self, timeout=None):
+        return None
+
+
 class FakeMqttClient:
     """paho-shaped: records publishes and connection configuration."""
 
     def __init__(self):
         self.published = []         # {"topic", "payload", "qos", "retain"}
         self.config_calls = []      # will_set / reconnect_delay_set / connect_async / loop_start
+        self.log = []               # chronological ("publish", topic, payload) / ("disconnect",) / ("loop_stop",)
         self.on_connect = None
         self.connected = False
 
     def publish(self, topic, payload, qos=0, retain=False):
         self.published.append({"topic": topic, "payload": payload, "qos": qos, "retain": retain})
+        self.log.append(("publish", topic, payload))
+        return _Published()
+
+    def is_connected(self):
+        return self.connected
+
+    def disconnect(self):
+        self.connected = False
+        self.log.append(("disconnect",))
+
+    def loop_stop(self):
+        self.log.append(("loop_stop",))
 
     def will_set(self, topic, payload=None, qos=0, retain=False):
         self.config_calls.append({"call": "will_set", "will_topic": topic, "payload": payload,

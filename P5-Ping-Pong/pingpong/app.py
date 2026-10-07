@@ -36,7 +36,19 @@ class Session:
         self.xray = False
         self._gates, self._last_kmh, self._last_label, self._spin = (), None, "", ""
         self._message, self._message_until = "", 0
+        self._notice = ""
         self._flash, self._flash_until = None, 0
+
+    def set_notice(self, text):
+        """A standing message for the lobby (e.g. "UNCALIBRATED"); pauses and event banners win over it."""
+        self._notice = text
+
+    def bind_status(self, hub=None, mqtt=None):
+        """Point the HUD's HUB / MQTT indicators at live sources (the rig exists after the session)."""
+        if hub is not None:
+            self._hub_status = hub
+        if mqtt is not None:
+            self._mqtt_status = mqtt
 
     # --- inputs ------------------------------------------------------------------------------
     def on_pose(self, pose):
@@ -59,8 +71,8 @@ class Session:
         self._absorb(events)
         return events
 
-    def tick(self):
-        events = self.game.tick(self.clock.now_ns())
+    def tick(self, data_ns=None):
+        events = self.game.tick(self.clock.now_ns(), data_ns)
         self._absorb(events)
         return events
 
@@ -105,7 +117,8 @@ class Session:
             arrival_ab=g.incoming.aim_ab if g.incoming is not None else None,
             last_kmh=self._last_kmh, last_label=self._last_label, spin_text=self._spin,
             mqtt_status=self._mqtt_status(), hub_status=self._hub_status(),
-            message=self._paused_text() or (self._message if now < self._message_until else ""),
+            message=(self._paused_text() or (self._message if now < self._message_until else "")
+                     or (self._notice if g.phase == "LOBBY" else "")),
             gates=self._gates, show_xray=self.xray,
             flash=self._flash if now < self._flash_until else None, leaderboard=tuple(leaderboard))
 

@@ -60,8 +60,11 @@ def test_hits_trigger_haptic_cues_and_a_record_banner_that_expires():
     rec = Recorder()
     session = app.make_session(actuator=rec)
     app.play_until_hits(session, 1)
-    assert "record" in rec.names and any(n.startswith("hit_") for n in rec.names)
-    assert session.hud_state().message == "NEW RECORD"
+    assert any(n.startswith("hit_") for n in rec.names) and "record" not in rec.names    # nothing to beat yet
+    session.clock.advance_s(5.0)
+    session.tick()                                                  # a miss ends the game
+    app.play_until_hits(session, 2)                                 # a second game: 2 passes the best of 1
+    assert "record" in rec.names and session.hud_state().message == "NEW RECORD"
     session.clock.advance_s(2.0)
     assert session.hud_state().message == ""
 
@@ -111,3 +114,23 @@ def test_the_hud_says_why_the_game_is_paused_and_clears_when_resumed():
     assert msg.startswith("PAUSED") and "hub" in msg
     session.game.set_pause("hub", False, session.clock.now_ns())
     assert not session.hud_state().message.startswith("PAUSED")
+
+
+def test_status_sources_can_be_bound_after_the_session_exists():
+    session = app.make_session()
+    assert (session.hud_state().hub_status, session.hud_state().mqtt_status) == ("ok", "off")
+    session.bind_status(hub=lambda: "stale", mqtt=lambda: "offline")
+    st = session.hud_state()
+    assert (st.hub_status, st.mqtt_status) == ("stale", "offline")
+
+
+def test_a_notice_is_shown_in_the_lobby_only_and_never_hides_a_pause_message():
+    session = app.make_session()
+    session.set_notice("UNCALIBRATED: run ./pp calibrate_swing")
+    assert session.hud_state().message.startswith("UNCALIBRATED")
+    session.on_start()
+    assert session.hud_state().message == ""
+    session.clock.advance_s(3.0)
+    session.tick()
+    session.game.set_pause("hub", True, session.clock.now_ns())
+    assert session.hud_state().message.startswith("PAUSED")

@@ -64,19 +64,25 @@ class GameCore:
         self._serve_at = now_ns + round(self.countdown_s * S)
         return True
 
-    def tick(self, now_ns):
-        """Settle everything that is due by now_ns (a long frame stall may owe several transitions)."""
+    def tick(self, now_ns, data_ns=None):
+        """Settle everything that is due by now_ns (a long frame stall may owe several transitions).
+
+        data_ns = arrival time of the newest IMU sample.  A miss means "no swing", which is only
+        a fact once the IMU stream has reached the deadline: if the hub goes quiet around the
+        swing window the wall clock alone must not call the ball a miss.
+        """
         if self.paused:
             return []
+        data_ns = now_ns if data_ns is None else min(now_ns, data_ns)
         events = []
         for _ in range(16):
-            step = self._advance(now_ns)
+            step = self._advance(now_ns, data_ns)
             if not step:
                 break
             events += step
         return events
 
-    def _advance(self, now_ns):
+    def _advance(self, now_ns, data_ns):
         if self.phase == "COUNTDOWN" and now_ns >= self._serve_at:
             return self._serve(self._serve_at)
         if self.phase == "POINT_OVER" and now_ns >= self.point_over_until_ns:
@@ -84,7 +90,7 @@ class GameCore:
         if self.phase == "RALLY":
             if self._cpu_at is not None and now_ns >= self._cpu_at:
                 return self._cpu_response(self._cpu_at)
-            if self.incoming is not None and now_ns > self.judge.miss_deadline_ns(self.incoming):
+            if self.incoming is not None and data_ns > self.judge.miss_deadline_ns(self.incoming):
                 return [GameEvent("miss", now_ns, {"ball_id": self.incoming.ball_id})] + self._end_rally("miss", now_ns)
         return []
 
@@ -182,8 +188,9 @@ class GameCore:
         if counted and self.publisher:
             self.publisher.update(self.tracker.value())
         events = [GameEvent("hit", now_ns, dict(data, streak=self.tracker.streak))]
-        if counted and self.tracker.record > self._record_before:
-            self._record_before = self.tracker.record
+        # A record is announced once per rally, when the streak passes the best that stood when the
+        # rally began -- never in a first rally with nothing to beat (that would buzz every hit).
+        if counted and self._record_before > 0 and self.tracker.streak == self._record_before + 1:
             events.append(GameEvent("record", now_ns, {"value": self.tracker.record}))
         self._out_shot, self._cpu_at = sp, self.outgoing_leg.arrival_ns
         return events
@@ -191,6 +198,7 @@ class GameCore:
     # --- rally / match bookkeeping ----------------------------------------------------------------
     def _end_rally(self, reason, now_ns):
         final = self.tracker.end_rally()
+        self._record_before = self.tracker.record
         if self.publisher:
             self.publisher.update(self.tracker.value())      # live_streak publishes the reset
         self.incoming = self._cpu_at = None

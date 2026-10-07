@@ -9,3 +9,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
+
+# Measured bench numbers and the hub card are per-machine
+config_local.json

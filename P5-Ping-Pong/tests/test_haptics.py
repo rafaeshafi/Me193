@@ -254,3 +254,52 @@ def test_a_failing_write_does_not_kill_the_actuator_thread():
     actuator.stop()
     assert errors and any("fake failure" in str(e) for e in errors)
     assert actuator._thread.is_alive() is False
+
+
+def test_submit_never_waits_for_a_slow_device_write_that_is_already_in_progress():
+    # A BLE write blocks its caller (blocking=False included); the game thread submits
+    # cues from its 60 Hz loop and must never stall behind the actuator thread's write.
+    import threading
+    import time
+
+    class SlowDevice(FakeDoubleMotor):
+        def __init__(self):
+            super().__init__()
+            self.in_write = threading.Event()
+
+        def beep(self, **kw):
+            self.in_write.set()
+            time.sleep(0.3)
+            super().beep(**kw)
+
+    dev = SlowDevice()
+    dev.connect()
+    core = haptics.ActuatorCore(dev)
+    core.submit("hit_good")
+    worker = threading.Thread(target=lambda: core.process(core.clock.now_ns()))
+    worker.start()
+    assert dev.in_write.wait(2.0)
+    t0 = time.monotonic()
+    core.submit("record")
+    waited = time.monotonic() - t0
+    worker.join()
+    assert waited < 0.05, f"submit() waited {waited * 1000:.0f} ms behind a device write"
+
+
+def test_disarm_does_not_hold_the_scheduler_lock_while_it_writes_to_the_hub():
+    import threading
+    import time
+
+    class SlowStop(FakeDoubleMotor):
+        def motor_stop(self, **kw):
+            time.sleep(0.3)
+            super().motor_stop(**kw)
+
+    dev = SlowStop()
+    dev.connect()
+    core = haptics.ActuatorCore(dev)
+    threading.Thread(target=core.disarm).start()
+    time.sleep(0.05)
+    t0 = time.monotonic()
+    core.submit("hit_good")
+    assert time.monotonic() - t0 < 0.05

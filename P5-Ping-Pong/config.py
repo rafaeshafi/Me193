@@ -114,7 +114,8 @@ def write_local(updates, path=LOCAL_PATH):
 
 
 def _apply():
-    globals().update(load_local())
+    if os.environ.get("PP_NO_LOCAL") != "1":      # tests / ./pp ready ignore measured bench numbers
+        globals().update(load_local(LOCAL_PATH))
     if os.environ.get("PP_BROKER"):
         globals()["BROKER_HOST"], globals()["BROKER_PORT"] = parse_broker(os.environ["PP_BROKER"])
     if os.environ.get("PP_RECORD_SCOPE"):

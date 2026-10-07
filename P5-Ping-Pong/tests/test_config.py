@@ -70,3 +70,19 @@ def test_card_serial_override_must_be_a_string_to_keep_leading_zeros(tmp_path):
 def test_card_serial_is_a_string_when_configured():
     # Serials have leading zeros ("0997"); an int would silently lose them.
     assert config.CARD_SERIAL is None or isinstance(config.CARD_SERIAL, str)
+
+
+def test_pp_no_local_makes_a_run_ignore_config_local_json(tmp_path, monkeypatch):
+    # The test-suite and ./pp ready set PP_NO_LOCAL so a bench run (which writes measured
+    # numbers into config_local.json) can never turn the unit tests red.
+    path = tmp_path / "config_local.json"
+    path.write_text(json.dumps({"GYRO_PER_DPS": 17.5}))
+    default = config.GYRO_PER_DPS
+    monkeypatch.setattr(config, "LOCAL_PATH", path)
+    monkeypatch.setattr(config, "GYRO_PER_DPS", default)       # restored when the test ends
+    monkeypatch.setenv("PP_NO_LOCAL", "1")
+    config._apply()
+    assert config.GYRO_PER_DPS == default
+    monkeypatch.delenv("PP_NO_LOCAL")
+    config._apply()
+    assert config.GYRO_PER_DPS == 17.5

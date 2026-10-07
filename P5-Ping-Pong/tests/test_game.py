@@ -196,14 +196,32 @@ def test_survival_ramps_the_ball_speed_over_the_rally():
     assert game.incoming_leg.v > first * 1.25
 
 
-def test_a_new_record_is_announced_once_per_improvement():
+def test_the_first_rally_only_builds_the_best_so_nothing_is_announced_as_a_record():
+    # Every hit of the first rally is technically a new best; announcing each one would buzz the
+    # motors on every hit and hide the timing cues the player needs.
     game, _ = make()
     start_rally(game)
     flagged = []
-    for _ in range(3):
+    for _ in range(4):
         flagged += [e for e in good_hit(game) if e.kind == "record"]
         next_serve(game)
-    assert [e.data["value"] for e in flagged] == [1, 2, 3]
+    assert flagged == [] and game.tracker.record == 4
+
+
+def test_passing_the_previous_best_is_announced_once_per_rally_not_for_every_hit_after_it():
+    game, _ = make()
+    start_rally(game)
+    for _ in range(2):                                           # best so far: 2
+        good_hit(game)
+        next_serve(game)
+    game.tick(game.judge.miss_deadline_ns(game.incoming) + 1)    # a miss ends the game
+    assert game.phase == "MATCH_OVER"
+    start_rally(game, 100 * S)                                   # a second game
+    flagged = []
+    for _ in range(4):
+        flagged += [e for e in good_hit(game) if e.kind == "record"]
+        next_serve(game)
+    assert [e.data["value"] for e in flagged] == [3]             # 3 passes 2; 4, 5 and 6 are not re-announced
 
 
 def test_match_a_cpu_miss_gives_the_player_the_point_and_the_cpu_serves_again():
@@ -310,3 +328,22 @@ def test_pausing_outside_a_rally_is_harmless():
     assert game.start(1 * S) is False or game.phase in ("LOBBY", "COUNTDOWN")
     game.set_pause("hub", False, 2 * S)
     assert game.paused is False
+
+
+def test_a_miss_waits_until_the_imu_data_has_caught_up_with_the_deadline():
+    # "No swing" is only a fact once the IMU stream has reached the deadline.  If the hub goes
+    # quiet around the swing window the ball must not be called a miss by the wall clock alone.
+    game, _ = make()
+    start_rally(game)
+    ball = game.incoming
+    deadline = game.judge.miss_deadline_ns(ball)
+    quiet_since = ball.t_c_ns - int(0.1 * S)                     # newest IMU sample before the gap
+    assert game.tick(deadline + int(0.2 * S), data_ns=quiet_since) == []
+    assert game.phase == "RALLY"
+    assert "miss" in kinds(game.tick(deadline + int(0.2 * S), data_ns=deadline + 1))
+
+
+def test_without_a_data_horizon_the_wall_clock_decides_as_before():
+    game, _ = make()
+    start_rally(game)
+    assert "miss" in kinds(game.tick(game.judge.miss_deadline_ns(game.incoming) + 1))

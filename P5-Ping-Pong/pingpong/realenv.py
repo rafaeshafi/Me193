@@ -13,6 +13,8 @@ from pingpong.clock import Clock
 
 
 class RealEnv:
+    threaded = True            # camera, IMU parser and actuator each get a thread
+
     def __init__(self):
         self.clock = Clock()
 
@@ -30,6 +32,21 @@ class RealEnv:
         import cv2
 
         return cv2.VideoCapture(index)
+
+    def make_landmarker(self):
+        from pingpong.pose_features import make_landmarker
+
+        return make_landmarker()
+
+    def make_tag_detector(self):
+        from pingpong.tags import TagDetector
+
+        return TagDetector()
+
+    def make_mqtt_client(self):
+        from pingpong import mqtt_link
+
+        return mqtt_link.make_paho_client()
 
     def mqtt_roundtrip(self, topic, timeout_s=5.0):
         """Publish a unique token to `topic` and wait for the broker to echo it; -> RTT ms or None."""

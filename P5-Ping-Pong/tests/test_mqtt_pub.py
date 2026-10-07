@@ -158,3 +158,50 @@ def test_a_broker_reconnect_republishes_the_best_value():
     client.published.clear()
     client.simulate_connect()
     assert payloads(client) == ["6.0"]
+
+
+def test_status_fn_reports_the_real_connection_state_not_a_constant():
+    from pingpong import mqtt_link
+
+    client = FakeMqttClient()
+    status = mqtt_link.status_fn(client)
+    assert status() == "offline"
+    client.simulate_connect()
+    assert status() == "ok"
+
+
+def test_shutdown_publishes_offline_then_disconnects_then_stops_the_loop():
+    from pingpong import mqtt_link
+
+    client = FakeMqttClient()
+    pub = ScorePublisher(client, topic=OFFICIAL, scope="live_streak")
+    mqtt_link.attach(client, pub)
+    client.simulate_connect()
+    pub.update(4)
+    client.log.clear()
+    mqtt_link.shutdown(client, pub)
+    kinds = [e[0] for e in client.log]
+    assert kinds[-2:] == ["disconnect", "loop_stop"]
+    offline = [e for e in client.log if e[0] == "publish" and e[1] == config.STATUS_TOPIC]
+    assert offline and offline[0][2] == "offline"
+    assert kinds.index("publish") < kinds.index("disconnect")          # flushed before hanging up
+    assert OFFICIAL not in [e[1] for e in client.log if e[0] == "publish"]   # no score reset on exit
+
+
+def test_shutdown_survives_a_client_that_fails_each_step():
+    from pingpong import mqtt_link
+
+    class Broken(FakeMqttClient):
+        def publish(self, *a, **k):
+            raise RuntimeError("boom")
+
+        def disconnect(self):
+            raise RuntimeError("boom")
+
+        def loop_stop(self):
+            self.stopped = True
+
+    client = Broken()
+    pub = ScorePublisher(client, topic=OFFICIAL)
+    mqtt_link.shutdown(client, pub)               # must not raise
+    assert client.stopped is True
