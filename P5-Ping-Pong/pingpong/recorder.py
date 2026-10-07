@@ -125,7 +125,10 @@ class Recorder:
     @staticmethod
     def _row(name, item):
         if name == "imu":
-            return {"t": item.t_ns, "g": item.g, "a": item.a}
+            row = {"t": item.t_ns, "g": item.g, "a": item.a}
+            if item.src != "hub":
+                row["s"] = item.src                  # "pose": the camera's samples, not the hub's
+            return row
         if name == "pose":
             return {"t": item.t_scene_ns, "u": item.u, "v": item.v, "c": item.conf, "h": item.hand}
         return item
@@ -160,6 +163,6 @@ def load(directory):
         path = directory / f"{name}.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines() if line] if path.exists() else []
 
-    imu = [ImuSample(t_ns=r["t"], g=tuple(r["g"]), a=tuple(r["a"])) for r in rows("imu")]
+    imu = [ImuSample(t_ns=r["t"], g=tuple(r["g"]), a=tuple(r["a"]), src=r.get("s", "hub")) for r in rows("imu")]
     poses = [PaddlePose(t_scene_ns=r["t"], u=r["u"], v=r["v"], conf=r["c"], hand=r["h"]) for r in rows("pose")]
     return Loaded(meta=meta, imu=imu, poses=poses, events=rows("events"))

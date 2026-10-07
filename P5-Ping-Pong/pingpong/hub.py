@@ -111,3 +111,35 @@ class HubLink:
                 step()
             except Exception:
                 pass
+
+
+class NoHub:
+    """The hub's place when the game runs on the camera alone (--no-hub): no IMU, no haptics, nothing to lose."""
+
+    absent = True
+    dev = None
+    connected = False
+    last_rx_ns = None
+    n_samples = 0
+
+    def __init__(self):
+        self.imu = queue.SimpleQueue()
+        self.gestures = queue.SimpleQueue()
+
+    def connect(self):
+        pass
+
+    def reconnect(self):
+        pass
+
+    def is_stale(self, threshold_ms):
+        return False
+
+    def stale_ms(self):
+        return None
+
+    def battery_pct(self):
+        return None
+
+    def close(self):
+        pass

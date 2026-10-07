@@ -98,6 +98,8 @@ class SwingDetector:
         self._last_low_t = None
         self._quiet_s = 0.0
         self._cool_until = 0.0
+        self._fired_t = 0.0
+        self._src = "hub"
 
     # --- blank windows (haptic pulses) --------------------------------------------
     def blank(self, start_ns, end_ns):
@@ -119,6 +121,7 @@ class SwingDetector:
         if self._blanked(sample.t_ns):
             return []
         t = sample.t_ns / 1e9
+        self._src = sample.src
         g = tuple(v / self.p.gyro_per_dps for v in sample.g)
         if self._gravity is None:
             self._gravity = tuple(float(v) for v in sample.a)
@@ -134,6 +137,8 @@ class SwingDetector:
         self._history.append((t, s))
         while self._history and self._history[0][0] < t - 2.0:
             self._history.popleft()
+        if self._state != "FWD" and s <= 0.2 * self._arm:
+            self._last_low_t = t                  # in the cool-down too: a swing may arm the moment it ends
 
         events = []
         prev = self._prev
@@ -142,8 +147,9 @@ class SwingDetector:
                 events += self._idle(sample, t, g, gu, s, w, prev)
             elif self._state == "FWD":
                 events += self._forward(sample, t, gu, s, w, prev)
-            elif self._state == "COOL" and t >= self._cool_until and w < self.p.cool_w_dps:
-                self._state = "IDLE"
+            elif self._state == "COOL" and t >= self._cool_until and (
+                    w < self.p.cool_w_dps or (self._last_low_t or 0.0) > self._fired_t):
+                self._state = "IDLE"          # settled, or the forward rate has dropped since the impact: stroke over
         self._prev = (t, s, w)
         return events
 
@@ -156,8 +162,6 @@ class SwingDetector:
 
     # --- IDLE -------------------------------------------------------------------------
     def _idle(self, sample, t, g, gu, s, w, prev):
-        if s <= 0.2 * self._arm:
-            self._last_low_t = t
         if w < self.p.idle_w_dps:
             self._quiet_s += (t - prev[0]) if prev else 0.0
             if self._quiet_s >= 0.3:
@@ -214,7 +218,7 @@ class SwingDetector:
 
     def _fire(self, sample, t):
         p, pk = self.p, self._pk
-        self._state, self._cool_until = "COOL", t + p.refractory_s
+        self._state, self._cool_until, self._fired_t = "COOL", t + p.refractory_s, t
         spike = pk["prev_w"] < p.spike_ratio * pk["w"] or (
             pk["next_w"] is not None and pk["next_w"] < p.spike_ratio * pk["w"])
         t_pk, w_pk = self._interpolate_peak()
@@ -248,4 +252,4 @@ class SwingDetector:
     def _event(self, kind, t_ns, w_pk, dur_ms, reversals, g, net, a_lin, clipped, feat=None):
         return SwingEvent(kind=kind, t_ns=t_ns, w_pk=float(w_pk), dur_ms=float(dur_ms), n_reversals=reversals,
                           axis_unit=_unit(g), net_rot_unit=_unit(net), a_lin_unit=_unit(a_lin),
-                          clipped=clipped, feat=tuple(feat) if feat is not None else (0.0,) * 12)
+                          clipped=clipped, feat=tuple(feat) if feat is not None else (0.0,) * 12, src=self._src)

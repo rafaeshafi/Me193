@@ -40,10 +40,15 @@ class Calibration:
     calibrated: bool = True
 
     @classmethod
-    def default(cls):
-        """Plausible values to try the game with; nothing here is measured."""
-        return cls(swing=SwingCalibration(u_fwd=(1.0, 0.0, 0.0), omega_lo=300.0, omega_hi=1200.0),
+    def default(cls, source="imu"):
+        """Plausible values to try the game with; nothing here is measured.  `source` "pose" = the camera as the gyro."""
+        lo, hi = (300.0, 1200.0) if source == "imu" else (250.0, 800.0)
+        return cls(swing=SwingCalibration(u_fwd=(1.0, 0.0, 0.0), omega_lo=lo, omega_hi=hi, source=source),
                    box=ReachBox(u_min=-1.0, u_max=1.0, v_min=-0.5, v_max=0.5), calibrated=False)
+
+    @property
+    def swing_source(self):
+        return self.swing.source
 
     def swing_params(self, gyro_per_dps, accel_per_g, fs_raw):
         return self.swing.swing_params(gyro_per_dps, accel_per_g, fs_raw)
@@ -53,7 +58,7 @@ class Calibration:
         return json.dumps({
             "version": VERSION, "hand": self.hand, "shoulder_w": self.shoulder_w,
             "swing": {"u_fwd": list(self.swing.u_fwd), "omega_lo": self.swing.omega_lo,
-                      "omega_hi": self.swing.omega_hi},
+                      "omega_hi": self.swing.omega_hi, "source": self.swing.source},
             "box": {"u_min": box.u_min, "u_max": box.u_max, "v_min": box.v_min, "v_max": box.v_max},
         }, indent=2) + "\n"
 
@@ -62,25 +67,27 @@ class Calibration:
         d = json.loads(text)
         swing, box = d["swing"], d["box"]
         return cls(swing=SwingCalibration(u_fwd=tuple(swing["u_fwd"]), omega_lo=float(swing["omega_lo"]),
-                                          omega_hi=float(swing["omega_hi"])),
+                                          omega_hi=float(swing["omega_hi"]), source=swing.get("source", "imu")),
                    box=ReachBox(box["u_min"], box["u_max"], box["v_min"], box["v_max"]),
                    shoulder_w=d.get("shoulder_w"), hand=d.get("hand", "right"))
 
 
-def _path(name, root):
-    return Path(root or default_root()) / slug(name) / "calibration.json"
+def _path(name, root, source="imu"):
+    """A hub calibration and a camera calibration are different measurements: each has its own file."""
+    return Path(root or default_root()) / slug(name) / ("calibration.json" if source == "imu"
+                                                         else f"calibration-{source}.json")
 
 
 def save(name, calibration, root=None):
-    path = _path(name, root)
+    path = _path(name, root, calibration.swing.source)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(calibration.to_json())
     return path
 
 
-def load(name, root=None):
-    """The player's calibration, or None if they have none yet.  A damaged file is an error."""
-    path = _path(name, root)
+def load(name, root=None, source="imu"):
+    """The player's calibration for this swing source, or None if they have none yet.  A damaged file is an error."""
+    path = _path(name, root, source)
     if not path.exists():
         return None
     try:

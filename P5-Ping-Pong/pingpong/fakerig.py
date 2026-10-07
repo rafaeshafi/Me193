@@ -14,7 +14,7 @@ the hub or hide the player to exercise the pause logic.
 import math
 import random
 
-from pingpong import live
+from pingpong import live, posegyro
 from pingpong.clock import FakeClock
 from pingpong.events import ImuSample
 from pingpong.hub import HubLink
@@ -27,6 +27,7 @@ GPD = 10.0                    # raw gyro counts per deg/s of the fake hub (passe
 GRAVITY = 1000                # raw accelerometer counts at rest (z)
 VIBRATION_DPS = 700.0         # a motor pulse "shakes" the fake IMU like a swing, unless it is blanked
 SHAKE_DPS = 300.0             # amplitude of a deliberate shake (5 Hz)
+WAVE_AMP = 0.35               # shoulder widths: amplitude of a deliberate hand wave (5 Hz), camera mode
 
 
 def _smoothstep(x):
@@ -34,11 +35,32 @@ def _smoothstep(x):
     return x * x * (3.0 - 2.0 * x)
 
 
+def swing_offset(t, t0, dur, vpk, *, back=0.5, back_s=0.20, back_gap_s=0.22, recover_s=0.5):
+    """How far (shoulder widths, along the swing direction) a hand scripted to swing has travelled at time t.
+
+    A backswing (peak speed back*vpk), then the forward stroke from t0 for dur seconds (a half-sine speed pulse
+    peaking at vpk shoulder widths per second, the shape the fake gyro pulses have), then a slow recovery to
+    where the hand began, so consecutive swings do not drift.
+    """
+    total = 0.0
+    for start, length, peak in ((t0 - back_gap_s, back_s, -back * vpk), (t0, dur, vpk)):
+        if t > start:
+            x = min(1.0, (t - start) / length)
+            total += peak * length / math.pi * (1.0 - math.cos(math.pi * x))
+    if t > t0 + dur:
+        net = (vpk * dur - back * vpk * back_s) * 2.0 / math.pi
+        total -= net * _smoothstep((t - t0 - dur) / recover_s)
+    return total
+
+
 class ScriptedPlayer:
     """Glides the hand to each ball's arrival point and swings so the gyro peaks at the ball's t_c."""
 
-    def __init__(self, box, *, w_pk=600.0, swing_s=0.15, timing_s=0.0, rest_uv=(0.0, -0.4), cards=()):
+    def __init__(self, box, *, w_pk=600.0, swing_s=0.15, timing_s=0.0, rest_uv=(0.0, -0.4), cards=(),
+                 pose_motion=False, swing_dir=(1.0, 0.0)):
         self.box, self.w_pk, self.swing_s, self.timing_s = box, w_pk, swing_s, timing_s
+        self.pose_motion, self.swing_dir = pose_motion, swing_dir    # camera mode: the hand itself makes the stroke
+        self.wave_windows = []                                       # (start_s, stop_s) since rig start: a 5 Hz hand wave
         self.cards = [(round(a * S), round(b * S), tag) for a, b, tag in cards]    # relative to rig start
         self.origin_ns = 0
         self._segments = [(0, 0, rest_uv, rest_uv)]          # (t0, t1, from_uv, to_uv)
@@ -59,7 +81,7 @@ class ScriptedPlayer:
             return
         if planned is None:                                  # first sight of this ball: head for its arrival point
             glide = min(0.43, 0.5 * max(0.0, (ball.t_c_ns - now_ns) / S))
-            self._segments.append((now_ns, now_ns + round(glide * S), self.hand_uv(now_ns),
+            self._segments.append((now_ns, now_ns + round(glide * S), self._base_uv(now_ns),
                                    self.box.to_uv(*ball.aim_ab)))
         self._peaks[ball.ball_id] = peak                     # (re)plan the swing: a pause moves t_c
 
@@ -73,12 +95,30 @@ class ScriptedPlayer:
             self._vibrations.append(start_ns)
 
     # --- what the sensors see ------------------------------------------------------------------------
-    def hand_uv(self, t_ns):
+    def _base_uv(self, t_ns):
         for t0, t1, a, b in reversed(self._segments):
             if t_ns >= t0:
                 f = 1.0 if t1 <= t0 else _smoothstep((t_ns - t0) / (t1 - t0))
                 return a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1])
         return self._segments[0][2]
+
+    def hand_uv(self, t_ns):
+        u, v = self._base_uv(t_ns)
+        if not self.pose_motion:
+            return u, v
+        travel = self._travel(t_ns)
+        return u + travel * self.swing_dir[0], v + travel * self.swing_dir[1]
+
+    def _travel(self, t_ns):
+        """Camera mode: how far along the swing direction the hand is off its glide (strokes, then waves)."""
+        t, vpk = t_ns / S, self.w_pk / posegyro.DPS_PER_SW_S
+        total = sum(swing_offset(t, peak / S - self.swing_s / 2, self.swing_s, vpk)
+                    for peak in self._peaks.values() if abs(t - peak / S) < 2.0)
+        rel = (t_ns - self.origin_ns) / S
+        for a, b in self.wave_windows:
+            if a <= rel < b:
+                total += WAVE_AMP * math.sin(2 * math.pi * 5.0 * (rel - a))
+        return total
 
     def imu(self, t_ns):
         """Raw hub reading (ax, ay, az, gx, gy, gz): half-sine pulses on the forward (x) gyro axis."""
@@ -121,17 +161,19 @@ class VibratingMotor(FakeDoubleMotor):
 class FakeRig:
     def __init__(self, *, level=1, mode="survival", target=7, seed=1, calibration=None, source="live",
                  scope="record_session", w_pk=600.0, timing_s=0.0, cards=None, hz=66.0, fps=30.0, lag_s=0.10,
-                 stale_ms=300.0, vibration=False, no_motor=False, record_dir=None, spin_probs_fn=None, learner=None):
+                 stale_ms=300.0, vibration=False, no_motor=False, record_dir=None, spin_probs_fn=None, learner=None,
+                 swing_source="imu"):
         self.clock = FakeClock(start_ns=1_000_000_000)
         self.origin_ns = self.clock.now_ns()
-        calibration = calibration or Calibration.default()
+        camera = swing_source == "pose"                                # the camera, not the hub's gyro, detects swings
+        calibration = calibration or Calibration.default(swing_source)
         cards = [(0.6, 2.4, 0)] if cards is None else cards            # the START card, held 1.8 s
-        self.player = ScriptedPlayer(calibration.box, w_pk=w_pk, timing_s=timing_s, cards=cards)
+        self.player = ScriptedPlayer(calibration.box, w_pk=w_pk, timing_s=timing_s, cards=cards, pose_motion=camera)
         self.player.origin_ns = self.origin_ns
         self.dev = VibratingMotor(self.player, self.clock, vibration)
         self.client = FakeMqttClient()
         self.hub_blackouts, self.pose_blackouts = [], []
-        self.shake_windows = self.player.shake_windows
+        self.shake_windows, self.wave_windows = self.player.shake_windows, self.player.wave_windows
         self.pause_reasons_seen = set()
         hub = HubLink(self.dev, notify_ms=15, clock=self.clock)
         hub.connect()
@@ -143,7 +185,7 @@ class FakeRig:
             source=source, scope=scope, no_motor=no_motor, threaded=False, lag_s=lag_s, gyro_per_dps=GPD,
             accel_per_g=1000.0, fs_raw=32767, stale_ms=stale_ms, to_image=lambda frame: frame,
             record_dir=record_dir, player="fake", spin_probs_fn=spin_probs_fn, learner=learner,
-            log=lambda *_: None)
+            pose_gyro=posegyro.PoseGyro() if camera else None, log=lambda *_: None)
         self.session, self.game = self.rig.session, self.rig.session.game
         self._dt = S // 240
         self._imu_period, self._frame_period, self._pump_period = round(S / hz), round(S / fps), S // 60

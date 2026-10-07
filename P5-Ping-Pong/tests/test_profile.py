@@ -74,3 +74,29 @@ def test_the_file_is_plain_readable_json(tmp_path):
     profile.save("rafae", sample(), root=tmp_path)
     data = json.loads((tmp_path / "rafae" / "calibration.json").read_text())
     assert data["hand"] == "left" and data["box"]["u_min"] == -1.2 and data["version"] == 1
+
+
+def camera_sample():
+    return profile.Calibration(
+        swing=SwingCalibration(u_fwd=(1.0, 0.0, 0.0), omega_lo=240.0, omega_hi=760.0, source="pose"),
+        box=ReachBox(-1.0, 1.0, -0.6, 0.5), shoulder_w=0.2)
+
+
+def test_the_default_for_the_camera_swing_source_is_a_camera_calibration_flagged_uncalibrated():
+    default = profile.Calibration.default("pose")
+    assert default.swing_source == "pose" and default.calibrated is False
+    assert profile.Calibration.default().swing_source == "imu"
+
+
+def test_a_camera_calibration_lives_in_its_own_file_and_never_replaces_the_hub_one(tmp_path):
+    profile.save("rafae", sample(), root=tmp_path)
+    profile.save("rafae", camera_sample(), root=tmp_path)
+    assert (tmp_path / "rafae" / "calibration.json").exists()
+    assert (tmp_path / "rafae" / "calibration-pose.json").exists()
+    assert profile.load("rafae", root=tmp_path).swing.omega_lo == 310.0                   # the hub one, untouched
+    assert profile.load("rafae", root=tmp_path, source="pose").swing.omega_lo == 240.0
+
+
+def test_a_player_with_only_a_hub_calibration_has_no_camera_calibration_yet(tmp_path):
+    profile.save("rafae", sample(), root=tmp_path)
+    assert profile.load("rafae", root=tmp_path, source="pose") is None

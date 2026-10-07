@@ -247,3 +247,32 @@ def test_fuzz_messy_streams_never_throw_and_every_event_is_finite_and_not_dated_
                 assert all(math.isfinite(x) for x in (event.w_pk, event.dur_ms, *event.feat))
             until = shake.feed(sample)
             assert until is None or until > t
+
+
+def test_a_swing_that_arms_the_moment_the_cool_down_ends_is_still_measured_from_its_own_onset():
+    # The cool-down after one impact is still running through the next swing's backswing, so the detector
+    # leaves it only on a sample that is already rising into the forward stroke.  Measuring that stroke from
+    # the last time the detector happened to be idle (before the FIRST swing) makes it look a second long
+    # and throws a real swing away.
+    samples = stream(2.0, lambda t: pulse(t, 0.6, 0.15, 800.0) - pulse(t, 0.72, 0.26, 300.0))
+    first = next(i for i, s in enumerate(samples) if (s.t_ns - T0) / 1e9 > 0.99)
+    for i, rate in enumerate((-60.0, 80.0, 400.0, 650.0, 800.0, 600.0, 250.0, 60.0, 0.0)):
+        samples[first + i] = ImuSample(t_ns=samples[first + i].t_ns, g=(round(rate * GPD), 0, 0), a=(0, 0, 1000))
+    for i in range(first + 9, len(samples)):
+        samples[i] = ImuSample(t_ns=samples[i].t_ns, g=(0, 0, 0), a=(0, 0, 1000))
+    hits = impacts(run(new(), samples))
+    assert len(hits) == 2 and hits[1][1].dur_ms < 300.0
+
+
+def test_a_forward_stroke_right_after_the_backswing_is_not_swallowed_by_the_cool_down():
+    # The cool-down after an impact ends once its time is up AND the motion has died down, but the next swing's
+    # backswing flips straight into its forward stroke without a quiet sample in between: the stroke must still
+    # arm.  (A forward rate below zero means the last stroke is over, so there is nothing left to cool.)
+    samples = stream(2.0, lambda t: pulse(t, 0.6, 0.15, 800.0) - pulse(t, 0.80, 0.30, 300.0))
+    first = next(i for i, s in enumerate(samples) if (s.t_ns - T0) / 1e9 > 1.04)          # the cool-down is over
+    for i, rate in enumerate((-250.0, -120.0, 140.0, 500.0, 800.0, 600.0, 250.0, 60.0, 0.0)):
+        samples[first + i] = ImuSample(t_ns=samples[first + i].t_ns, g=(round(rate * GPD), 0, 0), a=(0, 0, 1000))
+    for i in range(first + 9, len(samples)):
+        samples[i] = ImuSample(t_ns=samples[i].t_ns, g=(0, 0, 0), a=(0, 0, 1000))
+    hits = impacts(run(new(), samples))
+    assert len(hits) == 2 and hits[1][1].dur_ms < 300.0

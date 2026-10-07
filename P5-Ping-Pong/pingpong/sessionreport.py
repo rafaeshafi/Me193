@@ -90,6 +90,7 @@ def summarize(loaded):
         "cross_ms": _spread(_cross_offsets(judged)), "camera_lag_s": meta.get("camera_lag_s"),
         "kmh": _spread([h["kmh"] for h in hits]), "labels": dict(Counter(h["label"] for h in hits)),
         "hub": benchstats.rate_stats(imu_t),
+        "swing_source": (meta.get("calibration") or {}).get("swing", {}).get("source", "imu"),
         "pose": {"n": len(pose_t), "fps": (len(pose_t) - 1) / pose_span if pose_span > 0 else 0.0},
         "pauses": _pauses(events, t0, end), "hub_trouble": sum(1 for e in events if e["k"] == "hub" and e["d"]["status"] != "ok"),
         "loop_p95_ms": summary["loop"]["p95_ms"] if summary else None,
@@ -134,8 +135,13 @@ def format_report(s):
                      f"{cross['median']:+.0f} ms from the IMU peak (p10 {cross['p10']:+.0f}, p90 {cross['p90']:+.0f})"
                      + advice)
     hub, pose = s["hub"], s["pose"]
-    lines.append(f"Hub: {hub['hz']:.1f} Hz, worst gap {hub['worst_gap_ms']:.0f} ms, {hub['gaps_over_100ms']} gaps over "
-                 f"100 ms; pose {pose['fps']:.1f} fps ({pose['n']} readings)")
+    if s["swing_source"] == "pose":
+        lines.append(f"Swing source: the camera's hand speed ({pose['fps']:.1f} pose readings a second, "
+                     f"{pose['n']} readings); worst gap {hub['worst_gap_ms']:.0f} ms, {hub['gaps_over_100ms']} gaps "
+                     "over 100 ms")
+    else:
+        lines.append(f"Hub: {hub['hz']:.1f} Hz, worst gap {hub['worst_gap_ms']:.0f} ms, {hub['gaps_over_100ms']} gaps "
+                     f"over 100 ms; pose {pose['fps']:.1f} fps ({pose['n']} readings)")
     for p in s["pauses"]:
         lines.append(f"  paused ({', '.join(p['reasons'])}) for {p['seconds']:.1f} s at {p['start_s']:.1f} s")
     if s["loop_p95_ms"] is not None:

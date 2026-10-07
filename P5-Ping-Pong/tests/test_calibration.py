@@ -88,3 +88,23 @@ def test_detector_params_come_from_the_calibration():
     cal = calibration.SwingCalibration(u_fwd=(1.0, 0.0, 0.0), omega_lo=400.0, omega_hi=1200.0)
     params = cal.swing_params(gyro_per_dps=GPD, accel_per_g=980.0, fs_raw=30000)
     assert params.t_pk == pytest.approx(240.0) and params.gyro_per_dps == GPD and params.fs_raw == 30000
+
+
+def test_a_camera_calibration_drops_the_hub_spike_gate_and_asks_for_longer_swings():
+    hub = calibration.SwingCalibration((1.0, 0.0, 0.0), 300.0, 1000.0).swing_params(GPD, 1000.0, 32767)
+    cam = calibration.SwingCalibration((1.0, 0.0, 0.0), 300.0, 1000.0, source="pose").swing_params(GPD, 1000.0, 32767)
+    assert (hub.spike_ratio, hub.min_dur_ms, hub.refractory_s) == (0.4, 60.0, 0.30)
+    assert (cam.spike_ratio, cam.min_dur_ms, cam.refractory_s) == (0.0, 100.0, 0.15)
+    assert cam.t_pk == hub.t_pk == pytest.approx(180.0)                      # everything else is shared
+
+
+def test_a_swing_source_other_than_imu_or_pose_is_refused():
+    with pytest.raises(ValueError, match="source"):
+        calibration.SwingCalibration((1.0, 0.0, 0.0), 300.0, 1000.0, source="lidar")
+
+
+def test_the_source_survives_json_and_an_old_file_without_one_is_an_imu_calibration():
+    cam = calibration.SwingCalibration((0.0, 1.0, 0.0), 250.0, 800.0, source="pose")
+    assert calibration.SwingCalibration.from_json(cam.to_json()) == cam
+    old = '{"u_fwd": [0.0, 1.0, 0.0], "omega_lo": 250.0, "omega_hi": 800.0}'
+    assert calibration.SwingCalibration.from_json(old).source == "imu"

@@ -16,6 +16,7 @@ queue itself and runs the actuator's due work, and the caller steps the camera.
 """
 
 import dataclasses
+import queue
 import threading
 import time
 from collections import deque
@@ -27,7 +28,7 @@ from pathlib import Path
 
 import sqlite3
 
-from pingpong import app, mqtt_link, profile, qbandit, spin
+from pingpong import app, mqtt_link, posegyro, profile, qbandit, spin
 from pingpong import recorder as recorder_mod
 from pingpong import store as store_mod
 from pingpong.haptics import Actuator, ActuatorCore
@@ -54,8 +55,9 @@ class LiveRig:
     def __init__(self, session, *, hub, imu, vision, actuator=None, mqtt_client=None, clock,
                  threaded=False, stale_ms=None, pose_stale_s=POSE_STALE_S,
                  reconnect_after_s=RECONNECT_AFTER_S, reconnect_cooldown_s=RECONNECT_COOLDOWN_S,
-                 max_reconnects=MAX_RECONNECTS, recorder=None, log=print):
+                 max_reconnects=MAX_RECONNECTS, recorder=None, pose_gyro=None, swing_source="imu", log=print):
         self.session, self.hub, self.imu, self.vision = session, hub, imu, vision
+        self.pose_gyro, self.swing_source = pose_gyro, swing_source     # pose_gyro: the camera makes the swing samples
         self.recorder, self.store, self.audio = recorder, None, None    # store + audio are attached by build_live
         self.closers = []                                               # extra (name, callable) teardown steps
         self._seen = {"phase": None, "pauses": None, "hub": None}
@@ -67,7 +69,7 @@ class LiveRig:
         self.reconnect_cooldown_ns = round(reconnect_cooldown_s * 1e9)
         self.max_reconnects = max_reconnects
         self.n_impacts = 0
-        self._last_pose_ns = None
+        self._last_pose_ns = self._horizon_ns = None
         self._stale_since_ns = self._last_attempt_ns = None
         self._attempts, self._force_reconnect, self._reconnecting = 0, False, False
         self._loop_ms = deque(maxlen=20_000)
@@ -122,6 +124,10 @@ class LiveRig:
         if not self.threaded:
             self.imu.step()
         self._feed_poses()
+        if self.pose_gyro is not None:
+            self._drain_hub()
+            if not self.threaded:
+                self.imu.step()                                           # the camera's samples were queued just now
         hub_stale = self.hub.is_stale(self.stale_ms)
         self._update_pauses(now, hub_stale)
         self._maybe_reconnect(now, hub_stale)
@@ -139,7 +145,7 @@ class LiveRig:
                     data["spin_probs"] = self.session.game.spin_probs_fn(swing.feat)
                 self._record("swing", swing.t_ns, data)
                 self._game_events(self.session.on_swing(swing))
-        self._game_events(self.session.tick(data_ns=self.hub.last_rx_ns))
+        self._game_events(self.session.tick(data_ns=self._data_horizon_ns()))
         if not self.threaded and hasattr(self.actuator, "process"):
             self.actuator.process(now)
         self._record_changes(now)
@@ -188,6 +194,20 @@ class LiveRig:
                 if self.recorder is not None:
                     self.recorder.pose(pose)
                 self._last_pose_ns = pose.t_scene_ns
+                if self.pose_gyro is not None:                            # the camera is the swing sensor
+                    sample = self.pose_gyro.feed(pose)
+                    if sample is not None:
+                        self.imu.samples.put_nowait(sample)
+                        self._horizon_ns = sample.t_ns
+
+    def _drain_hub(self):
+        """Camera mode: the hub's own gyro is not used, and a queue nobody reads would grow all session."""
+        while not self.hub.imu.empty():
+            self.hub.imu.get_nowait()
+
+    def _data_horizon_ns(self):
+        """How far the swing sensor's data reaches: a miss is only a fact once it has passed the deadline."""
+        return self._horizon_ns if self.pose_gyro is not None else self.hub.last_rx_ns
 
     def _update_pauses(self, now, hub_stale):
         """Pause while a sensor is lost; the pause is back-dated to the last moment it was heard.
@@ -203,13 +223,15 @@ class LiveRig:
         pose_lost = active and (age is None or age > self.pose_stale_s)
         hub_since = now if self.hub.last_rx_ns is None else min(now, self.hub.last_rx_ns)
         pose_since = now if age is None else now - round(age * 1e9)
-        hub_down = active and hub_stale
+        hub_down = active and hub_stale and self.swing_source == "imu"   # the camera needs nothing from the hub
         game.set_pause("hub", hub_down, hub_since if hub_down else now)
         game.set_pause("pose", pose_lost, pose_since if pose_lost else now)
 
     # --- hub health -------------------------------------------------------------------------------------------
     def hub_status(self):
-        """HUD text: ok | stale | reconnecting | lost."""
+        """HUD text: ok | stale | reconnecting | lost | off (no hub at all)."""
+        if getattr(self.hub, "absent", False):
+            return "off"
         if self._reconnecting:
             return "reconnecting"
         if self._stale_since_ns is None:
@@ -259,7 +281,8 @@ class LiveRig:
         game = self.session.game
         trace = tuple(rate for _, rate in self.imu.trace(1.5))
         return dataclasses.replace(self.session.hud_state(), swing_trace=trace, swing_scale=game.omega_hi,
-                                   swing_threshold=game.judge.t_pk)
+                                   swing_threshold=game.judge.t_pk,
+                                   swing_label="CAMERA SWING" if self.swing_source == "pose" else "IMU SWING")
 
     def loop_stats(self):
         times = sorted(self._loop_ms)
@@ -273,13 +296,22 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
              mode="survival", target=7, seed=1, source="live", scope=None, no_publish=False, no_motor=False,
              threaded=False, lag_s=None, gyro_per_dps=None, accel_per_g=None, fs_raw=None, stale_ms=None,
              to_image=None, record_dir=None, player="rafae", vision=None, recorder=None, spin_probs_fn=None,
-             learner=None, log=print):
+             learner=None, pose_gyro=None, log=print):
     """Wire every piece into one LiveRig.  The real play.py and the fake rig both come through here,
     so the wiring that matters on hardware (haptic blank windows, phase-gated tag search, the pose
-    lock, status lights) is exactly the wiring the tests run."""
+    lock, status lights) is exactly the wiring the tests run.
+
+    The swing source is the calibration's: "imu" reads the hub's gyro, "pose" the camera's hand speed.  Live
+    camera mode passes a PoseGyro (it makes the swing samples from the poses); a replay of a camera session
+    passes none, because the recorded pose-derived samples arrive through the replay hub like hub samples."""
+    camera = calibration.swing.source == "pose"
+    if pose_gyro is not None and not camera:
+        raise ValueError("a PoseGyro needs a camera calibration (swing source 'pose'), not a hub one")
     gpd = config.GYRO_PER_DPS if gyro_per_dps is None else gyro_per_dps
     apg = config.ACCEL_PER_G if accel_per_g is None else accel_per_g
     fs = config.HUB_FS_RAW if fs_raw is None else fs_raw
+    if pose_gyro is not None:
+        gpd, apg, fs = posegyro.GYRO_PER_DPS, posegyro.ACCEL_PER_G, posegyro.FS_RAW    # the units PoseGyro speaks
     params = calibration.swing_params(gpd, apg, fs)
     shake = ShakeMonitor(gyro_per_dps=gpd, rms_min_dps=0.35 * params.t_pk)     # motion smaller than this is tremor
     recorder = recorder or _start_recording(
@@ -288,9 +320,13 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         accel_per_g=apg, fs_raw=fs, lag_s=config.CAMERA_LAG_S if lag_s is None else lag_s,
         stale_ms=config.STALE_MS if stale_ms is None else stale_ms, no_motor=no_motor, learn=learner is not None,
         clock=clock)
-    imu = ImuWorker(hub.imu, SwingDetector(params), shake=shake, recorder=recorder)
-    core = ActuatorCore(hub.dev, clock=clock, no_motor=no_motor, on_blank=imu.blank)   # the pulse blanks the IMU
-    actuator = Actuator(core, log=log) if threaded else core
+    imu = ImuWorker(hub.imu if pose_gyro is None else queue.SimpleQueue(), SwingDetector(params), shake=shake,
+                    recorder=recorder)
+    actuator = None                                      # no hub (--no-hub): no haptics, the sounds carry the cues
+    if getattr(hub, "dev", None) is not None:
+        # a pulse blanks the hub's gyro (the motors shake it); the camera does not feel the motors
+        core = ActuatorCore(hub.dev, clock=clock, no_motor=no_motor, on_blank=None if camera else imu.blank)
+        actuator = Actuator(core, log=log) if threaded else core
     publishing = mqtt_client is not None and not no_publish
     session = app.make_session(
         level=level, mode=mode, target=target, clock=clock, actuator=actuator,
@@ -306,7 +342,8 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
                               to_image=to_image)
     rig = LiveRig(session, hub=hub, imu=imu, vision=vision, actuator=actuator,
                   mqtt_client=mqtt_client if publishing else None, clock=clock, threaded=threaded,
-                  stale_ms=stale_ms, recorder=recorder, log=log)
+                  stale_ms=stale_ms, recorder=recorder, pose_gyro=pose_gyro,
+                  swing_source=calibration.swing.source, log=log)
     session.bind_status(hub=rig.hub_status, mqtt=mqtt_link.status_fn(mqtt_client) if publishing else None)
     if publishing:
         mqtt_link.attach(mqtt_client, session.game.publisher)

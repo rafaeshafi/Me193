@@ -17,7 +17,7 @@ import json
 from dataclasses import dataclass
 from queue import SimpleQueue
 
-from pingpong import levels, live
+from pingpong import levels, live, posegyro
 from pingpong import recorder as recorder_mod
 from pingpong.clock import FakeClock
 from pingpong.profile import Calibration
@@ -214,15 +214,28 @@ def replay(loaded, *, overrides=None, record_dir=None):
                  + [e["t"] for e in loaded.events])       # stop with the data: a silent tail would "pause" again
     i_imu = i_pose = i_start = 0
     next_pump = meta["t0_ns"]
-    while clock.now_ns() < end_ns:
-        clock.advance_s(STEP_NS / S)
-        now = clock.now_ns()
-        while i_imu < len(loaded.imu) and loaded.imu[i_imu].t_ns <= now:
+    camera = rig.swing_source == "pose"
+    # A camera sample is made from a pose the moment that pose is read: lag + estimator delay after its stamp,
+    # together with the pose.  A hub sample is stamped when it arrives.
+    imu_delay_ns = round((meta["camera_lag_s"] + posegyro.DELAY_S) * S) if camera else 0
+
+    def deliver_imu(now):
+        nonlocal i_imu
+        while i_imu < len(loaded.imu) and loaded.imu[i_imu].t_ns + imu_delay_ns <= now:
             hub.deliver(loaded.imu[i_imu])
             i_imu += 1
+
+    def deliver_poses(now):
+        nonlocal i_pose
         while i_pose < len(poses) and poses[i_pose].t_scene_ns + lag_ns <= now:
             vision.deliver(poses[i_pose])
             i_pose += 1
+
+    while clock.now_ns() < end_ns:
+        clock.advance_s(STEP_NS / S)
+        now = clock.now_ns()
+        for deliver in ((deliver_poses, deliver_imu) if camera else (deliver_imu, deliver_poses)):
+            deliver(now)
         while i_start < len(starts) and starts[i_start]["started_at_ns"] <= now:
             _start(rig, starts[i_start], overrides)
             i_start += 1

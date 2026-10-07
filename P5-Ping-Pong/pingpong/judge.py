@@ -105,6 +105,8 @@ class HitJudge:
 
     def _cross_gate(self, swing, samples):
         """J4 is LOGGED ONLY: it measures whether camera and IMU saw the swing at the same moment."""
+        if swing.src == "pose":
+            return GateResult("J4", True, "the camera is the swing sensor: nothing to compare (logged)")
         offset = cross_sensor_offset_ms(samples, swing.t_ns)
         if offset is None:
             return GateResult("J4", True, "not enough pose frames to compare (logged)")

@@ -38,6 +38,7 @@ class HudState:
     keys_hint: str = "SPACE start/swing   1-3 level   M mode   X x-ray   D motors   S sound   Q quit"
     leaderboard: tuple = field(default_factory=tuple)   # ((name, score), ...) top rows for the end screen
     swing_trace: tuple = ()          # recent signed forward gyro rate in dps (the IMU, made visible)
+    swing_label: str = "IMU SWING"   # "CAMERA SWING" when the camera's hand speed is the swing sensor
     swing_scale: float = 1200.0      # dps that fills the trace panel (the player's hard-swing rate)
     swing_threshold: float = 0.0     # dps below which a swing does not count (T_PK)
     player_name: str = ""            # highlights the player's own row on the leaderboard
@@ -134,7 +135,7 @@ def _draw_swing(frame, s, w, h):
         return
     x0, y0, pw, ph = 24, h - 215, 360, 110
     canvas.draw_trace(frame, x0, y0, pw, ph, s.swing_trace, s.swing_scale, s.swing_threshold, GREY, GREEN)
-    canvas.draw_text(frame, "IMU SWING", (x0 + 8, y0 + 22), 0.55, GREY, 1)
+    canvas.draw_text(frame, s.swing_label, (x0 + 8, y0 + 22), 0.55, GREY, 1)
 
 
 def _draw_footer(frame, s, w, h):

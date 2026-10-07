@@ -8,6 +8,7 @@
 Everything is in deg/s through gyro_per_dps, so a unit mistake is a one-constant fix.
 """
 
+import dataclasses
 import json
 import math
 from dataclasses import dataclass
@@ -15,6 +16,15 @@ from dataclasses import dataclass
 import numpy as np
 
 from pingpong.swing import SwingParams
+
+SOURCES = ("imu", "pose")
+# A camera delivers 15-30 samples a second, so a fast swing rises from rest to its peak in one frame: the
+# hub's one-sample spike gate would throw real swings away.  A single-frame landmark jump is caught by a
+# longer minimum duration instead (a real swing needs two frames to rise).  The hand moves to the ball
+# before it swings, and a quick reposition can look like a swing: a short refractory period keeps that
+# false swing from swallowing the real stroke that follows it (the hub's 0.3 s guards against vibration
+# ringing, which a camera does not have).
+POSE_SWING_SETTINGS = {"spike_ratio": 0.0, "min_dur_ms": 100.0, "refractory_s": 0.15}
 
 
 def fit_forward_axis(takes, gyro_per_dps):
@@ -50,11 +60,14 @@ class SwingCalibration:
     u_fwd: tuple
     omega_lo: float
     omega_hi: float
+    source: str = "imu"          # "imu": the hub's gyro; "pose": the camera as a virtual gyro (pingpong.posegyro)
 
     def __post_init__(self):
         norm = math.sqrt(sum(c * c for c in self.u_fwd))
         if norm < 1e-9:
             raise ValueError("forward axis must be a non-zero vector")
+        if self.source not in SOURCES:
+            raise ValueError(f"swing source must be one of {SOURCES}, got {self.source!r}")
         object.__setattr__(self, "u_fwd", tuple(c / norm for c in self.u_fwd))
 
     @property
@@ -62,13 +75,16 @@ class SwingCalibration:
         return 0.6 * self.omega_lo
 
     def swing_params(self, gyro_per_dps, accel_per_g, fs_raw):
-        return SwingParams(u_fwd=self.u_fwd, gyro_per_dps=gyro_per_dps, accel_per_g=accel_per_g,
-                           t_pk=self.t_pk, fs_raw=fs_raw)
+        params = SwingParams(u_fwd=self.u_fwd, gyro_per_dps=gyro_per_dps, accel_per_g=accel_per_g,
+                             t_pk=self.t_pk, fs_raw=fs_raw)
+        return dataclasses.replace(params, **POSE_SWING_SETTINGS) if self.source == "pose" else params
 
     def to_json(self):
-        return json.dumps({"u_fwd": list(self.u_fwd), "omega_lo": self.omega_lo, "omega_hi": self.omega_hi})
+        return json.dumps({"u_fwd": list(self.u_fwd), "omega_lo": self.omega_lo, "omega_hi": self.omega_hi,
+                           "source": self.source})
 
     @classmethod
     def from_json(cls, text):
         d = json.loads(text)
-        return cls(u_fwd=tuple(d["u_fwd"]), omega_lo=float(d["omega_lo"]), omega_hi=float(d["omega_hi"]))
+        return cls(u_fwd=tuple(d["u_fwd"]), omega_lo=float(d["omega_lo"]), omega_hi=float(d["omega_hi"]),
+                   source=d.get("source", "imu"))
