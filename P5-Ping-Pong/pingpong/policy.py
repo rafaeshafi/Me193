@@ -11,7 +11,7 @@ import math
 import random
 from dataclasses import dataclass
 
-from pingpong import levels, physics, qbandit
+from pingpong import levels, pd, physics, qbandit
 
 ZONES = tuple((a, b) for b in (0.15, 0.5, 0.85) for a in (0.15, 0.5, 0.85))
 V_MAX = 14.0
@@ -47,9 +47,8 @@ def miss_probability(level, v, spin_amp, reach_deficit_m):
 
 
 def reach_deficit_m(level, x_land_m, x_cpu_m, flight_s):
-    """Metres the ball lands beyond what the CPU paddle can cover after its reaction delay."""
-    reach = level.cpu_speed_ms * max(0.0, flight_s - level.tau_s)
-    return max(0.0, abs(x_land_m - x_cpu_m) - reach)
+    """Metres between the CPU paddle and the landing point when the ball arrives (a PD controller chases it)."""
+    return pd.paddle_error_m(level, x_land_m, x_cpu_m, flight_s)
 
 
 class CpuPolicy:

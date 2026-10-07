@@ -46,3 +46,28 @@ def test_the_readme_does_not_claim_algorithms_that_are_not_built():
     for name, module in (("logistic", "spin.py"), ("q-learning", "qbandit.py")):
         built = (ROOT / "pingpong" / module).exists()
         assert built or name not in claimed, f"README (c) claims {name} but pingpong/{module} does not exist"
+
+
+# Every algorithm named in (c) must be greppable: the claim, the module and a symbol only that algorithm has.
+ALGORITHMS = {
+    "BlazePose": ("pose_features.py", "PoseLandmarker"),
+    "AprilTag": ("tags.py", "aruco"),
+    "One-Euro": ("oneeuro.py", "class OneEuro"),
+    "Signed-axis swing detector": ("swing.py", "class SwingDetector"),
+    "FFT": ("shake.py", "np.fft.rfft"),
+    "PD controller": ("pd.py", "class PDController"),
+    "Softmax": ("policy.py", "math.exp"),
+    "Logistic Regression": ("spin.py", "LogisticRegression"),
+    "Q-learning": ("qbandit.py", "def update"),
+    "Cross-correlation": ("benchstats.py", "corrcoef"),
+}
+
+
+def test_every_algorithm_the_readme_names_is_in_the_code_where_it_says_it_is():
+    section = README.split("### (c)")[1].split("### Reflection")[0]
+    named = [name for name in ALGORITHMS if name.lower() in section.lower()]
+    assert len(named) == len(ALGORITHMS), f"README (c) should name all of {sorted(ALGORITHMS)}; names {named}"
+    for name, (module, symbol) in ALGORITHMS.items():
+        source = (ROOT / "pingpong" / module).read_text()
+        assert symbol in source, f"README (c) names {name} but {module} has no {symbol!r}"
+        assert module in section, f"README (c) does not point at {module} for {name}"

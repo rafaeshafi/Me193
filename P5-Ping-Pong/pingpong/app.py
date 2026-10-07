@@ -5,11 +5,12 @@ in --fake mode and in tests.  run_scripted() is a scripted fake player on a fake
 clock -- the automated version of "play.py --fake reaches 10 hits".
 """
 
+import dataclasses
 import math
 import random
 from collections import deque
 
-from pingpong import feedback, levels, physics
+from pingpong import feedback, levels, pd, physics
 from pingpong.clock import FakeClock
 from pingpong.events import PaddlePose, SwingEvent
 from pingpong.hud import HudState
@@ -166,7 +167,7 @@ class Session:
             phase=g.phase, mode=g.mode, level_name=g.level.name, streak=g.tracker.streak,
             record=g.tracker.record, player_points=g.player_points, cpu_points=g.cpu_points,
             target=g.target_points, countdown=None if remaining is None else max(1, math.ceil(remaining)),
-            ball=self._ball(now), paddle_ab=self.paddle_ab,
+            ball=self._ball(now), cpu_x_m=self._cpu_x(now), paddle_ab=self.paddle_ab,
             arrival_ab=g.incoming.aim_ab if g.incoming is not None else None,
             last_kmh=self._last_kmh, last_label=self._last_label, spin_text=self._spin,
             mqtt_status=self._mqtt_status(), hub_status=self._hub_status(),
@@ -180,6 +181,16 @@ class Session:
         if not self.game.paused:
             return ""
         return "PAUSED: " + ", ".join(sorted(self.game.pause_reasons)) + " lost"
+
+    def _cpu_x(self, now):
+        """The computer's paddle while it chases your shot (always arrives in Survival, can fall short in Match)."""
+        g, leg = self.game, self.game.outgoing_leg
+        if g.phase != "RALLY" or leg is None or g.incoming is not None:
+            return 0.0
+        level = g.level
+        if g.mode != "match":                          # Survival never misses: the drawn paddle always gets there
+            level = dataclasses.replace(level, cpu_speed_ms=50.0, tau_s=min(level.tau_s, 0.25 * leg.flight_s))
+        return pd.paddle_x(level, leg.x_end, 0.0, max(0.0, (now - leg.t0_ns) / S))
 
     def _ball(self, now):
         g = self.game

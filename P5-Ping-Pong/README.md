@@ -178,7 +178,7 @@ swing strength, how often the computer misses a ball, how often you would fault,
 ```
 play.py  config.py  pp  requirements.txt  README.md
 pingpong/   the game: sensing (hub, imu_worker, swing, shake, vision, pose, tags), game (judge, shot, physics,
-            rules, policy, qbandit, levels, spin), output (haptics, feedback, audio, hud, canvas), glue (live, app, profile,
+            rules, policy, pd, qbandit, levels, spin), output (haptics, feedback, audio, hud, canvas), glue (live, app, profile,
             spinflow, store, recorder, replay, sessionreport, fakerig, sources_fake)
 tools/      scan_hubs  env_check  bench_hub  bench_cam  bench_haptics  calibrate_swing  reset_hub
             report  replay  train_spin  sim  watch_score  republish_best  make_cards
@@ -202,14 +202,17 @@ My game is a stack of small explicit rules that I can test without hardware. **P
 sensors into events: a state machine projects the hub's gyro onto my learned forward-swing axis, arms
 on a threshold, fires at the peak, and ignores backswings and waving; AprilTag ids must be seen in 4 of
 6 frames (START also held 0.4 s) before they count; pose is used only when the landmarks are visible.
-**The hit judge** is a conjunction of six gates: the swing's back-dated time inside a window around
-the ball's known arrival, my hand (from pose, shifted by the measured camera lag) within a
+**The hit judge** is a conjunction of five deciding gates: the swing's back-dated time inside a window
+around the ball's known arrival, my hand (from pose, shifted by the measured camera lag) within a
 level-dependent radius of the ball and still near it at detection, the swing big and clean enough, one
-hit per ball, and no shake lock. Each failed gate appears on screen. **The shot policy** turns a valid
-swing into a shot: peak gyro rate sets ball speed, my hand position sets aim, and a deterministic risk
-rule (speed × sloppiness against a per-level threshold) decides net or out faults. **The computer**
-picks a target zone by a softmax over a utility that wrong-foots my tracked hand, plays it through a
-delayed, speed-limited PD paddle, and in Match misses with a probability that grows with my shot's
+hit per ball, and no shake lock. A sixth gate only measures and logs whether the camera and the IMU saw
+the swing at the same moment. Each gate's result and reason appears on screen. **The shot policy** turns a valid
+swing into a shot: peak gyro rate sets ball speed, my hand position sets aim, a trained spin model (if I
+made one) sets topspin or backspin, and a deterministic risk rule (speed × sloppiness against a per-level
+threshold) decides net or out faults. **The computer**
+picks a target zone by a softmax over a utility that wrong-foots my tracked hand (plus, if I turn it on,
+what a Q-learning table has learned about where I fail), then moves a speed-limited paddle to the landing
+point with a PD controller after its reaction delay, and in Match misses with a probability that grows with my shot's
 speed, spin and the distance its paddle cannot cover; in Survival it never misses and only the ramp
 (speed ×1.03 per hit, up to 1.8, a special ball every tenth) changes. A rules state machine turns hits
 and faults into the score; sensor loss pauses the game rather than scoring against me; the record of
@@ -237,12 +240,12 @@ continuous hits goes to MQTT whenever it improves.
 
 | Algorithm | Where | How it works |
 |---|---|---|
-| MediaPipe BlazePose landmarker (a pre-trained CNN) | `pose.py`, `vision.py` | A convolutional network regresses 33 body landmarks per frame and tracks them between frames. I use the wrist, index and pinky, normalised by shoulder width, as the paddle position. |
+| MediaPipe BlazePose landmarker (a pre-trained CNN) | `pose_features.py`, `pose.py`, `vision.py` | A convolutional network regresses 33 body landmarks per frame and tracks them between frames. I use the wrist, index and pinky, normalised by shoulder width, as the paddle position. |
 | AprilTag / ArUco 36h11 detection | `tags.py` | It thresholds the image, finds square quads and decodes a Hamming-protected bit grid into an id and corners. I vote over frames before an id counts as START or LEVEL. |
 | One-Euro filter | `oneeuro.py` | A low-pass filter whose cutoff rises with signal speed. The paddle point is smooth when I am still and nearly lag-free in a swing. |
 | Signed-axis swing detector (a threshold state machine; the axis comes from an SVD) | `swing.py`, `calibration.py` | It projects the gyro onto the forward axis learned from my calibration swings, arms on a threshold, tracks the peak and fires on the falling edge with an oscillation guard. A backswing projects negative, so it never fires. |
 | FFT shake discriminator | `shake.py` | The last second of gyro is resampled and run through `rfft`; a narrow, strong peak between 3 and 8 Hz with several full cycles is a shake. It locks the paddle for a second, while a single swing's smooth spectrum does not. |
-| PD controller | `policy.py` | Its command is Kp·error + Kd·error rate, saturated at a per-level speed after a reaction delay. Whether the computer reaches a ball is physical, not a coin flip. |
+| PD controller | `pd.py`, `policy.py` | Its velocity command is Kp·error + Kd·(filtered error rate), saturated at a per-level paddle speed and only starting after a reaction delay. Whether the computer reaches a ball is simulated physics, and the screen draws the paddle chasing (or missing) my shot. |
 | Softmax (Boltzmann) policy | `policy.py` | Each of nine target zones gets a utility and is sampled ∝ exp(utility / temperature). Lower temperature plays sharper at higher levels. |
 | StandardScaler + Logistic Regression | `spin.py`, `spinflow.py` | It standardises 12 swing features (the unit directions of the gyro peak, the net rotation and the linear acceleration, plus peak rate, duration and backswing ratio) and learns a linear softmax boundary between flat, top and back from my own labelled swings. The three probabilities become continuous topspin or backspin, and the model only ships if its cross-validated accuracy is at least 75%. |
 | Tabular Q-learning (opt-in, `--learn`) | `qbandit.py`, `policy.py` | It keeps Q(s,a) for nine states (my hand's third of the reach box × the column of the zone it served last) and nine target zones, and after every ball updates Q += α(r + γ·max Q' − Q) with reward 1 when I miss or fault. The computer adds Q to its softmax utility with a weight that grows with the level, so it learns to serve where I am weakest. |
