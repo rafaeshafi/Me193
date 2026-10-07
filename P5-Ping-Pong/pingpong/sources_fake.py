@@ -152,6 +152,33 @@ class FakeTagDetector:
         return [Tag(i, ((0, 0),) * 4, (0.0, 0.0), 0.0) for i in sorted(self.ids_fn(self.clock.now_ns()))]
 
 
+class FakeStream:
+    def __init__(self, callback):
+        self.callback, self.started, self.closed = callback, False, 0
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.started = False
+
+    def close(self):
+        self.closed += 1
+
+
+class FakeSound:
+    """sounddevice-shaped: OutputStream(...) gives a stream whose callback a test can pull from."""
+
+    def __init__(self, fail=False):
+        self.fail, self.stream = fail, None
+
+    def OutputStream(self, **kwargs):
+        if self.fail:
+            raise OSError("no output device")
+        self.stream = FakeStream(kwargs["callback"])
+        return self.stream
+
+
 class FakeEnv:
     """Everything env_check/bench tools need from the outside world, simulated.
 
@@ -183,6 +210,11 @@ class FakeEnv:
 
     def make_tag_detector(self):
         return FakeTagDetector(lambda t_ns: set(), self.clock)
+
+    def make_audio(self):
+        from pingpong.audio import Audio
+
+        return Audio(backend=FakeSound())
 
     def make_mqtt_client(self):
         self.mqtt_client = FakeMqttClient()

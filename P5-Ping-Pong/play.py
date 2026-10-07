@@ -10,7 +10,7 @@ Usage:
     ./pp play --no-publish --no-motor # rehearse without the broker / without motor pulses
     ./pp play --board                 # the leaderboard (best streaks, match wins) and nothing else
 
-Keys:  SPACE start (and swing in --fake)  1-3 level  M mode  X x-ray  D motors  R reconnect hub  Q/ESC quit
+Keys:  SPACE start (and swing in --fake)  1-3 level  M mode  X x-ray  D motors  S sound  R reconnect hub  Q/ESC quit
        --fake only:  J soft swing   K hard swing
 Run camera/Bluetooth modes from Terminal.app, not from the Claude app.
 """
@@ -37,6 +37,7 @@ def parse_args(argv=None):
     ap.add_argument("--no-publish", action="store_true", help="never touch the MQTT broker")
     ap.add_argument("--no-motor", action="store_true", help="mute the hub motors (beep + light stay)")
     ap.add_argument("--no-record", action="store_true", help="do not write recordings/<session>/ (IMU, pose, events)")
+    ap.add_argument("--no-audio", action="store_true", help="no game sounds (the S key mutes while playing)")
     ap.add_argument("--no-store", action="store_true", help="do not save finished games to the leaderboard database")
     ap.add_argument("--board", action="store_true", help="print the leaderboard and exit")
     ap.add_argument("--db", default=None, help="leaderboard database (default: data/pingpong.db)")
@@ -83,6 +84,11 @@ def run_fake(args):
     clock = Clock()
     session = app.make_session(level=args.level, mode=args.mode, target=args.target, clock=clock,
                                client=None, source="fake", seed=args.seed)
+    if not args.no_audio:
+        from pingpong.audio import Audio
+
+        session.audio = Audio()
+        session.audio.start()
     mouse = {"xy": (W // 2, int(H * 0.7))}
     cv2.namedWindow(TITLE)
     cv2.setMouseCallback(TITLE, lambda event, x, y, flags, param: mouse.update(xy=(x, y)))
@@ -99,6 +105,8 @@ def run_fake(args):
             if key != 255 and keys.handle_key(session, key, fake=True)[0] == "quit":
                 break
     finally:
+        if session.audio is not None:
+            session.audio.stop()
         cv2.destroyAllWindows()
     return 0
 

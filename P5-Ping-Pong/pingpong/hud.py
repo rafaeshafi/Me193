@@ -35,7 +35,7 @@ class HudState:
     gates: tuple = ()
     show_xray: bool = False
     flash: tuple | None = None       # (BGR colour, alpha)
-    keys_hint: str = "SPACE start/swing   1-3 level   M mode   X x-ray   D motors   Q quit"
+    keys_hint: str = "SPACE start/swing   1-3 level   M mode   X x-ray   D motors   S sound   Q quit"
     leaderboard: tuple = field(default_factory=tuple)   # ((name, score), ...) top rows for the end screen
     swing_trace: tuple = ()          # recent signed forward gyro rate in dps (the IMU, made visible)
     swing_scale: float = 1200.0      # dps that fills the trace panel (the player's hard-swing rate)

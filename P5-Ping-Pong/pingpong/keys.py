@@ -1,6 +1,6 @@
 """Keyboard control for the game window (pure: no cv2 here, so it is testable).
 
-SPACE start / (fake mode) swing   1-3 level   M mode   X x-ray   D disarm motors   Q/ESC quit
+SPACE start / (fake mode) swing   1-3 level   M mode   X x-ray   D disarm motors   S sound   Q/ESC quit
 Fake mode only:  J soft swing   SPACE normal swing   K hard swing
 """
 
@@ -32,6 +32,8 @@ def handle_key(session, key, *, fake):
         game.set_mode("match" if game.mode == "survival" else "survival")
     elif key == ord("x"):
         session.xray = not session.xray
+    elif key == ord("s") and getattr(session, "audio", None) is not None:
+        session.audio.muted = not session.audio.muted
     elif key == ord("d") and session.actuator is not None:
         core = getattr(session.actuator, "core", session.actuator)
         if getattr(session, "motors_armed", True):

@@ -37,6 +37,8 @@ class Session:
         self._gates, self._last_kmh, self._last_label, self._spin = (), None, "", ""
         self._message, self._message_until = "", 0
         self._notice = ""
+        self.audio = None                        # pingpong.audio.Audio (optional)
+        self._last_digit = None
         self.player = ""                         # the player's name (highlighted on the leaderboard)
         self.on_game_over = None                 # callback(summary dict) when a game or match ends
         self.leaderboard_fn = None               # () -> ((name, score), ...) for the end screen
@@ -78,7 +80,20 @@ class Session:
     def tick(self, data_ns=None):
         events = self.game.tick(self.clock.now_ns(), data_ns)
         self._absorb(events)
+        self._countdown_sounds(events)
         return events
+
+    def _countdown_sounds(self, events):
+        """A tick per countdown digit (3-2-1) and a "go" when the first ball is served."""
+        if self.audio is None:
+            return
+        remaining = self.game.seconds_to_serve(self.clock.now_ns())
+        digit = None if remaining is None else max(1, math.ceil(remaining))
+        if digit is not None and digit != self._last_digit:
+            self.audio.play("tick")
+        elif digit is None and self._last_digit is not None and any(e.kind == "serve" for e in events):
+            self.audio.play("go")
+        self._last_digit = digit
 
     # --- events -> feedback + HUD memory ---------------------------------------------------------
     def _game_stats(self):
@@ -100,6 +115,8 @@ class Session:
         now = self.clock.now_ns()
         if self.actuator is not None:
             feedback.play(events, self.game.level, self.actuator)
+        if self.audio is not None:
+            self.audio.play_events(events, self.game.level)
         st = self._game_stats()
         for e in events:
             if e.kind == "hit":

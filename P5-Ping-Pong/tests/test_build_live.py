@@ -150,3 +150,12 @@ def test_a_failing_save_never_reaches_the_game(tmp_path):
     rig.store.close()                                         # the database goes away under the game
     rig.session.on_game_over(_summary())                      # must not raise
     assert any("could not save" in m.lower() for m in messages)
+
+
+def test_audio_is_started_for_a_live_game_unless_it_is_switched_off(tmp_path):
+    loud = live.build_live(live_args("--player", "rafae"), FakeEnv(), player_root=tmp_path)
+    assert loud.audio is not None and loud.audio.enabled and loud.session.audio is loud.audio
+    loud.close()
+    assert loud.audio.enabled is False                                  # torn down with the rig
+    quiet = live.build_live(live_args("--player", "rafae", "--no-audio"), FakeEnv(), player_root=tmp_path)
+    assert quiet.audio is None and quiet.session.audio is None

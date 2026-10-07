@@ -48,6 +48,11 @@ class RealEnv:
 
         return mqtt_link.make_paho_client()
 
+    def make_audio(self):
+        from pingpong.audio import Audio
+
+        return Audio()                           # the built-in speakers through sounddevice
+
     def mqtt_roundtrip(self, topic, timeout_s=5.0):
         """Publish a unique token to `topic` and wait for the broker to echo it; -> RTT ms or None."""
         import paho.mqtt.client as mqtt

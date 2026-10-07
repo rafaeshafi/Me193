@@ -56,7 +56,7 @@ class LiveRig:
                  reconnect_after_s=RECONNECT_AFTER_S, reconnect_cooldown_s=RECONNECT_COOLDOWN_S,
                  max_reconnects=MAX_RECONNECTS, recorder=None, log=print):
         self.session, self.hub, self.imu, self.vision = session, hub, imu, vision
-        self.recorder, self.store = recorder, None      # the store (leaderboard database) is attached by build_live
+        self.recorder, self.store, self.audio = recorder, None, None    # store + audio are attached by build_live
         self._seen = {"phase": None, "pauses": None, "hub": None}
         self.actuator, self.mqtt_client, self.clock = actuator, mqtt_client, clock
         self.threaded, self.log = threaded, log
@@ -91,6 +91,8 @@ class LiveRig:
             return
         self._closed = True
         steps = [("actuator", self._stop_actuator), ("camera", self.vision.stop), ("imu", self.imu.stop)]
+        if self.audio is not None:
+            steps.insert(1, ("audio", self.audio.stop))
         if self.recorder is not None:                # after the IMU thread stopped: the last samples are in
             steps.append(("summary", self._record_summary))
             steps.append(("recorder", self.recorder.close))
@@ -380,6 +382,9 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
         hub.close()
         raise
     rig.calibration, rig.player, rig.session.player = calibration, args.player, args.player
+    if not args.no_audio:
+        rig.audio = rig.session.audio = env.make_audio()
+        rig.audio.start()
     if not args.no_store:
         try:
             db = store_mod.Store(store_path)
