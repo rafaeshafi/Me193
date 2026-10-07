@@ -22,7 +22,7 @@ from typing import Optional
 import numpy as np
 
 from pingpong import posemodel, profile
-from pingpong.posemodel import H0, K, MAX_GAP_S, STEP_S, WARM, FilterParams, HandPredictor, PoseFilter
+from pingpong.posemodel import H0, K, MAX_GAP_S, STEP_S, WARM, FilterParams, GlitchGate, HandPredictor, PoseFilter
 
 LAMBDAS = (1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1)       # ridge strengths tried
 LEAD_STEPS = (3, 4, 5, 6, 7)                         # grid steps trained on: 0.10 - 0.23 s
@@ -36,9 +36,16 @@ CALM = 0.03                                          # shoulder widths per frame
 OLD_GAIN = 0.8                                       # the extrapolation the game used before the model (latency.GAIN)
 WINDOW = K + WARM + 1
 
-CUTOFFS = (0.6, 1.2, 2.0, 3.0, 4.5)
-BETAS = (1.0, 2.5, 5.0, 10.0, 20.0)
-D_CUTOFFS = (0.7, 1.0, 1.5, 2.5)
+# The filter settings tried.  The first search stopped at the top of every range (4.5, 20, 2.5): matching the zero-phase
+# reference alone is best served by letting everything through.  Now a setting also has to jitter a still hand no more than
+# the default does, and the ranges reach well past where the best one sits (a d_cutoff above ~10 only lets the noise in the
+# speed open the filter).
+CUTOFFS = (0.15, 0.2, 0.3, 0.45, 0.6, 0.9, 1.2, 2.0, 3.0, 4.5, 7.0, 10.0, 15.0)
+BETAS = (0.0, 1.0, 2.5, 5.0, 7.0, 10.0, 14.0, 20.0, 40.0, 80.0, 160.0)
+D_CUTOFFS = (0.7, 1.0, 1.5, 2.5, 3.5, 5.0, 7.0, 10.0)
+JITTER_CAP = 1.0                                     # a tuned filter may jitter a still hand this many times as much as the default
+STILL_STEP = 0.01                                    # shoulder widths per frame (0.3 a second): below it the hand counts as still
+CHUNK = 256                                          # filter settings run in parallel per pass (keeps long sessions in memory)
 
 
 @dataclass
@@ -307,36 +314,72 @@ def refilter(track, params):
     return Track(t=track.t, u=u, v=v, ru=track.ru, rv=track.rv, name=track.name)
 
 
-def tune_filter(tracks, cutoffs=CUTOFFS, betas=BETAS, d_cutoffs=D_CUTOFFS):
-    """-> (FilterParams, report): the One-Euro settings whose output follows the teacher best on the raw readings."""
+def gated(t, u, v, gate_speed):
+    """The readings after the glitch gate alone: it does not depend on the One-Euro settings, so it is done once."""
+    gate = GlitchGate(gate_speed)
+    out = [gate((a, b), ts) for ts, a, b in zip(t, u, v)]
+    return np.array([o[0] for o in out]), np.array([o[1] for o in out])
+
+
+def filter_many(t, x, settings):
+    """One axis through the One-Euro filter for every (min_cutoff, beta, d_cutoff) of `settings` at once -> (settings, samples).
+
+    The recursion of oneeuro.OneEuro, run on all the settings in parallel (a sample at or before the last one changes nothing)."""
+    cutoff, beta, d_cutoff = (np.array(column, dtype=float) for column in zip(*settings))
+    out = np.empty((len(cutoff), len(x)))
+    xh, dxh = np.full(len(cutoff), float(x[0])), np.zeros(len(cutoff))
+    out[:, 0] = xh
+    tau_d = 1.0 / (2.0 * np.pi * d_cutoff)
+    for i in range(1, len(x)):
+        dt = t[i] - t[i - 1]
+        if dt > 0:
+            a_d = 1.0 / (1.0 + tau_d / dt)
+            dxh = a_d * (x[i] - xh) / dt + (1.0 - a_d) * dxh
+            a = 1.0 / (1.0 + 1.0 / (2.0 * np.pi * (cutoff + beta * np.abs(dxh))) / dt)
+            xh = a * x[i] + (1.0 - a) * xh
+        out[:, i] = xh
+    return out
+
+
+def tune_filter(tracks, cutoffs=CUTOFFS, betas=BETAS, d_cutoffs=D_CUTOFFS, cap=JITTER_CAP):
+    """-> (FilterParams, report): the One-Euro settings whose output follows the teacher best on the raw readings, among the
+    settings that jitter a still hand no more than `cap` times as much as the default settings do.
+
+    Following the teacher alone is best served by passing every reading through (clean readings need no filter to match a
+    smoothing of themselves), which shows all of the noise on a hand that is still: the paddle would shiver.  So the jitter is
+    capped at the default's, and what is left to gain is lag: the best settings smooth a still hand as much and follow a moving
+    one more closely."""
     raw = [t for t in tracks if t.ru is not None]
     if not raw:
         raise ValueError("no raw hand readings recorded yet: play a game (sessions keep them now) and train again")
-    targets = []
+    base = FilterParams()
+    settings = [(base.min_cutoff, base.beta, base.d_cutoff)] + [(c, b, d) for c in cutoffs for b in betas for d in d_cutoffs]
+    err2, step2 = np.zeros(len(settings)), np.zeros(len(settings))
+    n_err = n_still = 0
     for tr in raw:
         g, ru = on_grid(tr.t, tr.ru)
         _, rv = on_grid(tr.t, tr.rv)
-        targets.append((g, teacher(ru), teacher(rv)))
-
-    def loss(params):
-        errs = []
-        for tr, (g, tu, tv) in zip(raw, targets):
-            fu, fv = _filtered(tr, params)
-            for f, teach in ((fu, tu), (fv, tv)):
-                diff = np.interp(g, tr.t, f) - teach
-                errs.append(diff[np.isfinite(diff)])
-        e = np.concatenate(errs)
-        return float(np.sqrt(np.mean(e ** 2)))
-
-    base = FilterParams()
-    best, best_loss = base, loss(base)
-    default_loss = best_loss
-    for c in cutoffs:
-        for b in betas:
-            for d in d_cutoffs:
-                cand = FilterParams(min_cutoff=c, beta=b, d_cutoff=d, gate_speed=base.gate_speed)
-                value = loss(cand)
-                if value < best_loss - 1e-12:
-                    best, best_loss = cand, value
-    return best, {"rmse_default": default_loss, "rmse_tuned": best_loss, "sessions": len(raw),
-                  "readings": int(sum(len(t.t) for t in raw))}
+        teach = (teacher(ru), teacher(rv))
+        speed = np.hypot(np.diff(teach[0]), np.diff(teach[1]))
+        still = np.concatenate([[False], speed < STILL_STEP])             # False where the teacher has a hole (NaN < x is False)
+        gated_uv = gated(tr.t, tr.ru, tr.rv, base.gate_speed)
+        n_still += int(still.sum())
+        for axis, gated_axis in zip(teach, gated_uv):
+            known = np.isfinite(axis)
+            n_err += int(known.sum())
+            for lo in range(0, len(settings), CHUNK):
+                out = filter_many(tr.t, gated_axis, settings[lo:lo + CHUNK])
+                shown = np.stack([np.interp(g, tr.t, row) for row in out])
+                err2[lo:lo + CHUNK] += ((shown[:, known] - axis[known]) ** 2).sum(axis=1)
+                step2[lo:lo + CHUNK] += (np.diff(shown, axis=1)[:, still[1:]] ** 2).sum(axis=1)
+    if not n_still:
+        raise ValueError("the hand was never still in the recorded readings, so there is nothing to judge a filter's jitter on")
+    rmse, shimmer = np.sqrt(err2 / n_err), np.sqrt(step2 / n_still)
+    allowed = np.flatnonzero(shimmer <= cap * shimmer[0] * (1.0 + 1e-9))      # the default is always allowed
+    best = int(allowed[np.argmin(rmse[allowed])])
+    if rmse[best] >= rmse[0] - 1e-12:
+        best = 0
+    c, b, d = settings[best]
+    return (FilterParams(min_cutoff=c, beta=b, d_cutoff=d, gate_speed=base.gate_speed),
+            {"rmse_default": float(rmse[0]), "rmse_tuned": float(rmse[best]), "shimmer_default": float(shimmer[0]),
+             "shimmer_tuned": float(shimmer[best]), "sessions": len(raw), "readings": int(sum(len(t.t) for t in raw))})

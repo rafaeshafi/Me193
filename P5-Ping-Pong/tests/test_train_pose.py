@@ -132,6 +132,36 @@ def test_training_on_recorded_sessions_tunes_the_filter_and_saves_the_players_mo
     assert "filter" in text.lower() and "saved" in text.lower() and "./pp play --player rafae" in text
 
 
+def test_the_filter_line_says_how_much_closer_it_follows_the_hand_and_that_a_still_hand_jitters_no_more(tmp_path):
+    sessions(tmp_path / "rec")
+    code, text = train(FakeEnv(), tmp_path)
+    line = next(l for l in text.splitlines() if l.startswith("Filter:"))
+    assert "a still hand jitters" in line and "before" in line
+    report = posemodel.load_for("rafae", root=tmp_path / "players").meta["filter"]
+    assert report["shimmer_tuned"] <= report["shimmer_default"] * (1 + 1e-9) and report["rmse_tuned"] < report["rmse_default"]
+
+
+def test_when_no_setting_beats_the_default_without_jittering_more_the_default_stays_and_the_report_says_so(tmp_path, monkeypatch):
+    sessions(tmp_path / "rec")
+    monkeypatch.setattr(posetrain, "tune_filter", lambda tracks: (posemodel.FilterParams(), {
+        "rmse_default": 0.03, "rmse_tuned": 0.03, "shimmer_default": 0.006, "shimmer_tuned": 0.006, "sessions": 1, "readings": 10}))
+    code, text = train(FakeEnv(), tmp_path)
+    assert code == 0 and "the settings stay as they were" in text
+    assert posemodel.load_for("rafae", root=tmp_path / "players").filter == posemodel.FilterParams()
+
+
+def test_a_hand_that_was_never_still_in_the_readings_keeps_the_filter_and_the_training_goes_on(tmp_path):
+    import numpy as np
+
+    t = np.arange(0.0, 40.0, 1 / 30)
+    u = 1.5 * (t % 8.0) - 6.0                                               # a hand always on the move: nothing to judge jitter on
+    track = posetrain.Track(t=t, u=u, v=np.zeros_like(t), ru=u, rv=np.zeros_like(t), name="mover")
+    write_session(tmp_path / "rec", "20261001-100000-rafae", track)
+    code, text = train(FakeEnv(), tmp_path)
+    assert code == 0 and "never still" in text
+    assert posemodel.load_for("rafae", root=tmp_path / "players").filter == posemodel.FilterParams()
+
+
 def test_a_dry_run_shows_the_result_and_saves_nothing(tmp_path):
     sessions(tmp_path / "rec")
     code, text = train(FakeEnv(), tmp_path, "--dry-run")

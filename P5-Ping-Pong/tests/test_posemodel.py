@@ -49,6 +49,20 @@ def test_a_single_frame_glitch_is_dropped_but_a_real_jump_that_lasts_is_followed
     assert out[-1] > 2.0 and out[0] < 1.0
 
 
+def test_the_glitch_gate_is_the_front_half_of_the_filter_and_usable_on_its_own():
+    gate = posemodel.GlitchGate(gate_speed=40.0)
+    out = [gate((0.5, 0.0), k * DT) for k in range(10)]
+    assert out[-1] == (0.5, 0.0)
+    assert gate((3.5, 0.0), 10 * DT) == (0.5, 0.0)                         # a one-frame flip is replaced by the last reading
+    assert gate((0.5, 0.0), 11 * DT) == (0.5, 0.0)
+    kept = [gate((3.5, 0.0), (12 + j) * DT)[0] for j in range(4)]           # one that lasts is the hand
+    assert kept[0] == 0.5 and kept[-1] == 3.5
+    f = posemodel.PoseFilter(posemodel.FilterParams(gate_speed=40.0))
+    for k in range(10):
+        f((0.5, 0.0), k * DT)
+    assert f((3.5, 0.0), 10 * DT)[0] == pytest.approx(0.5, abs=0.05)         # the filter still has it in front
+
+
 def test_the_filter_parameters_survive_json():
     params = posemodel.FilterParams(min_cutoff=0.8, beta=12.0, d_cutoff=1.7, gate_speed=33.0)
     assert posemodel.FilterParams.from_json(params.to_json()) == params

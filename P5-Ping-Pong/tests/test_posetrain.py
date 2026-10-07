@@ -186,6 +186,32 @@ def test_a_tuned_filter_follows_the_teacher_better_than_the_default_and_never_wo
     assert isinstance(params, posemodel.FilterParams) and params.gate_speed == posemodel.FilterParams().gate_speed
 
 
+def test_the_filter_run_for_every_setting_at_once_is_the_filter_the_game_runs():
+    track = raw_track(4, noise=0.04, glitches=4, seconds=30.0)
+    settings = [(1.2, 5.0, 1.0), (0.6, 10.0, 5.0), (4.5, 20.0, 2.5), (0.2, 0.0, 0.7), (15.0, 160.0, 10.0)]
+    gu, gv = posetrain.gated(track.t, track.ru, track.rv, posemodel.FilterParams().gate_speed)
+    many_u = posetrain.filter_many(track.t, gu, settings)
+    many_v = posetrain.filter_many(track.t, gv, settings)
+    for k, (c, b, d) in enumerate(settings):
+        ref = posetrain.refilter(track, posemodel.FilterParams(min_cutoff=c, beta=b, d_cutoff=d))
+        assert many_u[k] == pytest.approx(ref.u, abs=1e-9) and many_v[k] == pytest.approx(ref.v, abs=1e-9)
+
+
+def test_a_tuned_filter_jitters_a_still_hand_no_more_than_the_default_does_and_follows_the_hand_better():
+    # tracks as clean as a good camera gives (0.015 shoulder widths of noise): matching the zero-phase reference alone
+    # would then pick "no filter at all", which shows every bit of the noise on a hand that is still
+    tracks = [raw_track(s, noise=0.015, glitches=0) for s in (1, 2, 3)]
+    params, report = posetrain.tune_filter(tracks)
+    assert report["shimmer_tuned"] <= report["shimmer_default"] * (1 + 1e-9)
+    assert report["rmse_tuned"] < 0.9 * report["rmse_default"]
+    assert params.min_cutoff < 5.0                                             # not the 'let everything through' corner
+
+
+def test_the_search_goes_well_past_where_the_first_tuning_stopped():
+    assert min(posetrain.CUTOFFS) <= 0.3 and max(posetrain.CUTOFFS) >= 10.0
+    assert max(posetrain.BETAS) >= 80.0 and max(posetrain.D_CUTOFFS) >= 7.0
+
+
 def test_tuning_needs_the_unfiltered_readings():
     track = raw_track(1)
     with pytest.raises(ValueError):

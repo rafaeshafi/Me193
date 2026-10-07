@@ -47,30 +47,44 @@ class FilterParams:
         return cls(**{k: float(d[k]) for k in ("min_cutoff", "beta", "d_cutoff", "gate_speed") if k in d})
 
 
-class PoseFilter:
-    """The filter the camera worker runs on every reading: a One-Euro filter behind a glitch gate."""
+class GlitchGate:
+    """Drops the one-frame jumps a landmark flip makes: a reading that implies a hand speed above gate_speed is replaced by
+    the last one, twice at most (a flip lasts a frame; a hand that really is there stays there)."""
 
-    def __init__(self, params=None):
-        self.params = params or FilterParams()
-        self._f = OneEuro2D(min_cutoff=self.params.min_cutoff, beta=self.params.beta, d_cutoff=self.params.d_cutoff)
-        self._last = self._t = None
-        self._glitches = 0
+    def __init__(self, gate_speed=FilterParams.gate_speed):
+        self.gate_speed = gate_speed
+        self.reset()
 
     def reset(self):
-        self._f.reset()
         self._last = self._t = None
         self._glitches = 0
 
     def __call__(self, xy, t_s):
         if self._last is not None and t_s > self._t:
             speed = math.hypot(xy[0] - self._last[0], xy[1] - self._last[1]) / (t_s - self._t)
-            if speed > self.params.gate_speed and self._glitches < 2:        # a flip lasts a frame; a real jump goes on
+            if speed > self.gate_speed and self._glitches < 2:
                 self._glitches += 1
                 xy = self._last
             else:
                 self._glitches = 0
         self._last, self._t = (xy[0], xy[1]), t_s
-        return self._f(xy, t_s)
+        return self._last
+
+
+class PoseFilter:
+    """The filter the camera worker runs on every reading: a One-Euro filter behind a glitch gate."""
+
+    def __init__(self, params=None):
+        self.params = params or FilterParams()
+        self._gate = GlitchGate(self.params.gate_speed)
+        self._f = OneEuro2D(min_cutoff=self.params.min_cutoff, beta=self.params.beta, d_cutoff=self.params.d_cutoff)
+
+    def reset(self):
+        self._f.reset()
+        self._gate.reset()
+
+    def __call__(self, xy, t_s):
+        return self._f(self._gate(xy, t_s), t_s)
 
 
 # --- the predictor -----------------------------------------------------------------------------------------------------------

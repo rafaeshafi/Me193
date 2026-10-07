@@ -100,7 +100,8 @@ that drops a one-frame landmark flip (`posemodel.py`). `./pp train_pose --player
 you follow the screen for 95 s (stand still, slide, lift, follow an imaginary ball, swing) while the camera is recorded, and
 the same footage is then run through MediaPipe's light and its full pose model, so the one with the least noise that still
 keeps up with 30 frames a second is chosen on your camera, room and body; the filter's three settings are tuned so the live
-(causal) filter follows a zero-phase smoothing of your own raw readings; and a ridge-regression predictor of where the hand
+(causal) filter follows a zero-phase smoothing of your own raw readings, among the settings that jitter a still hand no more
+than the defaults do (clean readings would otherwise "win" with no filtering at all and the paddle would shiver); and a ridge-regression predictor of where the hand
 will be when the frame is seen is trained on your tracks, but only used if it cuts the error against simply holding the hand
 by 10% on tracks it was not trained on without making the paddle shimmer more than 1.5 times as much. On the six games
 I had recorded when I first trained it, it did not (0% better), so the paddle is drawn where the camera read the hand. The result is

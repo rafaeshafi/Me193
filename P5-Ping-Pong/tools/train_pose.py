@@ -215,10 +215,18 @@ def train(env, args, *, player_root=None, record_root=None, out=print):
         return 2
     params, filter_report = posemodel.FilterParams(), None
     if any(t.ru is not None for t in tracks):
-        params, filter_report = posetrain.tune_filter(tracks)
-        out(f"Filter: min_cutoff {params.min_cutoff:g}, beta {params.beta:g}, d_cutoff {params.d_cutoff:g}: it follows a "
-            f"zero-phase smoothing of your raw readings to {filter_report['rmse_tuned']:.3f} shoulder widths "
-            f"(the settings before: {filter_report['rmse_default']:.3f})")
+        try:
+            params, filter_report = posetrain.tune_filter(tracks)
+        except ValueError as exc:
+            out(f"Filter: kept as it was: {exc}")
+        else:
+            if params == posemodel.FilterParams():
+                out("Filter: the settings stay as they were: none follows your hand better without jittering a still hand more")
+            else:
+                out(f"Filter: min_cutoff {params.min_cutoff:g}, beta {params.beta:g}, d_cutoff {params.d_cutoff:g}: it follows a "
+                    f"zero-phase smoothing of your raw readings to {filter_report['rmse_tuned']:.3f} shoulder widths "
+                    f"(the settings before: {filter_report['rmse_default']:.3f}), and a still hand jitters "
+                    f"{filter_report['shimmer_tuned']:.4f} shoulder widths a frame (before: {filter_report['shimmer_default']:.4f})")
     else:
         out("Filter: kept as it was: no unfiltered readings recorded yet (record a take, or play a game)")
     if params != posemodel.FilterParams():
