@@ -80,15 +80,30 @@ def selftest():
     return 0
 
 
+def fake_loop(session, *, show, wait_key, mouse_xy):
+    """The --fake window loop: the mouse is the paddle, keys swing.  Returns when the player quits."""
+    from pingpong import hud, keys
+    from pingpong.events import PaddlePose
+
+    while True:
+        x, y = mouse_xy()
+        a, b = min(1.0, max(0.0, x / W)), min(1.0, max(0.0, 1.0 - y / H))
+        u, v = session.game.judge.box.to_uv(a, b)
+        session.on_pose(PaddlePose(t_scene_ns=session.clock.now_ns(), u=u, v=v, conf=0.95, hand="right"))
+        session.tick()
+        show(hud.render(session.hud_state(), size=(W, H)))
+        key = wait_key(1) & 0xFF
+        if key != 255 and keys.handle_key(session, key, fake=True)[0] == "quit":
+            return
+
+
 def run_fake(args):
     import cv2
 
-    from pingpong import app, hud, keys
+    from pingpong import app
     from pingpong.clock import Clock
-    from pingpong.events import PaddlePose
 
-    clock = Clock()
-    session = app.make_session(level=args.level, mode=args.mode, target=args.target, clock=clock,
+    session = app.make_session(level=args.level, mode=args.mode, target=args.target, clock=Clock(),
                                client=None, source="fake", seed=args.seed)
     if not args.no_audio:
         from pingpong.audio import Audio
@@ -100,16 +115,8 @@ def run_fake(args):
     cv2.setMouseCallback(TITLE, lambda event, x, y, flags, param: mouse.update(xy=(x, y)))
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
-        while True:
-            a = min(1.0, max(0.0, mouse["xy"][0] / W))
-            b = min(1.0, max(0.0, 1.0 - mouse["xy"][1] / H))
-            u, v = session.game.judge.box.to_uv(a, b)
-            session.on_pose(PaddlePose(t_scene_ns=clock.now_ns(), u=u, v=v, conf=0.95, hand="right"))
-            session.tick()
-            cv2.imshow(TITLE, hud.render(session.hud_state(), size=(W, H)))
-            key = cv2.waitKey(1) & 0xFF
-            if key != 255 and keys.handle_key(session, key, fake=True)[0] == "quit":
-                break
+        fake_loop(session, show=lambda frame: cv2.imshow(TITLE, frame), wait_key=cv2.waitKey,
+                  mouse_xy=lambda: mouse["xy"])
     finally:
         if session.audio is not None:
             session.audio.stop()

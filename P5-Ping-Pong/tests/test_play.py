@@ -67,3 +67,34 @@ def test_board_prints_the_leaderboard_without_touching_any_hardware(tmp_path, ca
 def test_board_without_a_database_says_there_are_no_games_and_creates_nothing(tmp_path, capsys):
     assert play.main(["--board", "--db", str(tmp_path / "none.db")]) == 0
     assert "no games yet" in capsys.readouterr().out and not (tmp_path / "none.db").exists()
+
+
+def test_the_fake_window_loop_plays_balls_from_the_mouse_and_the_keys():
+    from pingpong import app
+    from pingpong.clock import FakeClock
+
+    clock = FakeClock(start_ns=1_000_000_000)
+    session = app.make_session(clock=clock, client=None, source="fake", seed=1)
+    mouse = {"xy": (play.W // 2, play.H // 2)}
+
+    def mouse_xy():                                               # the "mouse" follows where the ball will arrive
+        ball = session.game.incoming
+        if ball is not None:
+            mouse["xy"] = (ball.aim_ab[0] * play.W, (1.0 - ball.aim_ab[1]) * play.H)
+        return mouse["xy"]
+
+    def wait_key(ms):
+        clock.advance_s(1 / 60)                                   # one frame passes per call
+        game = session.game
+        if game.tracker.streak >= 3:
+            return ord("q")
+        if game.phase == "LOBBY":
+            return 32                                             # SPACE starts
+        ball = game.incoming
+        if game.phase == "RALLY" and ball is not None and clock.now_ns() >= ball.t_c_ns:
+            return ord("k")                                       # a hard swing at the moment the ball arrives
+        return 255
+
+    frames = []
+    play.fake_loop(session, show=frames.append, wait_key=wait_key, mouse_xy=mouse_xy)
+    assert session.game.tracker.streak >= 3 and frames and frames[0].shape == (play.H, play.W, 3)

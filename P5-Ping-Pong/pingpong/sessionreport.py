@@ -5,6 +5,7 @@ the report tool prints.  This is what turns "it did not register my swing" into 
 of 9 swings: only 0 confident pose frames in the approach window".
 """
 
+import re
 from collections import Counter, defaultdict
 
 import numpy as np
@@ -21,6 +22,17 @@ def _spread(values, *extra):
     a = np.asarray(values, dtype=float)
     out = {"n": len(a), "mean": float(a.mean()), "median": float(np.median(a)),
            "p10": float(np.percentile(a, 10)), "p90": float(np.percentile(a, 90)), "max": float(a.max())}
+    return out
+
+
+def _cross_offsets(verdicts):
+    """The camera-vs-IMU offsets (ms) that gate J4 measured on judged swings."""
+    out = []
+    for v in verdicts:
+        for g in v["gates"]:
+            match = g["name"] == "J4" and re.search(r"pose peak ([+-]\d+) ms", g["note"])
+            if match:
+                out.append(float(match.group(1)))
     return out
 
 
@@ -75,6 +87,7 @@ def summarize(loaded):
         "gate_notes": {k: v[:3] for k, v in gate_notes.items()}, "gate_pass": gate_pass,
         "timing_ms": _spread([v["e_s"] * 1000.0 for v in verdicts if v["kind"] == "HIT"]),
         "w_pk": _spread([e["d"]["w_pk"] for e in events if e["k"] == "swing"]),
+        "cross_ms": _spread(_cross_offsets(judged)), "camera_lag_s": meta.get("camera_lag_s"),
         "kmh": _spread([h["kmh"] for h in hits]), "labels": dict(Counter(h["label"] for h in hits)),
         "hub": benchstats.rate_stats(imu_t),
         "pose": {"n": len(pose_t), "fps": (len(pose_t) - 1) / pose_span if pose_span > 0 else 0.0},
@@ -108,6 +121,18 @@ def format_report(s):
     lines.append("Gates passed/judged: " + "  ".join(f"{g} {p}/{n}" for g, (p, n) in s["gate_pass"].items()))
     for gate, count in sorted(s["gate_failures"].items()):
         lines.append(f"  rejected by {gate} x{count}: " + " | ".join(s["gate_notes"][gate]))
+    cross = s["cross_ms"]
+    if cross["n"]:
+        lag = s["camera_lag_s"]
+        advice = ""
+        if lag is not None:
+            if abs(cross["median"]) < 20.0:
+                advice = f": keep CAMERA_LAG_S = {lag:.3f}"
+            else:
+                advice = f": try CAMERA_LAG_S = {max(0.0, lag + cross['median'] / 1000.0):.3f} (now {lag:.3f})"
+        lines.append(f"Camera vs IMU (gate J4, {cross['n']} swings): the camera's hand-speed peak comes "
+                     f"{cross['median']:+.0f} ms from the IMU peak (p10 {cross['p10']:+.0f}, p90 {cross['p90']:+.0f})"
+                     + advice)
     hub, pose = s["hub"], s["pose"]
     lines.append(f"Hub: {hub['hz']:.1f} Hz, worst gap {hub['worst_gap_ms']:.0f} ms, {hub['gaps_over_100ms']} gaps over "
                  f"100 ms; pose {pose['fps']:.1f} fps ({pose['n']} readings)")

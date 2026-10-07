@@ -91,3 +91,33 @@ def test_the_report_tool_picks_the_newest_session_in_a_folder_or_a_given_one(tmp
 
 def test_the_tool_selftest_is_green():
     assert report_tool.main(["--selftest"]) == 0
+
+
+def _session_with_j4(offsets, camera_lag_s=0.10):
+    from pingpong.recorder import Loaded
+
+    events = []
+    for i, off in enumerate(offsets):
+        note = "not enough pose frames to compare (logged)" if off is None else f"pose peak {off:+d} ms vs IMU (logged)"
+        gates = [{"name": g, "passed": True, "note": note if g == "J4" else ""} for g in ("J1", "J2", "J3", "J4", "J5", "J6")]
+        events.append({"t": i, "k": "verdict", "d": {"verdict": {"kind": "HIT", "q_pos": 1.0, "e_s": 0.0,
+                                                                  "d_min_sw": 0.0, "gates": gates}}})
+    meta = {"player": "x", "level": 1, "mode": "survival", "source": "live", "camera_lag_s": camera_lag_s, "t0_ns": 0}
+    return Loaded(meta=meta, imu=[], poses=[], events=events)
+
+
+def test_the_camera_vs_imu_offsets_from_gate_j4_are_summarised_with_a_lag_suggestion():
+    s = sessionreport.summarize(_session_with_j4([-50, -40, -35, -45, None, -42]))
+    assert s["cross_ms"]["n"] == 5 and s["cross_ms"]["median"] == pytest.approx(-42)
+    text = sessionreport.format_report(s)
+    assert "camera vs imu" in text.lower() and "CAMERA_LAG_S" in text and "0.058" in text      # 0.100 - 0.042
+
+
+def test_no_j4_numbers_means_no_camera_line():
+    s = sessionreport.summarize(_session_with_j4([None, None]))
+    assert s["cross_ms"]["n"] == 0 and "camera vs imu" not in sessionreport.format_report(s).lower()
+
+
+def test_an_offset_close_to_zero_says_the_lag_constant_is_fine():
+    text = sessionreport.format_report(sessionreport.summarize(_session_with_j4([-8, 5, 0, 12, -3])))
+    assert "keep CAMERA_LAG_S" in text

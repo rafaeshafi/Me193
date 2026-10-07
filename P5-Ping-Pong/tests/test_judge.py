@@ -156,3 +156,52 @@ def test_a_late_swing_detected_after_the_plane_still_counts():
     v = judge().judge(swing(t_ns=t_i), ball(), poses(t_i), now_ns=now)
     assert v.kind == "HIT"
     assert now < judge().miss_deadline_ns(ball())
+
+
+def _moving_hand(t_peak_ns, t_i, hz=30.0, span=0.5, amp=4.0):
+    """A hand sweeping along u whose speed peaks at t_peak_ns (a bell-shaped speed profile, peak `amp` SW/s)."""
+    import math
+
+    out, u = [], 0.0
+    n = int(span * hz)
+    t0 = t_i - int(0.4 * S)
+    for k in range(n):
+        t = t0 + int(k * S / hz)
+        speed = amp * math.exp(-(((t - t_peak_ns) / S) / 0.06) ** 2)
+        u += speed / hz
+        out.append(PaddlePose(t_scene_ns=t, u=u, v=0.0, conf=0.9, hand="right"))
+    return out
+
+
+def test_j4_shows_the_measured_offset_in_its_note_and_never_blocks():
+    import re
+
+    hand = _moving_hand(T_C - int(0.04 * S), T_C, amp=0.5)         # a small wiggle: the hand stays near the ball
+    v = judge().judge(swing(), ball(), hand, now_ns=T_C)
+    note = gate(v, "J4").note
+    assert v.kind == "HIT" and gate(v, "J4").passed is True and "logged" in note
+    assert abs(float(re.search(r"([+-]\d+) ms", note).group(1)) + 40) <= 20
+
+
+def test_j4_reports_the_signed_offset_between_the_pose_speed_peak_and_the_imu_peak():
+    from pingpong.judge import cross_sensor_offset_ms
+
+    t_i = T_C
+    for true_offset_ms in (-80, -40, 0, 60):
+        hand = _moving_hand(t_i + int(true_offset_ms * 1e6), t_i)
+        assert cross_sensor_offset_ms(hand, t_i) == pytest.approx(true_offset_ms, abs=20)
+
+
+def test_j4_says_so_when_there_are_too_few_pose_frames_to_find_a_peak():
+    from pingpong.judge import cross_sensor_offset_ms
+
+    assert cross_sensor_offset_ms([], T_C) is None
+    assert cross_sensor_offset_ms(poses(T_C)[:3], T_C) is None
+    v = judge().judge(swing(), ball(), poses(T_C), now_ns=T_C)
+    assert gate(v, "J4").passed is True and "not enough" in gate(v, "J4").note
+
+
+def test_j4_flags_a_large_disagreement_in_its_note_without_rejecting_the_hit():
+    hand = _moving_hand(T_C - int(0.25 * S), T_C, amp=0.5)          # the camera saw the peak 250 ms before the IMU
+    v = judge().judge(swing(), ball(), hand, now_ns=T_C)
+    assert v.kind == "HIT" and gate(v, "J4").passed is True and "disagree" in gate(v, "J4").note

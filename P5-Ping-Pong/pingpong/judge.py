@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pingpong.events import GateResult, Verdict
 
 S = 1_000_000_000
+MIN_PEAK_SPEED_SW_S = 0.3        # a hand that barely moves has no speed peak worth comparing
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,25 @@ class BallWindow:
     t_c_ns: int
     aim_ab: tuple        # arrival point in reach-box coordinates
     level: object        # pingpong.levels.Level
+
+
+def cross_sensor_offset_ms(samples, t_i_ns):
+    """How far (ms, signed) the camera's hand-speed peak is from the IMU's swing peak t_i; None if unknowable.
+
+    Looks at poses from 0.5 s before to 0.15 s after the IMU peak.  Needs five readings and a hand that
+    actually moves; negative = the camera saw its peak first.
+    """
+    window = [p for p in samples if t_i_ns - int(0.5 * S) <= p.t_scene_ns <= t_i_ns + int(0.15 * S)]
+    if len(window) < 5:
+        return None
+    times = [(a.t_scene_ns + b.t_scene_ns) / 2 for a, b in zip(window, window[1:])]
+    speeds = [math.hypot(b.u - a.u, b.v - a.v) / max(1e-6, (b.t_scene_ns - a.t_scene_ns) / S)
+              for a, b in zip(window, window[1:])]
+    smooth = [sum(speeds[max(0, k - 1):k + 2]) / len(speeds[max(0, k - 1):k + 2]) for k in range(len(speeds))]
+    k = max(range(len(smooth)), key=smooth.__getitem__)
+    if smooth[k] < MIN_PEAK_SPEED_SW_S:
+        return None
+    return (times[k] - t_i_ns) / 1e6
 
 
 class HitJudge:
@@ -56,7 +76,7 @@ class HitJudge:
         gates = [GateResult("J1", e_s <= level.late_s, f"timing {e_s * 1000:+.0f} ms (window "
                             f"-{level.early_s * 1000:.0f}/+{level.late_s * 1000:.0f})")]
         j2, d_min = self._pose_gate(swing, ball, pose_samples)
-        gates += [j2, self._swing_gate(swing), GateResult("J4", True, "logged-only"),
+        gates += [j2, self._swing_gate(swing), self._cross_gate(swing, pose_samples),
                   self._refractory_gate(swing, ball), self._lock_gate(swing)]
         q_pos = max(0.0, min(1.0, 1.0 - d_min / level.radius_sw)) if math.isfinite(d_min) else 0.0
         hard = [g for g in gates if g.name != "J4"]
@@ -82,6 +102,14 @@ class HitJudge:
         if latest is None or latest.conf < self.min_conf or dist(latest) > 1.6 * R:
             return GateResult("J2", False, "hand moved away from the ball before the swing"), d_min
         return GateResult("J2", True, f"hand {d_min:.2f} SW from the ball (limit {R:.2f})"), d_min
+
+    def _cross_gate(self, swing, samples):
+        """J4 is LOGGED ONLY: it measures whether camera and IMU saw the swing at the same moment."""
+        offset = cross_sensor_offset_ms(samples, swing.t_ns)
+        if offset is None:
+            return GateResult("J4", True, "not enough pose frames to compare (logged)")
+        flag = ": disagree" if abs(offset) > 150 else ""
+        return GateResult("J4", True, f"pose peak {offset:+.0f} ms vs IMU{flag} (logged)")
 
     def _swing_gate(self, swing):
         if swing.w_pk < self.t_pk:
