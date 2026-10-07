@@ -340,7 +340,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
     if pose_gyro is not None:
         gpd, apg, fs = posegyro.GYRO_PER_DPS, posegyro.ACCEL_PER_G, posegyro.FS_RAW    # the units PoseGyro speaks
     params = calibration.swing_params(gpd, apg, fs)
-    shake = ShakeMonitor(gyro_per_dps=gpd, rms_min_dps=0.35 * params.t_pk,       # motion smaller than this is tremor
+    shake = ShakeMonitor(gyro_per_dps=gpd, rms_min_dps=calibration.swing.shake_rms_dps,       # motion smaller than this is tremor
                          **(POSE_SHAKE_SETTINGS if camera else {}))
     recorder = recorder or _start_recording(
         record_dir, log, source=source, player=player, seed=seed, level=level, mode=mode, target=target,

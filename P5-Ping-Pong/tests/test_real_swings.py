@@ -71,18 +71,29 @@ def test_the_slow_soft_swings_are_found_and_their_late_recovery_lobe_is_not_a_se
     assert [round(e.w_pk) for e, _ in found] == [round(found[0][0].w_pk)] and len(found) == 1
 
 
-@pytest.mark.parametrize("index", [3, 9])
-def test_a_real_backswing_on_its_own_never_fires(index):
-    assert impacts(take_of("backswing_only", index), real.params()) == []
+def strict_threshold():
+    """The threshold before 2026-10-07 evening (0.7 x the soft strength): what a player who passes --set swing.t_pk gets."""
+    return 0.7 * real.calibrated()[1]
 
 
-def test_a_wobble_about_another_axis_with_a_big_magnitude_is_not_a_forward_swing():
+def test_a_real_backswing_on_its_own_never_fires():
+    assert impacts(take_of("backswing_only", 3), real.params()) == []
+
+
+def test_a_wobble_about_another_axis_with_a_big_magnitude_is_not_a_forward_swing_at_the_strict_threshold():
     # backswing_only[9] has a 303 dps magnitude peak but only a 244 dps forward component: below the 279 dps threshold
     take = take_of("backswing_only", 9)
     gyro = np.array([s.g for s in take["samples"]], dtype=float) / real.GPD
     magnitude = np.linalg.norm(gyro - real.REST_DPS, axis=1).max()
-    assert magnitude >= real.params().t_pk > real.true_forward_peak(take, real.calibrated()[0])[0]
-    assert impacts(take, real.params()) == []
+    assert magnitude >= strict_threshold() > real.true_forward_peak(take, real.calibrated()[0])[0]
+    assert impacts(take, real.params(t_pk=strict_threshold())) == []
+
+
+def test_the_sensitive_default_lets_that_wobble_count_as_a_weak_swing_but_it_stays_weak():
+    # the cost of catching the soft swings of real play (tests/test_play_swings.py): a big wobble of the hub about another
+    # axis has a 244 dps component along the forward axis, which is now above the threshold.  It is one weak event.
+    found = impacts(take_of("backswing_only", 9), real.params())
+    assert len(found) == 1 and found[0][0].w_pk < 260.0
 
 
 def test_ten_seconds_of_real_fan_waving_gives_at_most_one_impact_instead_of_a_hit_per_wave():

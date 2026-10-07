@@ -4,7 +4,7 @@
     calibration swing, sign-fixed so the forward stroke is positive (the backswing
     then projects negative and never arms the detector);
   * omega_lo / omega_hi = medians of the peak rates of the soft and the full swings,
-    which scale every shot's speed; T_PK = T_PK_FACTOR * omega_lo is the weakest swing that counts.
+    which scale every shot's speed; T_PK = T_PK_FACTOR * omega_lo is the weakest swing that counts (hub; the camera has its own factor).
 Everything is in deg/s through gyro_per_dps, so a unit mistake is a one-constant fix.
 """
 
@@ -18,9 +18,15 @@ import numpy as np
 from pingpong.swing import SwingParams
 
 SOURCES = ("imu", "pose")
-T_PK_FACTOR = 0.7        # the weakest swing that counts, as a fraction of the soft-swing strength.  Measured on real
-                         # takes: the weakest deliberate soft swing was 0.81 x the median soft one, a swing's own
-                         # recovery lobe up to 0.65 x, so 0.7 sits between them
+T_PK_FACTOR = 0.42       # the weakest swing that counts, as a fraction of the soft-swing strength.  A swing in play is
+                         # gentler than a calibration "soft" swing: of the 12 balls missed in two games on 2026-10-07, six had
+                         # a real swing of 210-300 dps (0.46-0.65 x the soft strength) right at them that 0.7 dropped.  The
+                         # cost: a hesitation before a stroke, a wobble, or a soft swing's recovery lobe can now count as a
+                         # (weak) swing too; the judge ignores swings outside a ball's window, one hit per ball, and the
+                         # signed forward axis still rejects backswings.  `--set swing.t_pk=N` overrides it in dps.
+POSE_T_PK_FACTOR = 0.7   # the camera's hand speed was tuned on scripted hands only: it keeps the old factor
+SHAKE_RMS_FACTOR = 0.35 * 0.7   # the shake lock ignores motion under this fraction of the soft strength (tremor); it is
+                                # fixed here so that lowering the swing threshold does not make the lock twitchier
 # A camera delivers 15-30 samples a second, so a fast swing rises from rest to its peak in one frame: the
 # hub's one-sample spike gate would throw real swings away.  A single-frame landmark jump is caught by a
 # longer minimum duration instead (a real swing needs two frames to rise).  The hand moves to the ball
@@ -94,7 +100,11 @@ class SwingCalibration:
 
     @property
     def t_pk(self):
-        return T_PK_FACTOR * self.omega_lo
+        return (POSE_T_PK_FACTOR if self.source == "pose" else T_PK_FACTOR) * self.omega_lo
+
+    @property
+    def shake_rms_dps(self):
+        return SHAKE_RMS_FACTOR * self.omega_lo
 
     def swing_params(self, gyro_per_dps, accel_per_g, fs_raw):
         params = SwingParams(u_fwd=self.u_fwd, gyro_per_dps=gyro_per_dps, accel_per_g=accel_per_g,

@@ -31,7 +31,7 @@ class SwingParams:
     u_fwd: tuple = (1.0, 0.0, 0.0)
     gyro_per_dps: float = 10.0       # raw counts per deg/s (bench P2)
     accel_per_g: float = 1000.0
-    t_pk: float = 250.0              # dps: 0.7 * the soft-swing strength (calibration.T_PK_FACTOR)
+    t_pk: float = 250.0              # dps: a fraction of the soft-swing strength (calibration.T_PK_FACTOR)
     fs_raw: int = 32767              # raw full scale (bench P3)
     arm_factor: float = 0.4          # ARM = arm_factor * t_pk
     start_factor: float = 0.5        # SWING_START at 0.5 * t_pk

@@ -5,7 +5,7 @@
              are 1.8 m from the laptop, so a held hand is the "click")
     tilt     (hub only) hold the hub upright and still, then turn it side to side like a doorknob, right
              first: the axis you turn it about, which way is right, and what upright is (pingpong.tilt)
-    soft     5 soft swings   -> omega_lo (and, with T_PK = 0.7 * omega_lo, the weakest swing that counts)
+    soft     5 soft swings   -> omega_lo (and, with T_PK = T_PK_FACTOR * omega_lo, the weakest swing that counts)
     full     5 full swings   -> omega_hi (a full swing = top speed)
     done     forward axis (SVD of the peak vectors), strengths, reach box -> a Calibration
 

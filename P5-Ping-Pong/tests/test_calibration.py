@@ -96,7 +96,8 @@ def test_a_camera_calibration_drops_the_hub_spike_gate_and_asks_for_longer_swing
     cam = calibration.SwingCalibration((1.0, 0.0, 0.0), 300.0, 1000.0, source="pose").swing_params(GPD, 1000.0, 32767)
     assert (hub.spike_ratio, hub.min_dur_ms, hub.refractory_s) == (0.4, 60.0, 0.30)
     assert (cam.spike_ratio, cam.min_dur_ms, cam.refractory_s) == (0.0, 100.0, 0.15)
-    assert cam.t_pk == hub.t_pk == pytest.approx(calibration.T_PK_FACTOR * 300.0)   # everything else is shared
+    assert hub.t_pk == pytest.approx(calibration.T_PK_FACTOR * 300.0)
+    assert cam.t_pk == pytest.approx(calibration.POSE_T_PK_FACTOR * 300.0)          # the camera keeps its scripted-hand factor
     assert (cam.max_dur_ms, hub.max_dur_ms) == (400.0, 2000.0)           # real hub swings last up to ~1.4 s
 
 
@@ -148,6 +149,7 @@ def test_the_rest_offset_is_always_given_because_real_takes_do_not_start_at_rest
     assert calibration.forward_peaks([take], (1.0, 0.0, 0.0), GPD, bias=(0.0, 0.0, 0.0)) == [pytest.approx(400.0)]
 
 
-def test_the_weakest_counting_swing_is_seven_tenths_of_the_soft_strength():
-    assert calibration.T_PK_FACTOR == 0.7
-    assert calibration.SwingCalibration((1.0, 0.0, 0.0), 440.0, 1150.0).t_pk == pytest.approx(0.7 * 440.0)
+def test_the_weakest_counting_swing_is_a_fraction_of_the_soft_strength_set_from_real_play():
+    # 0.7 dropped half the intended swings of two real games (tests/test_play_swings.py)
+    assert calibration.T_PK_FACTOR == 0.42
+    assert calibration.SwingCalibration((1.0, 0.0, 0.0), 440.0, 1150.0).t_pk == pytest.approx(0.42 * 440.0)

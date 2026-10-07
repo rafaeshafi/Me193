@@ -235,6 +235,14 @@ in `pingpong/levels.py`, the detector's `SwingParams` and the judge. `./pp repor
 with, and `./pp replay` of that session starts from them (`--set` there wins), so the loop is: play, read the
 x-ray / report ("hand 0.62 SW from the ball (limit 0.45)"), try a number, replay it on the same swings.
 
+**How soft a swing can be.** The weakest swing that counts is 0.42 x the strength of your calibration's soft swings
+(the line on the IMU strip chart; `--set swing.t_pk=N` sets it in dps). It used to be 0.7 x, until two real games showed
+that half of the balls I missed had a swing of 210-300 dps right at them, gentler than the "soft" swings I had calibrated
+with (458 dps), so the threshold dropped them (`tests/test_play_swings.py` keeps six of those swings). The price: a big
+wobble of the hub or a hesitation before a stroke can now count as a weak swing too (the judge ignores a swing when no
+ball is near and takes one hit per ball, and a backswing still never counts). The shake lock is unchanged, and so is the
+camera swing detector, which was only ever tuned on scripted hands.
+
 **Tuning the levels.** `./pp sim` plays the whole game loop with a scripted player and prints, per level and
 swing strength, how often the computer misses a ball, how often you would fault, and how long rallies last
 (`--quality 0.4` for a sloppier player: hard swings start to fault where the level's threshold is low).
