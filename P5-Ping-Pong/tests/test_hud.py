@@ -175,3 +175,45 @@ def test_a_long_lobby_notice_is_drawn_inside_the_frame_and_clear_of_the_start_pr
     assert rows.size > 1000
     assert cols.min() >= 20 and cols.max() <= W - 20                  # nothing clipped at the left or right edge
     assert rows.min() > 410                                           # below "SHOW THE START CARD / or press SPACE"
+
+
+# --- what the x-ray panel and the leaderboard panel must not do ---------------------------------------------------------
+def drawn_text(monkeypatch):
+    seen = []
+    real = canvas.draw_text
+
+    def spy(frame, text, org, *a, **kw):
+        seen.append(text)
+        return real(frame, text, org, *a, **kw)
+
+    monkeypatch.setattr(canvas, "draw_text", spy)
+    return seen
+
+
+def test_the_xray_never_cuts_a_gate_note_in_the_middle_of_its_numbers(monkeypatch):
+    seen = drawn_text(monkeypatch)
+    note = "hand 0.62 SW from the ball (limit 0.45)"
+    hud.render(state(phase="RALLY", show_xray=True, gates=(GateResult("J2", False, note),
+                                                          GateResult("J6", False, "paddle locked after shaking"))),
+               size=(W, H))
+    assert note in " ".join(seen) or any(note in line for line in seen)
+    assert "paddle locked after shaking" in " ".join(seen)
+
+
+def test_the_leaderboard_panel_stays_clear_of_the_score_line_at_the_top(monkeypatch):
+    boxes = []
+    real = canvas.dim_rect
+    monkeypatch.setattr(canvas, "dim_rect", lambda frame, x, y, w, h, *a, **kw: (boxes.append((x, y, w, h)),
+                                                                                  real(frame, x, y, w, h, *a, **kw)))
+    hud.render(state(phase="MATCH_OVER", mode="match", leaderboard=(("rafae", 3), ("guest", 1))), size=(W, H))
+    assert boxes and all(y >= 140 for _, y, _, _ in boxes)
+    assert all(x + w <= 364 for x, _, w, _ in boxes)                   # and left of the centred GAME OVER / MATCH OVER
+
+
+def test_the_xray_panel_stays_clear_of_the_centred_best_line(monkeypatch):
+    boxes = []
+    real = canvas.dim_rect
+    monkeypatch.setattr(canvas, "dim_rect", lambda frame, x, y, w, h, *a, **kw: (boxes.append((x, y, w, h)),
+                                                                                  real(frame, x, y, w, h, *a, **kw)))
+    hud.render(state(phase="RALLY", show_xray=True, gates=(GateResult("J1", True, "timing +10 ms"),)), size=(W, H))
+    assert boxes and all(x >= 715 for x, _, _, _ in boxes) and all(x + w <= W - 10 for x, _, w, _ in boxes)

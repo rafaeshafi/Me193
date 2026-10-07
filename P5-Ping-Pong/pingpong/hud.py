@@ -109,7 +109,7 @@ def _draw_leaderboard(frame, s):
     rows = s.leaderboard[:5]
     if not rows:
         return
-    x0, y0, pw, ph = 24, 100, 380, 64 + 40 * len(rows)
+    x0, y0, pw, ph = 24, 150, 340, 64 + 40 * len(rows)
     canvas.dim_rect(frame, x0, y0, pw, ph)
     canvas.draw_text(frame, "BEST STREAKS" if s.mode == "survival" else "MATCH WINS", (x0 + 14, y0 + 36), 0.8, AMBER, 2)
     for i, (name, score) in enumerate(rows):
@@ -121,13 +121,20 @@ def _draw_leaderboard(frame, s):
 
 
 def _draw_xray(frame, s, w, h):
-    x0, y = w - 470, 110
-    canvas.draw_text(frame, "X-RAY: why that counted", (x0, y), 0.7, AMBER, 2)
+    pw = 520
+    x0, y0 = w - pw - 24, 124
+    rows = []
     for gate in s.gates:
-        y += 34
-        color = GREEN if gate.passed else RED
-        canvas.draw_text(frame, f"{gate.name} {'OK' if gate.passed else 'X '}  {gate.note[:36]}", (x0, y), 0.55,
-                         color, 1)
+        text = f"{gate.name} {'OK' if gate.passed else 'X '}  {gate.note}".rstrip()
+        lines, scale = canvas.fit_text(text, pw, max_scale=0.65, min_scale=0.65, thickness=1, max_lines=2)
+        rows.append((GREEN if gate.passed else RED, lines, scale))
+    canvas.dim_rect(frame, x0 - 14, y0 - 40, pw + 28, 60 + 28 * sum(len(lines) for _, lines, _ in rows))
+    canvas.draw_text(frame, "X-RAY: why that counted", (x0, y0), 0.8, AMBER, 2)
+    y = y0 + 6
+    for color, lines, scale in rows:
+        for line in lines:
+            y += 28
+            canvas.draw_text(frame, line, (x0, y), scale, color, 1)
 
 
 def _draw_swing(frame, s, w, h):
