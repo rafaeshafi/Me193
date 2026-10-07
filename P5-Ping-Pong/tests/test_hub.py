@@ -153,3 +153,25 @@ def test_a_packet_the_parser_cannot_read_is_counted_and_the_stream_carries_on():
     assert link.n_parse_errors == 1 and link.last_rx_ns == clock.now_ns()      # the hub is still talking
     dev.emit(imu=(1, 2, 1000, 3, 4, 5))
     assert link.imu.get_nowait().g == (3, 4, 5) and link.n_parse_errors == 1
+
+
+def test_the_failed_pending_responses_at_disconnect_do_not_print_asyncios_never_retrieved_noise(caplog):
+    import asyncio
+    import gc
+    import logging
+
+    loop = asyncio.new_event_loop()
+    try:
+        with caplog.at_level(logging.ERROR, logger="asyncio"):
+            expected = loop.create_future()                     # what the library does to every pending response
+            expected.set_exception(ConnectionError("Device disconnected unexpectedly"))
+            del expected
+            gc.collect()
+            assert [r for r in caplog.records if r.name == "asyncio"] == []
+            other = loop.create_future()                        # any other forgotten error must still be reported
+            other.set_exception(ValueError("something else broke"))
+            del other
+            gc.collect()
+            assert any("something else broke" in r.getMessage() for r in caplog.records)
+    finally:
+        loop.close()

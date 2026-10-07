@@ -50,6 +50,27 @@ STEPS = [
 ]
 
 
+LEAD_S = {"rate": 6.0}        # the play position is 1.8 m from the laptop where the command was typed
+NEW_STEP_LEAD_S = 3.0         # a different kind of take: pick the hub up, get into position
+TAKE_GAP_S = 1.0              # the next take of the same step: just a breath
+
+
+def make_prompt(env, link, announced, out):
+    """prompt(step, index): announce a step once, give time to get ready, then a beep means GO."""
+    def prompt(step, index):
+        if step.label not in announced:
+            announced.add(step.label)
+            lead = LEAD_S.get(step.label, NEW_STEP_LEAD_S)
+            out(f"\n== {step.label} x{step.count} ({step.secs:.0f} s each): {step.text}")
+            out(f"   starting in {lead:.0f} s: get into position, then follow the beeps")
+            env.sleep(lead)
+        else:
+            env.sleep(TAKE_GAP_S)
+        link.dev.beep(frequency=880, blocking=False)         # GO
+
+    return prompt
+
+
 def run_steps(env, link, steps, prompt, out, fixtures_dir):
     """Record every take of every step; returns {label: [samples, ...]}."""
     takes = {}
@@ -213,15 +234,7 @@ def main(argv=None):
     try:
         link.connect()
         print(f"connected; battery {link.battery_pct()}%  ({sum(s.count for s in steps)} takes)")
-        announced = set()
-
-        def prompt(step, index):
-            if step.label not in announced:
-                announced.add(step.label)
-                print(f"\n== {step.label} x{step.count} ({step.secs:.0f} s each): {step.text}")
-            env.sleep(1.0)                                   # time to get ready
-            link.dev.beep(frequency=880, blocking=False)     # GO
-
+        prompt = make_prompt(env, link, set(), print)
         takes = run_steps(env, link, steps, prompt, out=print,
                           fixtures_dir=config.HERE / "recordings" / "fixtures")
         m = analyse(takes)

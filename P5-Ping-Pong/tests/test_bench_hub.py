@@ -93,3 +93,23 @@ def test_run_steps_prompts_for_every_take_and_saves_fixtures(tmp_path):
 
 def test_selftest_passes():
     assert bench_hub.main(["--selftest"]) == 0
+
+
+# --- time to get into position -----------------------------------------------------------------------------------------------
+def test_a_new_step_gives_time_to_get_into_position_and_later_takes_only_a_breath():
+    env = FakeEnv()
+    link = env.make_hub(15, {"card_color": 5, "card_serial": "0997"})
+    link.connect()
+    said = []
+    prompt = bench_hub.make_prompt(env, link, set(), said.append)
+    rate, faces = bench_hub.STEPS[0], bench_hub.STEPS[1]
+    waits = []
+    for step, index in ((rate, 0), (faces, 0), (faces, 1)):
+        t0 = env.clock.now_ns()
+        prompt(step, index)
+        waits.append((env.clock.now_ns() - t0) / 1e9)
+    assert waits[0] >= 6.0                                   # the play position is 1.8 m from where the command was typed
+    assert 3.0 <= waits[1] < 6.0                             # a different kind of take: pick the hub up, get ready
+    assert waits[2] == pytest.approx(1.0, abs=0.01)          # the next take of the same step: just a breath
+    assert any("rate" in line for line in said) and any("get into position" in line for line in said)
+    assert [c[0] for c in link.dev.calls].count("beep") == 3  # one GO beep per take

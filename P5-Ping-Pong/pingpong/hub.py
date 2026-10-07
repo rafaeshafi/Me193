@@ -12,12 +12,33 @@ Rules this module exists to enforce (all verified in the legoeducation source):
     them, because even blocking=False blocks its caller on the BLE write.
 """
 
+import logging
 import queue
 
 import legoeducation as le
 
 from pingpong.clock import Clock
 from pingpong.events import GestureEvent, ImuSample
+
+class _ExpectedDisconnectNoise(logging.Filter):
+    """When the hub disconnects the library fails every response it was still waiting for with
+    ConnectionError('Device disconnected unexpectedly').  The commands we send without waiting (a beep, a light,
+    the final motor stop) leave such futures unretrieved, and asyncio then prints 'Future exception was never
+    retrieved' when they are collected: harmless, and alarming in the middle of a bench or a game.  Only that
+    exact error is dropped; every other forgotten exception is still reported."""
+
+    def filter(self, record):
+        message = record.getMessage()
+        return not ("Future exception was never retrieved" in message and "Device disconnected unexpectedly" in message)
+
+
+def quiet_expected_disconnect_noise():
+    logger = logging.getLogger("asyncio")
+    if not any(isinstance(f, _ExpectedDisconnectNoise) for f in logger.filters):
+        logger.addFilter(_ExpectedDisconnectNoise())
+
+
+quiet_expected_disconnect_noise()
 
 COLORS = {
     "green": le.LEGO_COLOR_GREEN, "blue": le.LEGO_COLOR_BLUE, "red": le.LEGO_COLOR_RED,
