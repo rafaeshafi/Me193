@@ -109,3 +109,25 @@ def test_a_camera_game_without_a_hub_plays_a_rally_and_closes_cleanly(tmp_path):
     assert rig.rig.hub_status() == "off" and rig.game.paused is False
     rig.close()
     assert rig.client.log[-1] == ("loop_stop",)
+
+
+# --- the hub's gyro units must have been measured before a swing strength means anything --------------------------------
+def test_playing_on_the_hub_before_the_units_were_measured_says_so(tmp_path, monkeypatch):
+    monkeypatch.setattr(live.config, "MEASURED", set())
+    messages = []
+    live.build_live(args_for("--player", "rafae", "--swing-source", "imu"), FakeEnv(), player_root=tmp_path,
+                    log=messages.append)
+    assert any("bench_hub" in m and "unit" in m.lower() for m in messages)
+
+
+def test_measured_units_or_the_camera_as_the_swing_sensor_need_no_such_warning(tmp_path, monkeypatch):
+    monkeypatch.setattr(live.config, "MEASURED", {"GYRO_PER_DPS", "ACCEL_PER_G"})
+    messages = []
+    live.build_live(args_for("--player", "rafae", "--swing-source", "imu"), FakeEnv(), player_root=tmp_path,
+                    log=messages.append)
+    assert not any("bench_hub" in m for m in messages)
+    monkeypatch.setattr(live.config, "MEASURED", set())
+    messages.clear()
+    live.build_live(args_for("--player", "rafae", "--swing-source", "pose"), FakeEnv(), player_root=tmp_path,
+                    log=messages.append)
+    assert not any("bench_hub" in m for m in messages)                    # the camera has its own fixed units

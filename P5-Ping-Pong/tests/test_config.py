@@ -86,3 +86,10 @@ def test_pp_no_local_makes_a_run_ignore_config_local_json(tmp_path, monkeypatch)
     monkeypatch.delenv("PP_NO_LOCAL")
     config._apply()
     assert config.GYRO_PER_DPS == 17.5
+
+
+def test_a_bench_number_counts_as_measured_only_when_config_local_holds_it(monkeypatch):
+    monkeypatch.setattr(config, "MEASURED", {"GYRO_PER_DPS", "CARD_COLOR"})
+    assert config.is_measured("GYRO_PER_DPS") and not config.is_measured("ACCEL_PER_G")
+    monkeypatch.setattr(config, "MEASURED", set())
+    assert not config.is_measured("GYRO_PER_DPS")

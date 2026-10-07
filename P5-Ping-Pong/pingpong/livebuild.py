@@ -93,6 +93,9 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
         raise LiveSetupError(f"--set: {exc}") from exc
     if settings:
         log(f"settings changed from the defaults: {overrides_mod.format_settings(settings)}")
+    if not camera and not config.is_measured("GYRO_PER_DPS"):
+        log("WARNING: the hub's gyro units were never measured (GYRO_PER_DPS is a guess): run './pp bench_hub --guided' "
+            "first (its three 360-degree turns), or swing strengths and thresholds can be off by 10x")
     card = None if args.no_hub else require_card(args)
     guest = profile.slug(args.player) == "guest"
     calibration = (None if guest else profile.load(args.player, root=player_root, source=swing_source)) \

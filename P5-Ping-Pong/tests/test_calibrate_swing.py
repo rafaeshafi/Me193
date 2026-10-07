@@ -116,3 +116,16 @@ def test_no_hub_with_an_explicit_hub_gyro_is_refused_before_anything_starts(tmp_
     code = tool.run(env, args_for(tmp_path, "--no-hub", "--swing-source", "imu"), profile_root=tmp_path,
                     show=lambda f: None, wait_key=lambda ms: 255, notify=lambda n: None)
     assert code == 2 and env.hub_device.calls == []
+
+
+def test_calibrating_on_the_hub_before_its_units_were_measured_warns_but_the_camera_never_does(tmp_path, monkeypatch, capsys):
+    import config
+
+    monkeypatch.setattr(config, "MEASURED", set())
+    script = fakerig.CalibrationScript()
+    tool.run(fake_env(script), args_for(tmp_path), profile_root=tmp_path, show=lambda f: None,
+             wait_key=lambda ms: ord("q"), notify=lambda n: None, size=(320, 180), frame_hz=5.0)
+    assert "bench_hub" in capsys.readouterr().err
+    camera = fakerig.CalibrationScript(u_true=(0.8, 0.6, 0.0), camera=True)
+    run_camera(tmp_path, camera_env(camera), "--no-hub")
+    assert "bench_hub" not in capsys.readouterr().err

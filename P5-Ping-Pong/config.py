@@ -113,9 +113,19 @@ def write_local(updates, path=LOCAL_PATH):
     return current
 
 
+MEASURED = set()      # the settings config_local.json held at start-up: what a bench (or the player) actually wrote
+
+
+def is_measured(name):
+    """True if `name` came from config_local.json rather than being this file's unmeasured default."""
+    return name in MEASURED
+
+
 def _apply():
     if os.environ.get("PP_NO_LOCAL") != "1":      # tests / ./pp ready ignore measured bench numbers
-        globals().update(load_local(LOCAL_PATH))
+        local = load_local(LOCAL_PATH)
+        globals().update(local)
+        MEASURED.update(local)
     if os.environ.get("PP_BROKER"):
         globals()["BROKER_HOST"], globals()["BROKER_PORT"] = parse_broker(os.environ["PP_BROKER"])
     if os.environ.get("PP_RECORD_SCOPE"):

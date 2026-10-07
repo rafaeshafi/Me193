@@ -121,6 +121,9 @@ def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), fr
         print(f"cannot calibrate: {exc}", file=sys.stderr)
         return 2
     camera = source == "pose"
+    if not camera and not config.is_measured("GYRO_PER_DPS"):
+        print("WARNING: the hub's gyro units were never measured (GYRO_PER_DPS is a guess): run './pp bench_hub "
+              "--guided' first (its three 360-degree turns), or no swing may be recognised at all", file=sys.stderr)
     if args.no_hub:
         hub = NoHub()
     else:
