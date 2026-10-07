@@ -18,8 +18,16 @@ def make_paho_client():
 
 def attach(client, publisher, *, host=None, port=None, keepalive=None, status_topic=None):
     client.will_set(status_topic or config.STATUS_TOPIC, "offline", qos=1, retain=True)
-    client.reconnect_delay_set(1, 30)
-    client.on_connect = lambda c, userdata, flags, reason_code, properties=None: publisher.on_connect()
+    client.reconnect_delay_set(1, 5)           # the public broker sometimes drops an attempt: retry briskly
+    listen = publisher.listens()
+
+    def on_connect(c, userdata, flags, reason_code, properties=None):
+        if listen:
+            c.subscribe(publisher.topic, qos=1)           # read-only: what does the broker hold right now?
+        publisher.on_connect()
+
+    client.on_connect = on_connect
+    client.on_message = lambda c, userdata, message: publisher.on_message(message)
     client.connect_async(host or config.BROKER_HOST, port or config.BROKER_PORT,
                          keepalive or config.KEEPALIVE_S)
     client.loop_start()

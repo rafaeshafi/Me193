@@ -28,6 +28,8 @@ class GameCore:
                  target_points=7, omega_lo=300.0, omega_hi=1200.0, spin_probs_fn=None,
                  countdown_s=3.0, point_pause_s=2.0):
         self.judge, self.tracker, self.policy, self.publisher = judge, tracker, policy, publisher
+        if publisher is not None:
+            publisher.on_resume = tracker.seed_record      # --resume: the retained best is where this run starts
         self.level = level or levels.LEVELS[1]
         self.mode, self.target_points = mode, target_points
         self.omega_lo, self.omega_hi, self.spin_probs_fn = omega_lo, omega_hi, spin_probs_fn

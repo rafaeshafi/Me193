@@ -145,7 +145,8 @@ def test_attach_sets_the_will_on_the_status_topic_only_and_boots_offline():
     calls = {c["call"]: c for c in client.config_calls}
     assert calls["will_set"]["will_topic"] == config.STATUS_TOPIC
     assert calls["will_set"]["payload"] == "offline" and calls["will_set"]["retain"] is True
-    assert (calls["reconnect_delay_set"]["min"], calls["reconnect_delay_set"]["max"]) == (1, 30)
+    # test.mosquitto.org drops a connection attempt now and then (3 of 4 in one probe): retry briskly, never wait 30 s
+    assert (calls["reconnect_delay_set"]["min"], calls["reconnect_delay_set"]["max"]) == (1, 5)
     assert "connect_async" in calls and "loop_start" in calls       # boots without a broker
 
 
@@ -205,3 +206,67 @@ def test_shutdown_survives_a_client_that_fails_each_step():
     pub = ScorePublisher(client, topic=OFFICIAL)
     mqtt_link.shutdown(client, pub)               # must not raise
     assert client.stopped is True
+
+
+# --- knowing what the broker already holds (so a rehearsal cannot silently overwrite the graded score) ---------------------
+def linked(**kw):
+    from pingpong import mqtt_link
+
+    pub, client = make(**kw)
+    mqtt_link.attach(client, pub)
+    client.simulate_connect()
+    return pub, client
+
+
+def test_a_live_publisher_listens_to_its_own_topic_and_remembers_what_the_broker_holds():
+    pub, client = linked()
+    assert (OFFICIAL, 1) in client.subscriptions
+    assert pub.retained is None
+    client.deliver(OFFICIAL, "18.0", retain=True)
+    assert pub.retained == 18
+
+
+def test_the_echo_of_our_own_publish_is_not_mistaken_for_the_retained_value():
+    pub, client = linked()
+    client.deliver(OFFICIAL, "19.0", retain=False)                       # a live message, not the stored one
+    assert pub.retained is None
+
+
+@pytest.mark.parametrize("kw", [{"source": "fake"}, {"source": "sim"}, {"no_publish": True}])
+def test_a_publisher_that_never_touches_the_official_topic_does_not_even_listen_to_it(kw):
+    pub, client = linked(**kw)
+    assert client.subscriptions == []
+
+
+@pytest.mark.parametrize("text", ["hello", "", "nan", "-3.0"])
+def test_a_garbage_or_cleared_retained_value_is_ignored(text):
+    pub, client = linked()
+    client.deliver(OFFICIAL, "7.0", retain=True)
+    client.deliver(OFFICIAL, text, retain=True)
+    assert pub.retained is None
+
+
+def test_without_resume_a_new_run_starts_from_zero_whatever_the_broker_holds():
+    pub, client = linked()
+    client.deliver(OFFICIAL, "18.0", retain=True)
+    pub.update(1)
+    assert payloads(client) == ["1.0"]                                   # "best streak this run": the locked decision
+
+
+def test_with_resume_the_retained_best_is_the_floor_and_the_game_is_told():
+    seeded = []
+    pub, client = linked(resume=True)
+    pub.on_resume = seeded.append
+    client.deliver(OFFICIAL, "18.0", retain=True)
+    pub.update(5)
+    assert payloads(client) == [] and seeded == [18]
+    pub.update(19)
+    assert payloads(client) == ["19.0"]
+
+
+def test_a_resubscribe_after_a_reconnect_hears_the_retained_value_again_without_harm():
+    pub, client = linked(resume=True)
+    client.deliver(OFFICIAL, "18.0", retain=True)
+    client.simulate_connect()
+    client.deliver(OFFICIAL, "18.0", retain=True)
+    assert client.subscriptions.count((OFFICIAL, 1)) == 2 and pub.retained == 18

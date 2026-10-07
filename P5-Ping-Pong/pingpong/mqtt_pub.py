@@ -22,7 +22,8 @@ _DEMO_SOURCES = ("fake", "sim", "demo")
 
 class ScorePublisher:
     def __init__(self, client, *, topic=config.SCORE_TOPIC, scope="record_session", source="live",
-                 no_publish=False, status_topic=config.STATUS_TOPIC, demo_topic=config.DEMO_SCORE_TOPIC):
+                 no_publish=False, status_topic=config.STATUS_TOPIC, demo_topic=config.DEMO_SCORE_TOPIC,
+                 resume=False):
         if scope not in config.RECORD_SCOPES:
             raise ValueError(f"unknown scope {scope!r}")
         self.client = client
@@ -35,6 +36,9 @@ class ScorePublisher:
         self._last = None          # last value sent (None until the first publish)
         self._floor = 0            # resume: never publish at or below this
         self._current = 0
+        self.resume = resume       # --resume: the broker's retained best is where this run starts
+        self.retained = None       # what the broker held when we subscribed (None: unknown / not a number)
+        self.on_resume = None      # called with the retained best when it arrives and resume is on
 
     @staticmethod
     def format(value):
@@ -70,6 +74,29 @@ class ScorePublisher:
         else:
             if self._current > max(self._last or 0, self._floor):
                 self._send(self._current)
+
+    def listens(self):
+        """Only a session that can write the official topic needs to know what it holds (fake ones stay deaf)."""
+        return not self.no_publish and self._target() == self.topic
+
+    def on_message(self, message):
+        """The retained message the broker sends on subscribe (a live echo of our own publish has retain=False)."""
+        if message.topic == self.topic and message.retain:
+            self.remember_retained(message.payload.decode(errors="replace"))
+
+    def remember_retained(self, text):
+        try:
+            value = float(text)
+        except ValueError:
+            value = None
+        if value is None or math.isnan(value) or value < 0:
+            self.retained = None
+            return
+        self.retained = int(value)
+        if self.resume:
+            self.resume_from(text)
+            if self.on_resume is not None:
+                self.on_resume(self.retained)
 
     def on_connect(self):
         """Called on every (re)connect: announce online; republish the value only if above zero."""

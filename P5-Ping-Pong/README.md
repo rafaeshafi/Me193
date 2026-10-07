@@ -144,7 +144,10 @@ too fast · **J6** paddle not locked after the hub was shaken.
 | value | the **best streak this run** (it ticks up live while you build a new best and holds after a miss) |
 
 Nothing is published at start-up (a restart never resets the retained value); the first publish is
-your first hit. Fake, simulated and demo values go to `ME193-pp/RafaeShafi/demo/score`, replays and
+your first hit. A plain run starts from zero ("best streak this run"), so its first hit publishes `1.0` over
+whatever the broker held: the game subscribes to its own topic (read-only), and when the broker already holds a
+value the lobby and the console say so before anyone swings. `./pp play --resume` keeps that value as the best
+to beat (nothing is published until you pass it), which is also what you want after a crash in the graded run. Fake, simulated and demo values go to `ME193-pp/RafaeShafi/demo/score`, replays and
 `--no-publish` publish nothing, a guest never publishes, and the last-will ("offline") lives on
 `ME193-pp/RafaeShafi/status`, never on the score topic. Watch it the way the instructor will:
 
@@ -183,7 +186,7 @@ swing strength, how often the computer misses a ball, how often you would fault,
 | the hub's IMU is too slow (< 25 Hz at the bench) | the camera's hand speed detects swings instead (`--swing-source`); spin is off then |
 | you leave the camera view for more than 0.6 s | paused, with "PAUSED: pose lost" on screen |
 | tags unreadable | SPACE starts, 1–3 set the level |
-| broker unreachable | the game runs; the score is sent when it reconnects |
+| broker unreachable | the game runs; the score is sent when it reconnects. The public broker drops a connection attempt now and then (3 of 4 in one probe), so `MQTT OFFLINE` for the first seconds is normal: it retries every 1-5 s |
 | motors weak | beep + light carry every cue; `D` disarms the motors |
 | someone shakes the hub | an FFT of the last second detects it and locks the paddle for a second |
 

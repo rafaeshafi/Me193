@@ -86,3 +86,19 @@ def test_record_is_monotone_under_random_sequences():
             assert t.record >= last_record
             assert t.streak <= t.record
             last_record = t.record
+
+
+def test_a_resumed_record_can_be_seeded_but_never_lowered():
+    t = ScoreTracker()
+    t.seed_record(12)
+    assert t.record == 12 and t.value() == 12
+    t.seed_record(5)
+    assert t.record == 12
+    t.on_valid_hit(1)
+    assert t.streak == 1 and t.record == 12 and t.value() == 12
+
+
+def test_the_live_streak_scope_ignores_a_seed_because_it_publishes_the_running_streak():
+    t = ScoreTracker(scope="live_streak")
+    t.seed_record(12)
+    assert t.record == 0 and t.value() == 0

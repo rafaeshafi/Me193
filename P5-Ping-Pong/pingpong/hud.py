@@ -148,5 +148,7 @@ def _draw_footer(frame, s, w, h):
     if parts:
         canvas.draw_text(frame, "  ".join(parts), (w // 2, h - 70), 1.6, WHITE, 3, anchor="center")
     if s.message:
-        canvas.draw_text(frame, s.message, (w // 2 - 120, 260), 1.7, AMBER, 4, anchor="center")
+        # in the lobby the message is a standing notice (UNCALIBRATED, what the broker holds): below the start prompt
+        y = 470 if s.phase == "LOBBY" else 260
+        canvas.draw_fitted(frame, s.message, w // 2, y, w - 120, max_scale=1.7, min_scale=0.75, color=AMBER)
     canvas.draw_text(frame, s.keys_hint, (24, h - 20), 0.55, GREY, 1)

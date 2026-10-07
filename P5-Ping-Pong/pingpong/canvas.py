@@ -40,6 +40,52 @@ def draw_text(frame, text, org, scale=1.0, color=(255, 255, 255), thickness=2, a
     return tw, th
 
 
+def fit_text(text, max_w, *, max_scale=1.7, min_scale=0.7, thickness=2, max_lines=3):
+    """-> (lines, scale) for a message that must fit max_w pixels.
+
+    One line at the largest scale that fits (a short banner stays big); a long notice shrinks to min_scale and
+    only then wraps into <= max_lines lines.  Text that still does not fit is cut with "..."."""
+    def width(line, scale):
+        return cv2.getTextSize(line, FONT, scale, thickness)[0][0]
+
+    scale = max_scale
+    while True:
+        if width(text, scale) <= max_w:
+            return [text], scale
+        if scale <= min_scale + 1e-9:
+            break
+        scale = max(min_scale, scale * 0.95)
+    lines, line = [], ""
+    for word in text.split():
+        candidate = f"{line} {word}".strip()
+        if line and width(candidate, min_scale) > max_w:
+            lines.append(line)
+            line = word
+        else:
+            line = candidate
+    lines.append(line)
+    dropped = len(lines) > max_lines
+    lines = lines[:max_lines]
+    for i, line in enumerate(lines):                                    # trim whatever is still too wide (a long word)
+        cut = dropped and i == len(lines) - 1
+        while line and width(line + ("..." if cut else ""), min_scale) > max_w:
+            line, cut = line[:-1], True
+        lines[i] = line + ("..." if cut else "")
+    return lines, min_scale
+
+
+def draw_fitted(frame, text, center_x, top_y, max_w, *, max_scale=1.7, min_scale=0.7, color=(255, 255, 255),
+                thickness=4, max_lines=3):
+    """A message that always fits: shrunk and wrapped as needed, centred on center_x, first baseline at top_y."""
+    lines, scale = fit_text(text, max_w, max_scale=max_scale, min_scale=min_scale, thickness=thickness,
+                            max_lines=max_lines)
+    line_h = int(34 * scale + 14)
+    for i, line in enumerate(lines):
+        draw_text(frame, line, (center_x, top_y + i * line_h), scale, color, max(1, round(thickness * scale / max_scale)),
+                  anchor="center")
+    return len(lines)
+
+
 def draw_court(frame):
     h, w = frame.shape[:2]
     corners = [canvas_pt(-HALF_WIDTH_M, 0.0, w, h), canvas_pt(HALF_WIDTH_M, 0.0, w, h),

@@ -139,3 +139,39 @@ def test_the_players_own_row_is_highlighted():
 def test_the_board_is_only_drawn_on_the_end_screen():
     rally = hud.render(state(phase="RALLY", leaderboard=BOARD), size=(W, H))
     assert diff(rally, hud.render(state(phase="RALLY"), size=(W, H))) == 0
+
+
+# --- a notice longer than the screen is wide ---------------------------------------------------------------------------
+LONG = "UNCALIBRATED: run ./pp calibrate_swing --player rafae --swing-source pose --no-hub"
+
+
+def test_a_short_message_stays_one_big_line_and_a_long_one_shrinks_and_wraps_to_fit_the_screen():
+    import cv2
+
+    short, scale = canvas.fit_text("MISSED", W - 100, max_scale=1.7, min_scale=0.7, thickness=4)
+    assert short == ["MISSED"] and scale == 1.7
+    lines, scale = canvas.fit_text(LONG, W - 100, max_scale=1.7, min_scale=0.7, thickness=4)
+    assert 0.7 <= scale < 1.7                                          # shrunk (and wrapped if even that is too wide)
+    assert " ".join(lines) == LONG
+    assert all(cv2.getTextSize(line, canvas.FONT, scale, 4)[0][0] <= W - 100 for line in lines)
+
+
+def test_text_that_cannot_fit_even_at_the_smallest_size_is_cut_with_dots_not_drawn_off_screen():
+    import cv2
+
+    lines, scale = canvas.fit_text("word " * 100, 600, max_scale=1.7, min_scale=0.7, thickness=4, max_lines=2)
+    assert len(lines) == 2 and scale == 0.7 and lines[-1].endswith("...")
+    assert all(cv2.getTextSize(line, canvas.FONT, scale, 4)[0][0] <= 600 for line in lines)
+    lines, scale = canvas.fit_text("x" * 400, 600, max_scale=1.7, min_scale=0.7, thickness=4)       # one endless word
+    assert len(lines) == 1 and lines[0].endswith("...")
+    assert cv2.getTextSize(lines[0], canvas.FONT, scale, 4)[0][0] <= 600
+
+
+def test_a_long_lobby_notice_is_drawn_inside_the_frame_and_clear_of_the_start_prompt():
+    plain = hud.render(state(phase="LOBBY"), size=(W, H))
+    noted = hud.render(state(phase="LOBBY", message=LONG), size=(W, H))
+    changed = np.abs(noted.astype(np.int32) - plain.astype(np.int32)).sum(axis=2) > 0
+    rows, cols = np.where(changed)
+    assert rows.size > 1000
+    assert cols.min() >= 20 and cols.max() <= W - 20                  # nothing clipped at the left or right edge
+    assert rows.min() > 410                                           # below "SHOW THE START CARD / or press SPACE"

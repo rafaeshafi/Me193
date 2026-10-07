@@ -37,6 +37,8 @@ def make_parser():
     ap.add_argument("--target", type=int, default=7, help="match target points (11 = win by 2)")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--no-publish", action="store_true", help="never touch the MQTT broker")
+    ap.add_argument("--resume", action="store_true",
+                    help="start from the best the broker already holds: nothing is published until you beat it")
     ap.add_argument("--no-motor", action="store_true", help="mute the hub motors (beep + light stay)")
     ap.add_argument("--no-record", action="store_true", help="do not write recordings/<session>/ (IMU, pose, events)")
     ap.add_argument("--no-audio", action="store_true", help="no game sounds (the S key mutes while playing)")

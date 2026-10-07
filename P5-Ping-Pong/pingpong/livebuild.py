@@ -132,7 +132,7 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
             no_publish=no_publish, no_motor=args.no_motor, threaded=env.threaded,
             to_image=getattr(env, "to_image", None), record_dir=record_dir, player=args.player,
             spin_probs_fn=None if model is None else model.probs, learner=learner,
-            pose_gyro=posegyro.PoseGyro() if camera else None, log=log)
+            pose_gyro=posegyro.PoseGyro() if camera else None, resume=bool(getattr(args, "resume", False)), log=log)
     except BaseException:
         if capture is not None:
             capture.release()

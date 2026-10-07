@@ -28,6 +28,11 @@ class ScoreTracker:
         self.record = max(self.record, self.streak)
         return True
 
+    def seed_record(self, record):
+        """--resume: start from a best the broker already holds (never lowers the record; not for live_streak)."""
+        if self.scope != "live_streak":
+            self.record = max(self.record, int(record))
+
     def end_rally(self):
         final, self.streak = self.streak, 0
         return final

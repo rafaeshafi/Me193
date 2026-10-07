@@ -61,6 +61,7 @@ class LiveRig:
         self.max_reconnects = max_reconnects
         self.n_impacts = 0
         self._last_pose_ns = self._horizon_ns = None
+        self._retained_told = False
         self._stale_since_ns = self._last_attempt_ns = None
         self._attempts, self._force_reconnect, self._reconnecting = 0, False, False
         self._loop_ms = deque(maxlen=20_000)
@@ -140,9 +141,26 @@ class LiveRig:
         if not self.threaded and hasattr(self.actuator, "process"):
             self.actuator.process(now)
         self._record_changes(now)
+        self._announce_retained()
         if self.recorder is not None:
             self.recorder.tick(now)
         self._loop_ms.append((time.perf_counter() - t0) * 1000.0)
+
+    def _announce_retained(self):
+        """Once, when the broker says what it holds: tell the player before a plain run writes over it."""
+        publisher = self.session.game.publisher
+        if self._retained_told or publisher is None or not publisher.retained:
+            return
+        self._retained_told, held = True, publisher.retained
+        if publisher.resume:
+            notice = f"RESUMING: the broker holds {held}, your best starts there"
+            self.log(f"broker holds {held}.0 on the score topic: --resume keeps it as the best to beat")
+        else:
+            notice = f"BROKER HOLDS {held} - a new run publishes 1 over it (--resume keeps it, --no-publish leaves it)"
+            self.log(f"broker holds {held}.0 on the score topic: this run starts from 0 and its first hit publishes "
+                     "1.0 over it; stop and use --resume to keep it, or --no-publish to leave it alone")
+        if not self.session.has_notice():
+            self.session.set_notice(notice)
 
     def _record_summary(self):
         stats = getattr(self.vision, "stats", None)
@@ -287,7 +305,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
              mode="survival", target=7, seed=1, source="live", scope=None, no_publish=False, no_motor=False,
              threaded=False, lag_s=None, gyro_per_dps=None, accel_per_g=None, fs_raw=None, stale_ms=None,
              to_image=None, record_dir=None, player="rafae", vision=None, recorder=None, spin_probs_fn=None,
-             learner=None, pose_gyro=None, log=print):
+             learner=None, pose_gyro=None, resume=False, log=print):
     """Wire every piece into one LiveRig.  The real play.py and the fake rig both come through here,
     so the wiring that matters on hardware (haptic blank windows, phase-gated tag search, the pose
     lock, status lights) is exactly the wiring the tests run.
@@ -323,7 +341,8 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         level=level, mode=mode, target=target, clock=clock, actuator=actuator,
         client=mqtt_client if publishing else None, source=source, scope=scope or config.RECORD_SCOPE,
         no_publish=no_publish, seed=seed, box=calibration.box, omega_lo=calibration.swing.omega_lo,
-        omega_hi=calibration.swing.omega_hi, t_pk=params.t_pk, spin_probs_fn=spin_probs_fn, learner=learner)
+        omega_hi=calibration.swing.omega_hi, t_pk=params.t_pk, spin_probs_fn=spin_probs_fn, learner=learner,
+        resume=resume)
     if vision is None:
         lock = PoseLock()
         if calibration.shoulder_w:
