@@ -1,0 +1,185 @@
+"""The scene: the table in perspective with shadows, the net, two paddles and the ball, drawn like an arcade game.
+
+Everything is placed in the world of physics.py (metres) and drawn through a court3d.Camera, so depth reads the way it
+does in the arcade original: things shrink and climb the picture towards the far end, the ball's shadow on the table
+shows how high it is, and your paddle is an object standing in the scene (it gets smaller and higher as it reaches
+forward) rather than a sticker on the screen.  Flat bright colours, no textures.
+"""
+
+import math
+from functools import lru_cache
+
+import cv2
+import numpy as np
+
+from pingpong import canvas, physics
+
+# BGR palette
+FLOOR, BANNER = (92, 118, 205), (70, 40, 30)
+STANDS, STANDS_ROW = (200, 112, 50), (225, 150, 90)
+TABLE, TABLE_FRONT, LINE = (70, 170, 55), (40, 105, 30), (240, 240, 240)
+LEG, SHADOW = (66, 124, 180), (0, 0, 0)
+NET, TAPE = (50, 50, 50), (250, 250, 250)
+BALL, BALL_RIM = (70, 225, 255), (20, 90, 150)
+REACH = (40, 170, 255)                  # the ring on the table: how far from your paddle a ball can still be hit
+
+PADDLE_FACE_M = 0.12                    # the face of your paddle (the ring around it is the real reach)
+CPU_FACE_M = 0.11
+BALL_R_M = 0.05
+CPU_Y_M = physics.STRIKE_Y_M
+CPU_Z_M = physics.CPU_Z_M + 0.05
+LEG_H_M = 0.30
+NET_OVERHANG_M = 0.10
+SKIN = (130, 175, 235)
+HW, L = physics.HALF_WIDTH_M, physics.TABLE_LEN_M
+
+
+def _pts(cam, *world):
+    return np.array([cam.project(*p)[:2] for p in world], dtype=np.int32)
+
+
+def _blend_poly(frame, pts, color, alpha):
+    """A translucent filled polygon (only the part of the frame it covers is touched)."""
+    h, w = frame.shape[:2]
+    pts = np.asarray(pts, dtype=np.int32)
+    x0, y0 = max(0, int(pts[:, 0].min()) - 2), max(0, int(pts[:, 1].min()) - 2)
+    x1, y1 = min(w, int(pts[:, 0].max()) + 3), min(h, int(pts[:, 1].max()) + 3)
+    if x1 <= x0 or y1 <= y0:
+        return
+    roi = frame[y0:y1, x0:x1]
+    layer = roi.copy()
+    cv2.fillPoly(layer, [pts - np.array([x0, y0], dtype=np.int32)], color, cv2.LINE_AA)
+    cv2.addWeighted(layer, alpha, roi, 1.0 - alpha, 0, roi)
+
+
+@lru_cache(maxsize=4)
+def _still_life(cam, w, h):
+    """The room and the table: they never change, so they are drawn once and copied into every frame."""
+    layer = np.empty((h, w, 3), dtype=np.uint8)
+    _backdrop(layer, cam)
+    _table(layer, cam)
+    return layer
+
+
+def draw_scene(frame, cam, s):
+    h, w = frame.shape[:2]
+    frame[:] = _still_life(cam, w, h)
+    if s.paddle is not None:
+        _zone(frame, cam, s)
+    if s.ball is not None:
+        _ball_shadow(frame, cam, s.ball)
+    items = [(CPU_Z_M, "cpu"), (physics.NET_Z_M, "net")]
+    if s.ball is not None:
+        items.append((s.ball[2] - 0.15, "ball"))
+    if s.paddle is not None:
+        items.append((s.paddle[2], "paddle"))
+    for _, kind in sorted(items, key=lambda item: -item[0]):
+        if kind == "cpu":
+            _cpu_paddle(frame, cam, s)
+        elif kind == "net":
+            _net(frame, cam)
+        elif kind == "ball":
+            _ball(frame, cam, s.ball)
+        else:
+            _player_paddle(frame, cam, s)
+
+
+# --- the room and the table --------------------------------------------------------------------------------------------
+def _backdrop(frame, cam):
+    h, w = frame.shape[:2]
+    frame[:] = FLOOR
+    far_l, far_r = cam.project(-HW, 0, L)[:2], cam.project(HW, 0, L)[:2]
+    near_l, near_r = cam.project(-HW, 0, 0)[:2], cam.project(HW, 0, 0)[:2]
+    top, bottom = round(0.115 * h), round(near_l[1] + 0.03 * h)
+    left = np.array([(0, top), (far_l[0] - 0.07 * w, top), (near_l[0] - 0.12 * w, bottom), (0, bottom)], dtype=np.int32)
+    right = np.array([(w, top), (far_r[0] + 0.07 * w, top), (near_r[0] + 0.12 * w, bottom), (w, bottom)], dtype=np.int32)
+    for edge, poly in ((0, left), (w, right)):
+        cv2.fillPoly(frame, [poly], STANDS, cv2.LINE_AA)
+        for k in range(1, 9):                                  # the rows of the crowd
+            y = round(top + (bottom - top) * k / 9)
+            x_in = round(poly[1][0] + (poly[2][0] - poly[1][0]) * (y - top) / (bottom - top))
+            cv2.line(frame, (edge, y), (x_in, y), STANDS_ROW, 2, cv2.LINE_AA)
+    cv2.rectangle(frame, (0, 0), (w, top), BANNER, -1)
+    shadow = _pts(cam, (-HW, -LEG_H_M, 0), (HW, -LEG_H_M, 0), (HW, -LEG_H_M, L), (-HW, -LEG_H_M, L))
+    _blend_poly(frame, shadow, SHADOW, 0.30)
+
+
+def _table(frame, cam):
+    for x in (-HW + 0.12, HW - 0.12):
+        for z in (0.14, L - 0.14):
+            (x0, y0, sc), (x1, y1, _) = cam.project(x, -0.06, z), cam.project(x, -LEG_H_M, z)
+            cv2.line(frame, (round(x0), round(y0)), (round(x1), round(y1)), LEG, max(3, round(0.05 * sc)), cv2.LINE_AA)
+    cv2.fillPoly(frame, [_pts(cam, (-HW, 0, 0), (HW, 0, 0), (HW, 0, L), (-HW, 0, L))], TABLE, cv2.LINE_AA)
+    cv2.fillPoly(frame, [_pts(cam, (-HW, 0, 0), (HW, 0, 0), (HW, -0.06, 0), (-HW, -0.06, 0))], TABLE_FRONT, cv2.LINE_AA)
+    corners = _pts(cam, (-HW, 0, 0), (HW, 0, 0), (HW, 0, L), (-HW, 0, L))
+    cv2.polylines(frame, [corners], True, LINE, 3, cv2.LINE_AA)
+    mid = _pts(cam, (0, 0, 0), (0, 0, L))
+    cv2.line(frame, tuple(int(v) for v in mid[0]), tuple(int(v) for v in mid[1]), LINE, 2, cv2.LINE_AA)
+
+
+def _net(frame, cam):
+    w = HW + NET_OVERHANG_M
+    quad = _pts(cam, (-w, 0, physics.NET_Z_M), (w, 0, physics.NET_Z_M), (w, physics.NET_H_M, physics.NET_Z_M),
+                (-w, physics.NET_H_M, physics.NET_Z_M))
+    _blend_poly(frame, quad, NET, 0.55)
+    for k in range(1, 28):                                     # the mesh
+        x = -w + 2 * w * k / 28
+        a, b = cam.project(x, 0, physics.NET_Z_M)[:2], cam.project(x, physics.NET_H_M, physics.NET_Z_M)[:2]
+        cv2.line(frame, (round(a[0]), round(a[1])), (round(b[0]), round(b[1])), NET, 1, cv2.LINE_AA)
+    top = _pts(cam, (-w, physics.NET_H_M, physics.NET_Z_M), (w, physics.NET_H_M, physics.NET_Z_M))
+    cv2.line(frame, tuple(int(v) for v in top[0]), tuple(int(v) for v in top[1]), TAPE, 3, cv2.LINE_AA)
+    for x in (-w, w):
+        a, b = cam.project(x, 0, physics.NET_Z_M), cam.project(x, physics.NET_H_M + 0.03, physics.NET_Z_M)
+        cv2.line(frame, (round(a[0]), round(a[1])), (round(b[0]), round(b[1])), (30, 30, 30), 3, cv2.LINE_AA)
+
+
+# --- shadows and rings on the table -------------------------------------------------------------------------------------
+def _on_table(x, z):
+    return abs(x) <= HW + 0.02 and -0.02 <= z <= L + 0.02
+
+
+def _ball_shadow(frame, cam, ball):
+    x, _, z = ball
+    if _on_table(x, z):
+        _blend_poly(frame, cam.ground_circle(x, z, BALL_R_M * 1.15), SHADOW, 0.75)
+
+
+def _zone(frame, cam, s):
+    """Your paddle's reach on the table: an oval round where your hand has it, as long as the ball can be hit over (a
+    ball whose shadow is inside it can be hit; over the paddle's own line it is exactly on time), and the paddle's shadow."""
+    rest = s.rest or s.paddle
+    x, _, z = rest
+    z_far, z_near = s.zone if s.zone is not None else (z + 0.45, z - 0.15)
+    z_far, z_near = min(z_far, L + 0.25), max(z_near, -0.45)
+    if z_far - z_near > 0.1:
+        ring = np.array(cam.ground_ellipse(x, (z_far + z_near) / 2, s.reach_m, (z_far - z_near) / 2), dtype=np.int32)
+        _blend_poly(frame, ring, REACH, 0.12)
+        cv2.polylines(frame, [ring], True, REACH, 2, cv2.LINE_AA)
+        line = _pts(cam, (x - s.reach_m, 0, z), (x + s.reach_m, 0, z))
+        cv2.line(frame, tuple(int(v) for v in line[0]), tuple(int(v) for v in line[1]), REACH, 2, cv2.LINE_AA)
+    px, _, pz = s.paddle
+    if _on_table(px, pz):
+        _blend_poly(frame, cam.ground_circle(px, pz, PADDLE_FACE_M * 1.1), SHADOW, 0.55)
+
+
+# --- the things standing in the scene -------------------------------------------------------------------------------------
+def _ball(frame, cam, ball):
+    px, py, sc = cam.project(*ball)
+    r = max(4, round(BALL_R_M * sc))
+    cv2.circle(frame, (round(px), round(py)), r + 2, BALL_RIM, -1, cv2.LINE_AA)
+    cv2.circle(frame, (round(px), round(py)), r, BALL, -1, cv2.LINE_AA)
+    cv2.circle(frame, (round(px - 0.35 * r), round(py - 0.35 * r)), max(1, round(0.22 * r)), (235, 250, 255), -1, cv2.LINE_AA)
+
+
+def _player_paddle(frame, cam, s):
+    px, py, sc = cam.project(*s.paddle)
+    r = max(6, round(PADDLE_FACE_M * sc))
+    canvas.draw_paddle(frame, round(px), round(py), r, angle_deg=s.paddle_angle, hand=True)
+
+
+def _cpu_paddle(frame, cam, s):
+    """The computer's paddle at the far end: it waits where it hit, chases your shot, and flicks when it hits."""
+    px, py, sc = cam.project(s.cpu_x_m, CPU_Y_M, CPU_Z_M)
+    angle = 0.0 if s.cpu_swing is None else 55.0 * math.sin(math.pi * s.cpu_swing)
+    canvas.draw_paddle(frame, round(px), round(py), max(5, round(CPU_FACE_M * sc)), rubber=canvas.RUBBER_BLUE,
+                       angle_deg=angle, handle_up=True)

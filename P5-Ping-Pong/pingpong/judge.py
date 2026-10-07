@@ -1,10 +1,14 @@
 """HitJudge: a swing is a HIT only if every hard gate passes (J1-J6).
 
-    J1 timing      t_i in [t_c - E, t_c + L]   (earlier = ignored practice swing)
-    J2 pose        hand near the ball over [t_i-0.30, t_i+0.05] (the impact included: a stroke sweeps ~10 SW/s,
-                   so the hand is within reach only at the moment of impact) AND near it AT the impact (closes
-                   "touch, then swing elsewhere"; the newest pose is no use here: detection comes up to 150 ms
-                   after the peak, when the hand is in the follow-through)
+    J1 timing      contact in [t_c - E, t_c + L]   (earlier = ignored practice swing).  The contact is the gyro's
+                   peak plus the stroke's lag: the forward stroke of a swing ENDS ~0.1 s after the peak of its rate, and
+                   that is when the player means the paddle to meet the ball (the first live games: the peaks came a
+                   median 0.25 s before the ball's nominal arrival, the stroke's ends right on it)
+    J2 pose        the hand is level with the ball ACROSS the court (how high it is does not matter) over
+                   [t_i-0.30, t_i+0.05] (the impact included: a stroke sweeps ~10 SW/s, so the hand is within reach
+                   only at the moment of impact) AND at the impact (closes "touch, then swing elsewhere"; the newest
+                   pose is no use here: detection comes up to 150 ms after the peak, when the hand is in the
+                   follow-through).  Where the ball is comes from its flight, at the contact.
     J3 swing       peak, duration and oscillation limits
     J4 cross-sensor (logged only; made hard only after measuring false rejects)
     J5 refractory  one hit per ball, 0.35 s after a counted hit, <= 3 hits per second
@@ -20,18 +24,21 @@ import math
 from collections import deque
 from dataclasses import dataclass
 
+from pingpong import physics, stage
 from pingpong.events import GateResult, Verdict
 
 S = 1_000_000_000
 MIN_PEAK_SPEED_SW_S = 0.3        # a hand that barely moves has no speed peak worth comparing
+CONTACT_LAG_S = 0.10             # from the gyro's peak to the end of the forward stroke: where the paddle meets the ball
 
 
 @dataclass(frozen=True)
 class BallWindow:
     ball_id: int
-    t_c_ns: int
-    aim_ab: tuple        # arrival point in reach-box coordinates
+    t_c_ns: int          # when the ball is over the sweet spot
+    aim_ab: tuple        # arrival point in reach-box coordinates (a: across the court; b: how deep it bounced)
     level: object        # pingpong.levels.Level
+    leg: object = None   # its flight (physics.Leg): where the ball is at any moment; without one it arrives at aim a
 
 
 def pose_at(samples, t_ns, *, before_s=0.10, after_s=0.05, min_conf=0.0):
@@ -63,8 +70,8 @@ def cross_sensor_offset_ms(samples, t_i_ns):
 
 class HitJudge:
     def __init__(self, box, t_pk=250.0, d95_s=0.15, min_dur_ms=60.0, max_dur_ms=2000.0, max_reversals=2,
-                 min_conf=0.6, refractory_s=0.35, max_hits_per_s=3):
-        self.box, self.t_pk, self.d95_s = box, t_pk, d95_s
+                 min_conf=0.6, refractory_s=0.35, max_hits_per_s=3, contact_lag_s=CONTACT_LAG_S):
+        self.box, self.t_pk, self.d95_s, self.contact_lag_s = box, t_pk, d95_s, contact_lag_s
         self.min_dur_ms, self.max_dur_ms, self.max_reversals = min_dur_ms, max_dur_ms, max_reversals
         self.min_conf, self.refractory_s, self.max_hits_per_s = min_conf, refractory_s, max_hits_per_s
         self._counted = set()
@@ -74,19 +81,30 @@ class HitJudge:
     def lock_paddle(self, until_ns):
         self._locked_until_ns = max(self._locked_until_ns, until_ns)
 
+    def sweet_ns(self, ball, v):
+        """When the ball is over the paddle that a hand at height v puts on the table (the nominal arrival without a flight)."""
+        if ball.leg is None or v is None:
+            return ball.t_c_ns
+        return ball.leg.time_at_z(stage.rest_z(self.box, v))
+
     def miss_deadline_ns(self, ball):
-        return ball.t_c_ns + round((ball.level.late_s + self.d95_s) * 1e9)
+        """Only when no paddle position could still reach the ball: the one furthest back is the last to meet it."""
+        t_ns = ball.t_c_ns if ball.leg is None else ball.leg.time_at_z(stage.Z_REST_MIN)
+        return t_ns + round((ball.level.late_s + self.d95_s) * 1e9)
 
     def judge(self, swing, ball, pose_samples, now_ns):
         level = ball.level
-        e_s = (swing.t_ns - ball.t_c_ns) / 1e9
+        intended_ns = swing.t_ns + round(self.contact_lag_s * 1e9)      # when the stroke means the paddle to meet the ball
+        contact_ns = max(now_ns, intended_ns)                           # ... and the ball is where it is NOW: never the past
+        impact = pose_at(pose_samples, swing.t_ns, min_conf=self.min_conf)     # where the hand put the paddle, and how far up
+        e_s = (intended_ns - self.sweet_ns(ball, None if impact is None else impact.v)) / 1e9
         if e_s < -level.early_s:
             note = "early cue" if e_s >= -2 * level.early_s else "early: practice swing, ignored"
-            return Verdict("IGNORED", 0.0, e_s, 0.0, (GateResult("J1", False, note),))
+            return Verdict("IGNORED", 0.0, e_s, 0.0, (GateResult("J1", False, note),), contact_ns)
 
         gates = [GateResult("J1", e_s <= level.late_s, f"timing {e_s * 1000:+.0f} ms (window "
                             f"-{level.early_s * 1000:.0f}/+{level.late_s * 1000:.0f})")]
-        j2, d_min = self._pose_gate(swing, ball, pose_samples)
+        j2, d_min = self._pose_gate(swing, ball, pose_samples, contact_ns)
         gates += [j2, self._swing_gate(swing), self._cross_gate(swing, pose_samples),
                   self._refractory_gate(swing, ball), self._lock_gate(swing)]
         q_pos = max(0.0, min(1.0, 1.0 - d_min / level.radius_sw)) if math.isfinite(d_min) else 0.0
@@ -94,16 +112,21 @@ class HitJudge:
         if all(g.passed for g in hard):
             self._counted.add(ball.ball_id)
             self._hit_times_ns.append(swing.t_ns)
-            return Verdict("HIT", q_pos, e_s, d_min, tuple(gates))
-        return Verdict("REJECTED", q_pos, e_s, d_min if math.isfinite(d_min) else 0.0, tuple(gates))
+            return Verdict("HIT", q_pos, e_s, d_min, tuple(gates), contact_ns)
+        return Verdict("REJECTED", q_pos, e_s, d_min if math.isfinite(d_min) else 0.0, tuple(gates), contact_ns)
 
     # --- gates -------------------------------------------------------------------------
-    def _pose_gate(self, swing, ball, samples):
+    def ball_u(self, ball, t_ns):
+        """Where the ball is across the court at t_ns, in the hand's own units (shoulder widths)."""
+        x = ball.leg.position(t_ns)[0] if ball.leg is not None else physics.x_of_a(ball.aim_ab[0])
+        return self.box.to_uv(physics.a_of_x(x), 0.5)[0]
+
+    def _pose_gate(self, swing, ball, samples, contact_ns):
         R = ball.level.radius_sw
-        bu, bv = self.box.to_uv(*ball.aim_ab)
+        bu = self.ball_u(ball, contact_ns)
         lo, hi = swing.t_ns - int(0.30 * S), swing.t_ns + int(0.05 * S)
         visible = [p for p in samples if lo <= p.t_scene_ns <= hi and p.conf >= self.min_conf]
-        dist = lambda p: math.hypot(p.u - bu, p.v - bv)           # noqa: E731
+        dist = lambda p: abs(p.u - bu)                            # noqa: E731  (across the court: the height is free)
         d_min = min((dist(p) for p in visible), default=math.inf)
         if len(visible) < 2:
             return GateResult("J2", False, f"only {len(visible)} confident pose frame(s) in the approach window"), d_min

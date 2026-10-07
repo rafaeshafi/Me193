@@ -15,7 +15,7 @@ EXPECTED_FIELDS = {
     "PaddlePose": ["t_scene_ns", "u", "v", "conf", "hand"],
     "TagEvent": ["role", "value", "t_ns"],
     "GateResult": ["name", "passed", "note"],
-    "Verdict": ["kind", "q_pos", "e_s", "d_min_sw", "gates"],
+    "Verdict": ["kind", "q_pos", "e_s", "d_min_sw", "gates", "contact_ns"],
     "ShotParams": ["v_out", "T", "S", "A", "aim_a", "q_total", "fault", "label"],
     "HapticCmd": ["name", "strength", "fire_at_ns"],
     "GameEvent": ["kind", "t_ns", "data"],

@@ -29,11 +29,12 @@ def test_a_scripted_player_returns_ten_balls_with_the_camera_as_the_only_swing_s
     assert rig.rig.swing_source == "pose" and rig.rig.n_impacts >= 10
 
 
-def test_club_level_is_playable_from_the_camera_too():
-    # seed 2: the camera's shake lock (3-8 Hz over 1 s) false-locks a scripted rally in roughly a quarter of the seeds at
-    # Club and Pro (the swing, the hand's return and the next swing are one lobe every 0.3 s); camera mode was never
-    # tuned on a real recording, and it is not the sensor while the hub gives 64 Hz
-    rig = camera_rig(level=2, seed=2)
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_club_level_is_playable_from_the_camera_too(seed):
+    # camera mode is for Rookie and Club (a 30 fps camera cannot follow a Pro ball's 0.43 s flight: the glide, the
+    # backswing and the stroke merge into one lobe); it was never tuned on a real recording, and it is not the sensor
+    # while the hub gives 64 Hz
+    rig = camera_rig(level=2, seed=seed)
     rig.run(until=lambda: rig.game.tracker.streak >= 6, max_s=120)
     assert rig.game.tracker.streak >= 6
 

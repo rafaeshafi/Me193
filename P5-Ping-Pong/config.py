@@ -43,6 +43,13 @@ BLANK_AFTER_PULSE_S = 0.12   # IMU blanking after a motor pulse (bench P6 measur
 DUTY_CAP = 0.25              # max motor-on fraction ...
 DUTY_WINDOW_S = 2.0          # ... per rolling window
 
+# --- Where the time goes (see pingpong/latency.py): typical values, tunable ----------------------------------
+LAT_IMU_S = 0.040        # hub -> Mac: a sample is stamped on ARRIVAL, ~this long after the hand did it
+LAT_STROKE_S = 0.14      # from the gyro's peak to the end of the forward stroke (live recordings: 0.10-0.22 s)
+LAT_DISPLAY_S = 0.050    # a frame drawn -> light from the screen
+LAT_AUDIO_S = 0.025      # a sound written -> heard
+LAT_HAPTIC_S = 0.050     # a motor command written -> the hub's motors move
+
 # --- Vision ------------------------------------------------------------------
 CAMERA_INDEX = 0
 CAMERA_LAG_S = 0.10          # camera-vs-IMU lag; bench P8 measures it
@@ -52,7 +59,7 @@ _TUNABLE = (
     "CARD_COLOR", "CARD_SERIAL", "NOTIFY_MS", "ACCEL_PER_G", "GYRO_PER_DPS", "HUB_FS_RAW",
     "HUB_RATE_HZ", "HUB_WORST_GAP_MS", "HUB_P999_GAP_MS", "STALE_MS",
     "MAX_WRITES_PER_S", "BLANK_AFTER_PULSE_S", "DUTY_CAP", "DUTY_WINDOW_S",
-    "CAMERA_INDEX", "CAMERA_LAG_S",
+    "CAMERA_INDEX", "CAMERA_LAG_S", "LAT_IMU_S", "LAT_STROKE_S", "LAT_DISPLAY_S", "LAT_AUDIO_S", "LAT_HAPTIC_S",
 )
 
 

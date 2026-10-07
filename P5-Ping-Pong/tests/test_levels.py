@@ -53,3 +53,14 @@ def test_survival_ramp_scales_speed_and_is_capped():
     assert levels.survival_ramp(0) == 1.0
     assert levels.survival_ramp(10) == pytest.approx(1.3)
     assert levels.survival_ramp(1000) == 1.8
+
+
+def test_only_pro_and_insane_can_fault_a_hit_on_a_beginner_level_a_hit_is_a_hit():
+    # the first live games: a real hit (hard, a little off) was called "fault: out" and ended the game, which read as a bug
+    assert levels.LEVELS[1].fault_th >= 1.0 and levels.LEVELS[2].fault_th >= 1.0     # s * (1 - q) can never reach 1
+    assert levels.LEVELS[3].fault_th < 1.0 and levels.LEVELS[4].fault_th < 1.0
+
+
+def test_the_early_windows_fit_how_people_really_swing():
+    # measured on the live recordings: the contact (peak + 0.1 s) was 0.1-0.35 s before the ball's nominal arrival
+    assert levels.LEVELS[1].early_s >= 0.50 and levels.LEVELS[2].early_s >= 0.30

@@ -4,10 +4,12 @@
 
 ME 193 – AI & Robotics, Project 5. (It is P5 because `P4-Door-To-Door-Service` already exists.)
 
-You stand about 1.8 m from the laptop with the hub in your fist. The laptop draws a
-virtual table over your webcam picture and the computer serves a ball at you.
+You stand about 1.8 m from the laptop with the hub in your fist. The laptop shows a table tennis table in
+perspective, seen from behind your end like an arcade game (a ball with a shadow that bounces, a paddle with depth), and
+the computer serves a ball at you. Your webcam picture is a small corner of the screen, with a ring on the hand it tracks.
 
-- **Pose (MediaPipe)** says *where* your paddle is: your hand, relative to your shoulders.
+- **Pose (MediaPipe)** says *where* your paddle is: your hand, relative to your shoulders. Across the box is across the
+  table; up and down is how far up the table the paddle stands (raise your hand to meet the ball sooner).
 - **The hub's IMU** says *when* you swung and *how hard*: the gyro peak sets the speed of your return.
   (If the bench finds the hub too slow to see a swing, the camera's hand speed does this job instead.)
 - **AprilTag cards** start the game (card 0) and set the level (cards 1–3 = Rookie, Club, Pro),
@@ -117,34 +119,51 @@ between rallies to change the level; **M** switches Rally/Match; **1–3** also 
 | Q / Esc | quit (stops the motors, saves, lets the hub go) |
 | J / K | soft / hard swing (`--fake` only) |
 
-| Level | ball speed | flight (3 m) | hit window early / late | paddle radius | balls arrive in |
-|---|---|---|---|---|---|
-| Rookie | 2.5 m/s | 1.2 s | 0.30 / 0.18 s | 0.55 shoulder widths | the middle 60% of your reach box |
-| Club | 5.0 m/s | 0.60 s | 0.22 / 0.14 s | 0.45 | the middle 80% |
-| Pro | 7.0 m/s | 0.43 s | 0.16 / 0.10 s | 0.35 | the whole box |
+| Level | ball speed | flight (3 m) | hit window early / late | reach across the table | faults | balls arrive in |
+|---|---|---|---|---|---|---|
+| Rookie | 2.5 m/s | 1.2 s | 0.50 / 0.22 s | 0.70 shoulder widths | never | the middle 60% of your reach box |
+| Club | 5.0 m/s | 0.60 s | 0.30 / 0.16 s | 0.55 | never | the middle 80% |
+| Pro | 7.0 m/s | 0.43 s | 0.22 / 0.12 s | 0.42 | hard and sloppy | the whole box |
 
-**What the screen shows.** The camera picture is behind everything; on top of it is a table with two table-tennis
-paddles. The **red paddle is yours** and follows your hand (the fist, not the wrist) and **turns when you turn the hub**
-side to side in your fist (the calibration learns which way you turn it); its round face is exactly the
-level's hit radius, and the small amber ring is where the ball is about to arrive, so *the ring inside the red face
-when the ball gets there* is what the judge calls a hit. The **blue paddle is the computer**: it waits where it hit,
-moves to where your shot will land, and flicks when it hits the ball back from there. The grey rectangle is the part
-of your reach box the balls can come to. One shoulder width is the same number of pixels across and up.
-`--set level.reach=0.5` shrinks that window (0.5 = the middle half of the box) and `--set level.radius_sw=0.8` makes
-your paddle bigger.
+**What the screen shows.** A table in perspective, seen from behind your end (the camera that draws it is 1.4 m up and
+1.8 m behind your edge, pitched down 28 degrees; `pingpong/court3d.py`). The **red paddle is yours**: it stands on the table
+where your hand puts it, **across** the table as you move left and right and **up the table** as you raise your hand, gets
+smaller and higher on the screen as it reaches forward, **turns when you turn the hub** in your fist, and has a fist
+round its handle. The **blue paddle is the computer**: it waits where it hit, moves to where your shot will land, and
+flicks when it hits the ball back. The ball is a yellow disc with a **shadow on the table**, so how high it is and how far
+off it is can be read, and it **bounces once** on each side. The **amber oval on the table** is your paddle's reach: it is
+as wide as the level allows across and as long as the level's timing window is along the table; a ball whose shadow is
+inside it can be hit, and over the amber line across the paddle it is exactly on time. The two boxes at the sides are
+the streak and the best (Rally) or the points (Match); the camera picture is in the bottom corner. `--set level.radius_sw=0.9`
+widens the oval, `--set level.early_s=0.6` lengthens it.
 
-**One shot.** The computer's ball arrives at a known instant. You swing; the swing detector reports
-its peak (back-dated to when the gyro really peaked), and the judge checks six gates (below). A valid
-hit turns the peak gyro rate into speed (`3 + 11·s^0.8` m/s, `s` = 0..1 between your soft and full
-calibration swings), your hand position into aim, and a deterministic risk rule into a net or out
-fault when you swing hard *and* sloppily (`s·(1 − quality) > threshold`; a near-perfect hit never faults).
+**One shot.** The computer's ball bounces on your half and passes your paddle at a known instant. You swing; the swing
+detector reports the gyro's peak (back-dated to when it really peaked), the judge dates the **contact** a stroke later
+(the peak plus 0.1 s: the forward stroke of a swing ends about 0.1 s after the peak of its rate, and that is when you
+mean the paddle to meet the ball) and checks six gates (below). On a hit the **paddle lunges forward to wherever the ball
+is** at the contact (so an early swing meets it further up the table), and the ball goes back from there. The peak gyro
+rate becomes the speed of your return (`3 + 11·s^0.8` m/s, `s` = 0..1 between your soft and full calibration swings), your
+hand position the aim, and at Pro and Insane a deterministic risk rule makes a net or out fault when you swing hard *and*
+sloppily (`s·(1 − quality) > threshold`; a near-perfect hit never faults). Rookie and Club never fault: a hit is a hit.
 With a trained **spin model** the swing's own rotation and acceleration decide flat, topspin or backspin:
 topspin shortens the ball's flight after the bounce, backspin lengthens it, and in Match more spin makes the
 computer more likely to miss. Without a model (or one that did not reach 75% cross-validated accuracy) every
 ball is flat; `--no-spin` ignores the model.
 
-**The six gates** (the x-ray shows each one with its reason): **J1** timing inside the level's window ·
-**J2** your hand near the ball from 0.3 s before to 0.05 s after the impact, and near it at the impact · **J3** swing big and
+**Where the time goes.** Every stage has a delay and the game compensates for each one so that what you see, what is
+judged and what you feel line up (`pingpong/latency.py`, tunable with `--set latency.display_s=0.08` or in
+`config_local.json`): the hub's samples are stamped when they *arrive*, about 40 ms after your hand did it, and the
+swing is dated accordingly; the screen shows a frame 50 ms after it is drawn, so the ball and the computer's paddle (whose
+flights are known exactly) are **drawn ahead** by that much and what you see is where the ball is; your hand (the camera
+pipeline is 100 ms or more behind it) is **extrapolated** by its speed across that gap so the paddle keeps up with
+your hand, with a cap and damping so a turn does not overshoot; and the thump of a hit and its sound are **sent early**
+by the motors' and the speakers' delays so they arrive when the picture shows the contact. The camera's own lag is the
+one delay measured on this hardware (`./pp bench_cam`).
+
+**The six gates** (the x-ray shows each one with its reason): **J1** the contact inside the level's window around that moment ·
+**J2** your hand level with the ball *across the table* (its height does not matter) from 0.3 s before to 0.05 s after the
+impact and at the impact; the ball is where its flight puts it at the contact, the moment is when the ball is over the
+paddle your hand height puts on the table · **J3** swing big and
 clean enough · **J4** pose and IMU agree on the moment (logged only) · **J5** one hit per ball, not
 too fast · **J6** paddle not locked after the hub was shaken.
 
@@ -173,8 +192,9 @@ mosquitto_sub -h test.mosquitto.org -t 'ME193/Rogers/#' -v
 
 ## What it shows and records
 
-- **The screen**: your camera picture (mirrored) with the table, the ball and its shadow, a ring where
-  the ball will arrive, a ring at your hand, the streak and best, km/h of your last shot and its quality.
+- **The screen**: the table in perspective with the ball and its shadow, your paddle and the computer's, the amber
+  reach oval, the streak and best, km/h of your last shot and its quality, and your camera picture (mirrored) in the
+  corner with a ring on your tracked hand.
   A strip chart shows the **IMU swing rate with the threshold line** ("CAMERA SWING" when the camera is the
   sensor); **X** adds the x-ray gate list.
 - **Leaderboard**: every finished live game is saved to `data/pingpong.db` (Rally by best streak,
@@ -265,10 +285,10 @@ sensors into events: a state machine projects the hub's gyro onto my learned for
 on a threshold, fires at the peak, and ignores backswings and waving (when the hub is too slow the same machine
 runs on the camera's hand velocity); AprilTag ids must be seen in 4 of
 6 frames (START also held 0.4 s) before they count; pose is used only when the landmarks are visible.
-**The hit judge** is a conjunction of five deciding gates: the swing's back-dated time inside a window
-around the ball's known arrival, my hand (from pose, shifted by the measured camera lag) within a
-level-dependent radius of the ball around the impact and at the impact itself, the swing big and clean enough, one
-hit per ball, and no shake lock. A sixth gate only measures and logs whether the camera and the IMU saw
+**The hit judge** is a conjunction of five deciding gates: the swing's contact (its back-dated peak plus the stroke's
+length, less the time the hub took to tell me) inside a window around the moment the ball passes my paddle, my hand
+(from pose, shifted by the measured camera lag) level with the ball across the table within a level-dependent reach
+around the impact and at the impact itself, the swing big and clean enough, one hit per ball, and no shake lock. A sixth gate only measures and logs whether the camera and the IMU saw
 the swing at the same moment. Each gate's result and reason appears on screen. **The shot policy** turns a valid
 swing into a shot: peak gyro rate sets ball speed, my hand position sets aim, a trained spin model (if I
 made one) sets topspin or backspin, and a deterministic risk rule (speed × sloppiness against a per-level
@@ -284,9 +304,13 @@ continuous hits goes to MQTT whenever it improves.
 ### (b) What are the potential limitations of your game?
 
 - **Camera lag and one camera.** Pose trails the IMU by roughly 70–150 ms [measured: ___ ms] and a
-  single webcam gives no depth, so the "paddle is at the ball" test is a 2-D approximation, lenient at
-  Rookie. The hand also moves during a swing (a shoulder width or more in the 300 ms the pose gate looks at),
-  so the hardest swings can leave Pro's small radius; `--set level.radius_sw=0.8` is the knob.
+  single webcam gives no depth, so "the paddle is at the ball" is judged across the table only and the paddle's depth
+  comes from my hand's height rather than from how far forward I reach; the screen hides the camera's delay by
+  extrapolating my hand's speed, which can overshoot for a moment when I turn it round. The hand also moves during a
+  swing, so the judge looks at where it is at the impact and how close it came just before.
+- **Delays I could only estimate.** The hub's transport (~40 ms), the length of a stroke (~0.14 s), the screen (~50 ms),
+  the speakers (~25 ms) and the motors (~50 ms) cannot be measured with this hardware (only the camera against the hub
+  can); they are typical values with the live recordings behind the stroke length, and every one is a knob.
 - **The hub IMU.** About 64 Hz over Bluetooth [measured: 63.9 Hz, worst gap 93 ms] (below 25 Hz the camera
   takes over, see below), undocumented units (measured: 0.99 gyro counts per deg/s, about 1017 accelerometer
   counts per g, and the accelerometer saturates at about 8 g in a hard swing, which clips the spin features),

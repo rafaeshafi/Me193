@@ -17,9 +17,9 @@ class Level:
     name: str
     tag: int
     v_tier: float        # m/s, CPU -> player
-    early_s: float       # hit window before arrival
+    early_s: float       # hit window before arrival: the stroke's end may be this early (real swings run early)
     late_s: float        # hit window after arrival
-    radius_sw: float     # paddle must be this close to the ball (shoulder widths)
+    radius_sw: float     # the hand must be this close to the ball ACROSS the court (shoulder widths; height is free)
     tau_s: float         # CPU reaction delay
     cpu_speed_ms: float  # CPU paddle speed limit
     p0: float            # base miss probability (Match)
@@ -28,16 +28,17 @@ class Level:
     spin_variety: float
     v_ref: float         # speed above which the CPU starts missing
     spin_ref: float
-    fault_th: float      # player fault threshold on s * (1 - q_total)
+    fault_th: float      # player fault threshold on s * (1 - q_total); s * (1 - q) is at most 1, so >= 1 means no faults
     reach: float = 1.0   # the share of the reach box the balls arrive in (0.6: the middle 60%), so an easy level
                          # never asks for the corners of a box that was stretched to reach
 
 
 LEVELS = {
-    1: Level("Rookie", 1, 2.5, 0.30, 0.18, 0.55, 0.40, 1.2, 0.10, 0.25, INF, 0.0, 5.0, 0.20, 0.60, 0.6),
-    2: Level("Club", 2, 5.0, 0.22, 0.14, 0.45, 0.28, 2.2, 0.06, 0.15, 1.0, 0.2, 7.0, 0.35, 0.50, 0.8),
-    3: Level("Pro", 3, 7.0, 0.16, 0.10, 0.35, 0.18, 3.5, 0.03, 0.08, 0.4, 0.4, 9.0, 0.50, 0.42),
-    4: Level("Insane", 4, 9.5, 0.12, 0.07, 0.28, 0.10, 5.0, 0.01, 0.04, 0.15, 0.7, 11.0, 0.65, 0.35),
+    # (a hit that ended a game as a "fault" looked like a bug: Rookie and Club never fault, only Pro and Insane do)
+    1: Level("Rookie", 1, 2.5, 0.50, 0.22, 0.70, 0.40, 1.2, 0.10, 0.25, INF, 0.0, 5.0, 0.20, 3.0, 0.6),
+    2: Level("Club", 2, 5.0, 0.30, 0.16, 0.55, 0.28, 2.2, 0.06, 0.15, 1.0, 0.2, 7.0, 0.35, 2.0, 0.8),
+    3: Level("Pro", 3, 7.0, 0.22, 0.12, 0.42, 0.18, 3.5, 0.03, 0.08, 0.4, 0.4, 9.0, 0.50, 0.42),
+    4: Level("Insane", 4, 9.5, 0.15, 0.08, 0.30, 0.10, 5.0, 0.01, 0.04, 0.15, 0.7, 11.0, 0.65, 0.35),
 }
 
 

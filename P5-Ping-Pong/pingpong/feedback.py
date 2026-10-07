@@ -29,9 +29,17 @@ def pattern_for(event, level):
     return None
 
 
-def play(events, level, actuator):
-    """Submit the cue for each event, in order; a dropped pattern is fine (priority rules decide)."""
+def play(events, level, actuator, *, latency=None, now_ns=None):
+    """Submit the cue for each event, in order; a dropped pattern is fine (priority rules decide).
+
+    A hit is only DECIDED up to a tenth of a second before the paddle meets the ball on screen, and the motors need
+    haptic_s to move: its thump is scheduled for contact - haptic_s, so it arrives with the picture."""
     for event in events:
         name = pattern_for(event, level)
-        if name:
+        if not name:
+            continue
+        contact = event.data.get("contact_ns") if event.kind == "hit" else None
+        if contact is not None and latency is not None and now_ns is not None:
+            actuator.submit(name, max(now_ns, contact - round(latency.haptic_s * 1e9)))
+        else:
             actuator.submit(name)

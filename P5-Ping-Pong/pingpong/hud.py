@@ -1,34 +1,21 @@
 """HUD composition: one OpenCV frame from a HudState (large glyphs, readable at 1.8 m).
 
-The x-ray panel lists the judge gates J1-J6 with OK/X and a note, so the screen
-explains every decision ("hand 0.9 SW from the ball") -- the policy made visible.
+The court is scene.py (the table in perspective, your paddle, the computer's, the ball and its shadow); this adds the
+score panels, the prompts, the x-ray panel that lists the judge gates J1-J6 with OK/X and a note (so the screen explains
+every decision: "hand 0.9 SW from the ball" -- the policy made visible) and the camera as a small picture in the corner.
 """
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import cv2
+import numpy as np
 
-import math
-
-from pingpong import canvas, levels
+from pingpong import canvas, court3d, levels, scene
 
 GREEN, RED, AMBER, WHITE, GREY = (80, 220, 80), (70, 70, 240), (40, 170, 255), (255, 255, 255), (170, 170, 170)
 LOW_BATTERY = 20                 # percent: the hub's number goes amber below this
-PLANE_CENTRE_Y = 0.60            # the hand plane's middle, as a fraction of the frame height
-PLANE_SW_PX = 0.17               # pixels per shoulder width on the hand plane, as a fraction of the frame height
-TARGET_R = 16                    # px: the ring where the ball will arrive; it must end up inside your paddle's face
-CPU_PADDLE_R = 80                # px at full size: the computer's paddle (shrunk by the court's perspective)
-CPU_PADDLE_LIFT_M = 0.04         # its face is centred this far above the far edge of the table
-
-
-def plane_xy(ab, box_sw, w, h):
-    """Reach-box coordinates (a, b) -> pixels on the hand plane, where the paddle dot and the target ring live.
-
-    The same pixels per shoulder width across and up: the judge measures the hand in shoulder widths, so a ring of
-    radius R shoulder widths is a circle and 'the dot is inside the ring' is exactly 'the judge will say hit'.  (The
-    court's own mapping squashed height 2.5x against width, and rings that looked like they touched were missed.)"""
-    s = PLANE_SW_PX * h
-    return round(w / 2 + (ab[0] - 0.5) * box_sw[0] * s), round(PLANE_CENTRE_Y * h - (ab[1] - 0.5) * box_sw[1] * s)
+PIP_SIZE = (256, 144)            # the camera picture in the corner (px)
 
 
 @dataclass(frozen=True)
@@ -42,10 +29,14 @@ class HudState:
     cpu_points: int = 0
     target: int = 7
     countdown: int | None = None
-    ball: tuple | None = None        # (lateral_m, depth 0 far..1 near, height_m)
-    paddle_ab: tuple | None = None   # the player's hand in reach-box coordinates
-    arrival_ab: tuple | None = None  # where the incoming ball will arrive
+    ball: tuple | None = None        # (x, y, z) metres in physics.py's world: where the ball is now
+    paddle: tuple | None = None      # (x, y, z): your paddle, the hand's place on the table plus the stroke
+    rest: tuple | None = None        # (x, y, z): where the hand has the paddle (the stroke starts and ends here)
+    paddle_angle: float = 0.0        # degrees, clockwise as the player sees it: how far the hub is turned in the hand
+    reach_m: float = 0.30            # how far from the paddle (across the table) a ball can still be hit
+    zone: tuple | None = None        # (far z, near z): the stretch of table over which the incoming ball can be hit
     cpu_x_m: float = 0.0
+    cpu_swing: float | None = None   # 0..1 while the computer's paddle is hitting the ball, else None
     last_kmh: float | None = None
     last_label: str = ""
     spin_text: str = ""
@@ -63,18 +54,19 @@ class HudState:
     swing_scale: float = 1200.0      # dps that fills the trace panel (the player's hard-swing rate)
     swing_threshold: float = 0.0     # dps below which a swing does not count (T_PK)
     player_name: str = ""            # highlights the player's own row on the leaderboard
-    box_sw: tuple = (2.0, 1.4)       # the reach box's width and height in shoulder widths (sets the hand plane's shape)
-    radius_sw: float = 0.55          # the level's hit radius: the target ring is exactly this big
-    reach: float = 1.0               # the share of the reach box the balls arrive in
-    cpu_swing: float | None = None   # 0..1 while the computer's paddle is hitting the ball, else None
-    paddle_angle: float = 0.0        # degrees, clockwise as the player sees it: how far the hub is turned in the hand
+    hand_img: tuple | None = None    # your hand in the camera picture: (across, down) as fractions, as the mirror shows it
+
+
+@lru_cache(maxsize=4)
+def _camera(size):
+    return court3d.Camera.for_frame(*size)
 
 
 def render(state, size=(1280, 720), background=None):
     w, h = size
-    frame = canvas.fit_background(background, w, h) if background is not None else canvas.new_frame(w, h)
-    canvas.draw_court(frame)
-    _draw_actors(frame, state, w, h)
+    frame = np.empty((h, w, 3), dtype=np.uint8)
+    scene.draw_scene(frame, _camera((w, h)), state)
+    _draw_score(frame, state, w, h)
     _draw_top_bar(frame, state, w, h)
     _draw_phase(frame, state, w, h)
     if state.phase == "MATCH_OVER":
@@ -82,43 +74,32 @@ def render(state, size=(1280, 720), background=None):
     if state.show_xray and state.gates:
         _draw_xray(frame, state, w, h)
     _draw_swing(frame, state, w, h)
+    if background is not None:
+        _draw_pip(frame, background, state, w, h)
     _draw_footer(frame, state, w, h)
     if state.flash:
         canvas.tint(frame, state.flash[0], state.flash[1])
     return frame
 
 
-def _draw_actors(frame, s, w, h):
-    _draw_cpu_paddle(frame, s, w, h)
-    if s.phase in ("COUNTDOWN", "RALLY"):
-        _draw_arrival_window(frame, s, w, h)
-    if s.paddle_ab is not None:
-        # your paddle: its face is the judge's hit zone (a circle of the level's radius), centred on your hand
-        px, py = plane_xy(s.paddle_ab, s.box_sw, w, h)
-        canvas.draw_paddle(frame, px, py, round(s.radius_sw * PLANE_SW_PX * h), angle_deg=s.paddle_angle)
-        cv2.circle(frame, (px, py), 4, WHITE, -1, cv2.LINE_AA)
-    target = None
-    if s.arrival_ab is not None and s.phase == "RALLY":
-        target = plane_xy(s.arrival_ab, s.box_sw, w, h)             # where the ball will arrive: get the paddle over it
-        cv2.circle(frame, target, TARGET_R, AMBER, 3, cv2.LINE_AA)
-        cv2.circle(frame, target, 3, AMBER, -1, cv2.LINE_AA)
-    if s.ball is not None:
-        canvas.draw_ball(frame, *s.ball, toward=target)
-
-
-def _draw_cpu_paddle(frame, s, w, h):
-    """The computer's paddle at the far end: it waits where it hit, chases your shot, and flicks when it hits."""
-    px, py, scale = canvas.project(s.cpu_x_m, 0.0, CPU_PADDLE_LIFT_M, w, h)
-    angle = 0.0 if s.cpu_swing is None else 55.0 * math.sin(math.pi * s.cpu_swing)
-    canvas.draw_paddle(frame, px, py, round(CPU_PADDLE_R * scale), rubber=canvas.RUBBER_BLUE, angle_deg=angle)
-
-
-def _draw_arrival_window(frame, s, w, h):
-    """Where balls can arrive: the level's share of the reach box, so the player sees what they have to reach."""
-    half_w = 0.5 * s.reach * s.box_sw[0] * PLANE_SW_PX * h
-    half_h = 0.5 * s.reach * s.box_sw[1] * PLANE_SW_PX * h
-    cx, cy = plane_xy((0.5, 0.5), s.box_sw, w, h)
-    cv2.rectangle(frame, (round(cx - half_w), round(cy - half_h)), (round(cx + half_w), round(cy + half_h)), GREY, 1)
+def _draw_score(frame, s, w, h):
+    """Two panels on the sides of the table, like the arcade original's score boxes."""
+    if s.mode == "survival":
+        left, right = ("STREAK", s.streak, WHITE), ("BEST", max(s.record, s.streak), AMBER)
+    else:
+        left, right = ("YOU", s.player_points, WHITE), ("CPU", s.cpu_points, WHITE)
+    if s.phase == "MATCH_OVER" and s.leaderboard:
+        left = None                                          # the end screen's board takes the left side
+    for panel, x in ((left, 16), (right, w - 246)):
+        if panel is None:
+            continue
+        label, value, color = panel
+        canvas.panel(frame, x, 110, 230, 128)
+        canvas.draw_text(frame, label, (x + 115, 146), 0.8, GREY, 2, anchor="center")
+        canvas.draw_text(frame, str(value), (x + 115, 222), 3.0, color, 6, anchor="center")
+    if s.mode != "survival":
+        canvas.draw_text(frame, f"first to {s.target}   streak {s.streak}   best {max(s.record, s.streak)}",
+                         (w // 2, 100), 0.7, GREY, 2, anchor="center")
 
 
 def _draw_top_bar(frame, s, w, h):
@@ -128,14 +109,6 @@ def _draw_top_bar(frame, s, w, h):
     healthy = (s.mqtt_status, s.hub_status) == ("ok", "ok") and (s.hub_battery is None or s.hub_battery >= LOW_BATTERY)
     canvas.draw_text(frame, f"MQTT {s.mqtt_status.upper()}   HUB {s.hub_status.upper()}{battery}", (w - 24, 44), 0.8,
                      GREEN if healthy else AMBER, 2, anchor="right")
-    if s.mode == "survival":
-        canvas.draw_text(frame, str(s.streak), (w // 2, 150), 4.2, WHITE, 8, anchor="center")
-        canvas.draw_text(frame, f"BEST {max(s.record, s.streak)}", (w // 2, 200), 1.1, AMBER, 2, anchor="center")
-    else:
-        canvas.draw_text(frame, f"YOU {s.player_points}  -  {s.cpu_points} CPU", (w // 2, 120), 2.2, WHITE, 5,
-                         anchor="center")
-        canvas.draw_text(frame, f"first to {s.target}   streak {s.streak}   best {max(s.record, s.streak)}",
-                         (w // 2, 175), 0.9, GREY, 2, anchor="center")
 
 
 def _draw_phase(frame, s, w, h):
@@ -173,7 +146,7 @@ def _draw_leaderboard(frame, s):
 
 def _draw_xray(frame, s, w, h):
     pw = 520
-    x0, y0 = w - pw - 24, 124
+    x0, y0 = w - pw - 24, 270
     rows = []
     for gate in s.gates:
         text = f"{gate.name} {'OK' if gate.passed else 'X '}  {gate.note}".rstrip()
@@ -191,9 +164,19 @@ def _draw_xray(frame, s, w, h):
 def _draw_swing(frame, s, w, h):
     if not s.swing_trace:
         return
-    x0, y0, pw, ph = 24, h - 215, 360, 110
+    x0, y0, pw, ph = 16, h - 190, 290, 96
     canvas.draw_trace(frame, x0, y0, pw, ph, s.swing_trace, s.swing_scale, s.swing_threshold, GREY, GREEN)
-    canvas.draw_text(frame, s.swing_label, (x0 + 8, y0 + 22), 0.55, GREY, 1)
+    canvas.draw_text(frame, s.swing_label, (x0 + 8, y0 + 20), 0.5, GREY, 1)
+
+
+def _draw_pip(frame, camera, s, w, h):
+    """The camera, mirrored, in the bottom corner, with a ring on your hand: the proof you are being seen."""
+    pw, ph = PIP_SIZE
+    x0, y0 = w - pw - 24, h - ph - 60
+    frame[y0:y0 + ph, x0:x0 + pw] = cv2.resize(camera, (pw, ph), interpolation=cv2.INTER_AREA)
+    if s.hand_img is not None:
+        cv2.circle(frame, (round(x0 + s.hand_img[0] * pw), round(y0 + s.hand_img[1] * ph)), 9, AMBER, 2, cv2.LINE_AA)
+    cv2.rectangle(frame, (x0, y0), (x0 + pw, y0 + ph), GREY, 1)
 
 
 def _draw_footer(frame, s, w, h):

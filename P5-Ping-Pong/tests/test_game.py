@@ -16,6 +16,7 @@ from pingpong.scoring import ScoreTracker
 from pingpong.sources_fake import FakeMqttClient
 
 S = 1_000_000_000
+LAG_NS = round(0.10 * S)          # the judge's peak -> contact lag: a swing whose peak is this early makes contact on time
 BOX = ReachBox(u_min=-1.0, u_max=1.0, v_min=-0.5, v_max=0.5)
 
 
@@ -69,7 +70,7 @@ def start_rally(game, t0=0):
 
 def good_hit(game, w_pk=600.0, now=None):
     ball = game.incoming
-    t = ball.t_c_ns
+    t = ball.t_c_ns - LAG_NS
     return game.on_swing(swing(t, w_pk), poses(t, ball.aim_ab), now if now is not None else t)
 
 
@@ -118,10 +119,11 @@ def at_the_ball_then_following_through(t_i, ab, far_u):
     return on + [PaddlePose(t_scene_ns=int(t_i + 0.09 * S), u=far_u, v=v, conf=0.9, hand="right")]
 
 
-def test_the_return_starts_where_the_hand_was_at_the_impact_not_where_the_follow_through_ended():
+def test_the_return_starts_where_the_ball_met_the_paddle_not_where_the_follow_through_ended():
     game, _ = make()
     start_rally(game)
-    ball, t = game.incoming, game.incoming.t_c_ns
+    ball = game.incoming
+    t = ball.t_c_ns - LAG_NS
     events = game.on_swing(swing(t), at_the_ball_then_following_through(t, ball.aim_ab, BOX.u_min), t + int(0.1 * S))
     assert "hit" in kinds(events)
     assert game.outgoing_leg.x_start == pytest.approx(physics.x_of_a(ball.aim_ab[0]))   # not x_of_a(0), the far end
@@ -212,13 +214,14 @@ def test_swings_outside_a_rally_do_nothing():
     assert sent(client) == []
 
 
-def test_a_hard_sloppy_swing_faults_and_does_not_score():
-    game, client = make()
+def test_a_hard_sloppy_swing_faults_at_pro_and_does_not_score():
+    game, client = make(level=3)
     start_rally(game)
     ball = game.incoming
     R, E = ball.level.radius_sw, ball.level.early_s
-    t = ball.t_c_ns - int(0.9 * E * S)                          # near the early edge ...
-    events = game.on_swing(swing(t, w_pk=1500.0), poses(t, ball.aim_ab, du=0.9 * R), t)   # ... and far off
+    t = ball.t_c_ns - LAG_NS - int(0.9 * E * S)                 # the stroke's end near the early edge ...
+    where = (physics.a_of_x(ball.leg.position(t + LAG_NS)[0]), 0.5)           # (the ball is still on its way across)
+    events = game.on_swing(swing(t, w_pk=1500.0), poses(t, where, du=0.9 * R), t)   # ... and the hand far off it
     assert "fault" in kinds(events)
     assert [e for e in events if e.kind == "fault"][0].data["fault"] == "out"
     assert game.tracker.streak == 0 and sent(client) == []

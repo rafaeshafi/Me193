@@ -2,9 +2,10 @@
 
 import pytest
 
-from pingpong import app, levels, pd, physics, policy
+from pingpong import app, latency, levels, pd, physics, policy
 
 CLUB, PRO, ROOKIE = levels.LEVELS[2], levels.LEVELS[3], levels.LEVELS[1]
+LIVE = latency.Latency(display_s=0.0, loop_s=0.0)         # (the screen draws ahead by the display's delay: not what these test)
 
 
 def test_the_output_is_proportional_plus_a_damping_term_and_is_saturated_at_the_speed_limit():
@@ -69,7 +70,7 @@ def test_the_policy_reach_deficit_is_the_pd_error():
 def _wide_shot(mode, w_pk, min_x=0.3, level=1):
     """Play until a return that lands at least min_x metres from the centre; -> (session, the outgoing leg)."""
     for seed in range(1, 60):
-        session = app.make_session(level=level, mode=mode, target=100, seed=seed)
+        session = app.make_session(level=level, mode=mode, target=100, seed=seed, latency=LIVE)
         app.play_until_hits(session, 1, w_pk=w_pk)
         leg = session.game.outgoing_leg
         if abs(leg.x_end) >= min_x:
@@ -109,7 +110,7 @@ def test_after_its_return_the_computers_paddle_is_where_it_hit_and_drifts_back_t
 
 
 def test_the_computer_swings_when_it_serves_or_returns_for_about_a_third_of_a_second():
-    session = app.make_session(level=1)
+    session = app.make_session(level=1, latency=LIVE)
     assert session.hud_state().cpu_swing is None
     session.on_start()
     session.clock.advance_s(3.0)

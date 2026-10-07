@@ -202,12 +202,11 @@ def test_a_hand_that_really_swings_through_the_ball_is_still_judged_a_hit_for_an
     assert rig.game.tracker.streak >= 6
 
 
-def test_the_hardest_swing_carries_the_hand_out_of_the_pro_radius_and_a_wider_radius_fixes_it():
-    # A known limit, not a bug: at ~11 shoulder widths a second the hand leaves Pro's 0.35 radius before the peak.
-    # The tuning knob is --set level.radius_sw, and it is enough.
+def test_the_hardest_swing_still_hits_at_pro_the_judge_only_asks_where_the_hand_is_across_the_court():
+    # At ~11 shoulder widths a second the hand sweeps out of Pro's radius around the peak.  The judge needs the closest
+    # approach across the court (not a 2-D distance), so a hard rally holds; --set level.radius_sw is still the knob.
+    # (The scripted player is a metronome at 1.4 Hz, which the hub's shake lock takes for shaking: not what this is about.)
     hard = fakerig.FakeRig(level=3, hand_motion=True, w_pk=1100.0)
-    hard.run(until=lambda: hard.game.phase == "MATCH_OVER", max_s=60)
-    assert hard.game.tracker.record == 0
-    wide = fakerig.FakeRig(level=3, hand_motion=True, w_pk=1100.0, overrides={"level": {"radius_sw": 0.9}})
-    wide.run(until=lambda: wide.game.tracker.streak >= 5, max_s=90)
-    assert wide.game.tracker.streak >= 5
+    hard.rig.imu.shake = None
+    hard.run(until=lambda: hard.game.tracker.streak >= 5, max_s=90)
+    assert hard.game.tracker.streak >= 5

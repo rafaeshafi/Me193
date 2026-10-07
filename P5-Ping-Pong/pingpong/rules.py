@@ -108,6 +108,11 @@ class GameCore:
     def pause_reasons(self):
         return set(self._pause_reasons)
 
+    @property
+    def paused_at_ns(self):
+        """When the freeze began (the picture stays as it was then); None while the game is running."""
+        return self._paused_at
+
     def set_pause(self, reason, active, now_ns):
         """Freeze the game while a sensor is silent (a pause is never a hit or a fault).
 
@@ -123,12 +128,13 @@ class GameCore:
             self._paused_at = None
 
     def _shift(self, delta_ns):
-        if self.incoming is not None:
-            self.incoming = dataclasses.replace(self.incoming, t_c_ns=self.incoming.t_c_ns + delta_ns)
         for name in ("incoming_leg", "outgoing_leg"):
             leg = getattr(self, name)
             if leg is not None:
                 setattr(self, name, dataclasses.replace(leg, t0_ns=leg.t0_ns + delta_ns))
+        if self.incoming is not None:                     # the ball the judge holds follows its own (shifted) flight
+            self.incoming = dataclasses.replace(self.incoming, t_c_ns=self.incoming.t_c_ns + delta_ns,
+                                                leg=self.incoming_leg)
         for name in ("_serve_at", "_cpu_at", "point_over_until_ns"):
             if getattr(self, name) is not None:
                 setattr(self, name, getattr(self, name) + delta_ns)
@@ -157,7 +163,7 @@ class GameCore:
         plan = self.policy.serve(self.level, self.s_prev, self.tracker.streak, self.player_a, survival)
         leg = physics.plan_leg(t0_ns, plan.v, x_start, plan.aim_ab, plan.topspin, plan.sidespin)
         self._ball_id += 1
-        self.incoming = BallWindow(self._ball_id, leg.arrival_ns, plan.aim_ab, self.level)
+        self.incoming = BallWindow(self._ball_id, leg.arrival_ns, plan.aim_ab, self.level, leg)
         self.incoming_leg, self.outgoing_leg = leg, None
         self.phase, self._cpu_at = "RALLY", None
         return [GameEvent("serve", t0_ns, {"ball_id": self._ball_id, "v": plan.v, "aim_ab": plan.aim_ab,
@@ -173,7 +179,11 @@ class GameCore:
 
     # --- the player's swing ----------------------------------------------------------------------
     def _on_hit(self, swing, verdict, pose_samples, now_ns):
-        ball = self.incoming
+        ball, leg_in = self.incoming, self.incoming_leg
+        contact_ns = verdict.contact_ns or max(now_ns, ball.t_c_ns)
+        # the paddle meets the ball where the ball IS at the contact: the return leaves from that point
+        contact = leg_in.position(contact_ns) if leg_in is not None else (
+            physics.x_of_a(ball.aim_ab[0]), physics.STRIKE_Y_M, physics.HIT_Z_M)
         at = pose_at(pose_samples, swing.t_ns, min_conf=self.judge.min_conf) or (pose_samples[-1] if pose_samples else None)
         paddle_a = self.judge.box.to_ab(at.u, at.v)[0] if at else 0.5          # where the hand was AT the impact
         # the balls come in a level's share of the box, so the hand's lateral range is that share too: the aim
@@ -185,12 +195,11 @@ class GameCore:
                           paddle_a=aim_a, spin_probs=probs)
         self.s_prev = shotmod.swing_strength(swing.w_pk, self.omega_lo, self.omega_hi)
         self.player_a, self.incoming = paddle_a, None
-        launch = max(now_ns, ball.t_c_ns)
-        self.outgoing_leg = physics.plan_leg(
-            launch, sp.v_out, physics.x_of_a(paddle_a), (0.5 + sp.aim_a / 1.6, 0.5),
-            topspin=sp.T, sidespin=sp.S, fault=sp.fault)
+        self.outgoing_leg = physics.plan_return(
+            contact_ns, sp.v_out, contact, (0.5 + sp.aim_a / 1.6, 0.5), topspin=sp.T, sidespin=sp.S, fault=sp.fault)
         data = {"label": sp.label, "v_out": sp.v_out, "kmh": shotmod.kmh(sp.v_out), "topspin": sp.T,
-                "sidespin": sp.S, "q_total": sp.q_total, "gates": verdict.gates, "e_s": verdict.e_s}
+                "sidespin": sp.S, "q_total": sp.q_total, "gates": verdict.gates, "e_s": verdict.e_s,
+                "contact_ns": contact_ns, "contact": contact}
         self._observe(1.0 if sp.fault else 0.5 * (1.0 - sp.q_total), bool(sp.fault))
         if sp.fault:
             events = [GameEvent("fault", now_ns, dict(data, fault=sp.fault))]

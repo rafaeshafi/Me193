@@ -42,7 +42,7 @@ def test_a_level_setting_changes_every_level_and_survives_a_change_of_level():
     assert game.level.radius_sw == 0.9 and game.level.name == "Rookie"
     game.set_level(levels.LEVELS[3])                                           # a tag or key changes the level
     assert game.level.name == "Pro" and game.level.radius_sw == 0.9
-    assert levels.LEVELS[3].radius_sw == 0.35                                  # the table itself is never edited
+    assert levels.LEVELS[3].radius_sw != 0.9                                   # the table itself is never edited
 
 
 def test_the_arrival_window_can_be_tuned_live_with_set_level_reach():

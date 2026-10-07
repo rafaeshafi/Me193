@@ -52,10 +52,17 @@ def test_a_perfect_hit_can_never_fault_at_any_level_or_strength():
             assert shot.fault_for(s, q_total=0.9, level=level) is None
 
 
-def test_a_sloppy_smash_faults_out_and_a_sloppy_medium_hit_faults_into_the_net():
-    assert shot.fault_for(1.0, 0.4, CLUB) == "out"        # 1.0 * 0.6 = 0.6 > 0.5, s > 0.7
-    assert shot.fault_for(0.6, 0.1, CLUB) == "net"        # 0.6 * 0.9 = 0.54 > 0.5, s <= 0.7
-    assert shot.fault_for(0.6, 0.9, CLUB) is None
+def test_a_sloppy_smash_faults_out_and_a_sloppy_medium_hit_faults_into_the_net_at_pro():
+    pro = levels.LEVELS[3]
+    assert shot.fault_for(1.0, 0.4, pro) == "out"         # 1.0 * 0.6 = 0.6 > 0.42, s > 0.7
+    assert shot.fault_for(0.6, 0.1, pro) == "net"         # 0.6 * 0.9 = 0.54 > 0.42, s <= 0.7
+    assert shot.fault_for(0.6, 0.9, pro) is None
+
+
+def test_a_beginner_level_never_faults_however_sloppy_and_hard_the_swing():
+    for level in (levels.LEVELS[1], levels.LEVELS[2]):
+        for s in (0.2, 0.6, 1.0):
+            assert shot.fault_for(s, 0.0, level) is None, (level.name, s)
 
 
 def test_fault_is_a_pure_function_of_its_inputs():

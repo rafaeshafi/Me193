@@ -1,23 +1,15 @@
-"""Drawing primitives and the court projection (numpy BGR frames, no window)."""
+"""Drawing primitives (numpy BGR frames, no window): text, paddles, strip charts, panels.  The court itself is
+scene.py and court3d.py."""
 
 import math
 
 import cv2
 import numpy as np
 
-HALF_WIDTH_M = 0.7625
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 RUBBER_RED, RUBBER_BLUE = (35, 35, 200), (190, 85, 30)           # BGR: a table-tennis paddle is red on one side, blue/black on the other
 WOOD, WOOD_DARK, RIM = (100, 165, 220), (45, 85, 140), (25, 25, 25)
-
-
-def project(x_m, depth, h_m, w, h):
-    """(lateral metres, depth 0=far/CPU .. 1=near/player, height metres) -> (px, py, scale)."""
-    far_y, near_y = 0.34 * h, 0.86 * h              # (the far end sits below the score and the computer's paddle)
-    scale = 0.38 + 0.62 * depth
-    px = w / 2 + (x_m / HALF_WIDTH_M) * 0.40 * w * scale
-    py = far_y + depth * (near_y - far_y) - h_m * 0.55 * h * scale
-    return int(px), int(py), scale
+SKIN, SKIN_DARK = (130, 175, 235), (70, 105, 165)
 
 
 def new_frame(w, h):
@@ -90,40 +82,9 @@ def draw_fitted(frame, text, center_x, top_y, max_w, *, max_scale=1.7, min_scale
     return len(lines)
 
 
-def draw_court(frame):
-    h, w = frame.shape[:2]
-    corners = [canvas_pt(-HALF_WIDTH_M, 0.0, w, h), canvas_pt(HALF_WIDTH_M, 0.0, w, h),
-               canvas_pt(HALF_WIDTH_M, 1.0, w, h), canvas_pt(-HALF_WIDTH_M, 1.0, w, h)]
-    overlay = frame.copy()
-    cv2.fillPoly(overlay, [np.array(corners, dtype=np.int32)], (86, 52, 20))
-    cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
-    cv2.polylines(frame, [np.array(corners, dtype=np.int32)], True, (255, 255, 255), 2, cv2.LINE_AA)
-    cv2.line(frame, canvas_pt(0, 0.0, w, h), canvas_pt(0, 1.0, w, h), (170, 170, 170), 1, cv2.LINE_AA)
-    cv2.line(frame, canvas_pt(-HALF_WIDTH_M * 1.08, 0.5, w, h), canvas_pt(HALF_WIDTH_M * 1.08, 0.5, w, h),
-             (230, 230, 230), 4, cv2.LINE_AA)                                  # the net
-
-
-def canvas_pt(x_m, depth, w, h, h_m=0.0):
-    px, py, _ = project(x_m, depth, h_m, w, h)
-    return px, py
-
-
-def draw_ball(frame, x_m, depth, h_m, color=(40, 160, 255), toward=None):
-    """The ball on the court; `toward` = (x, y) pixels pulls it onto that point as it nears the player (depth 1), so a
-    ball that comes in to the target ring arrives IN the ring."""
-    h, w = frame.shape[:2]
-    gx, gy, _ = project(x_m, depth, 0.0, w, h)
-    bx, by, scale = project(x_m, depth, h_m, w, h)
-    if toward is not None:
-        pull = max(0.0, min(1.0, depth)) ** 3
-        bx, by = round(bx + (toward[0] - bx) * pull), round(by + (toward[1] - by) * pull)
-    cv2.ellipse(frame, (gx, gy), (int(16 * scale), int(6 * scale)), 0, 0, 360, (0, 0, 0), -1, cv2.LINE_AA)
-    cv2.circle(frame, (bx, by), int(8 + 14 * scale), color, -1, cv2.LINE_AA)
-    cv2.circle(frame, (bx, by), int(8 + 14 * scale), (255, 255, 255), 2, cv2.LINE_AA)
-
-
-def draw_paddle(frame, cx, cy, radius, *, rubber=RUBBER_RED, angle_deg=0.0, handle_up=False):
-    """A table-tennis paddle: a rubber face inside a black rim, on a short wooden handle.
+def draw_paddle(frame, cx, cy, radius, *, rubber=RUBBER_RED, angle_deg=0.0, handle_up=False, hand=False):
+    """A table-tennis paddle: a rubber face inside a black rim, on a short wooden handle (and, if asked, the fist
+    holding it).
 
     (cx, cy) is the centre of the FACE, which is the surface that hits the ball; the handle hangs below it (above it
     for the player at the far end) and swings about the face's centre by angle_deg."""
@@ -137,16 +98,14 @@ def draw_paddle(frame, cx, cy, radius, *, rubber=RUBBER_RED, angle_deg=0.0, hand
                        (near[0] - n[0] * 0.22 * radius, near[1] - n[1] * 0.22 * radius)], dtype=np.int32)
     cv2.fillConvexPoly(frame, handle, WOOD, cv2.LINE_AA)
     cv2.polylines(frame, [handle], True, WOOD_DARK, 2, cv2.LINE_AA)
+    if hand:                                                            # the fist round the handle, below the face
+        fist = (round(cx + d[0] * 2.05 * radius), round(cy + d[1] * 2.05 * radius))
+        cv2.circle(frame, fist, max(3, round(0.5 * radius)), SKIN_DARK, -1, cv2.LINE_AA)
+        cv2.circle(frame, fist, max(2, round(0.42 * radius)), SKIN, -1, cv2.LINE_AA)
     cv2.circle(frame, (cx, cy), radius, RIM, -1, cv2.LINE_AA)
     cv2.circle(frame, (cx, cy), round(0.9 * radius), rubber, -1, cv2.LINE_AA)
     shine = tuple(min(255, c + 80) for c in rubber)                     # a glossy arc on the upper left of the rubber
     cv2.ellipse(frame, (cx, cy), (round(0.72 * radius), round(0.72 * radius)), 0, 190, 245, shine, 2, cv2.LINE_AA)
-
-
-def draw_ring(frame, x_m, depth, h_m, radius, color, thickness=3):
-    h, w = frame.shape[:2]
-    px, py, scale = project(x_m, depth, h_m, w, h)
-    cv2.circle(frame, (px, py), int(radius * scale), color, thickness, cv2.LINE_AA)
 
 
 def tint(frame, color, alpha):
@@ -171,6 +130,13 @@ def draw_trace(frame, x0, y0, w, h, values, scale, threshold=0.0, color=(200, 20
     for (a, va), (b, vb) in zip(zip(pts, values), zip(pts[1:], values[1:])):
         cv2.line(frame, a, b, hot if max(va, vb) >= threshold > 0 else color, 2, cv2.LINE_AA)
     cv2.rectangle(frame, (x0, y0), (x0 + w, y0 + h), (170, 170, 170), 1)
+
+
+def panel(frame, x0, y0, w, h):
+    """A score box: the picture behind it darkened, with a bright border (the arcade original's POINTS boxes)."""
+    region = frame[y0:y0 + h, x0:x0 + w]
+    region[:] = (region * 0.30).astype(np.uint8)
+    cv2.rectangle(frame, (x0, y0), (x0 + w, y0 + h), (235, 235, 235), 2)
 
 
 def dim_rect(frame, x0, y0, w, h, factor=0.35):

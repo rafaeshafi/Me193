@@ -40,6 +40,7 @@ SOUNDS = {
     "hit_good": _tone(880, 90, 28),
     "hit_perfect": _tone(1200, 110, 40, glide_to=1800, harmonics=(1.0, 0.4)),
     "hit_off": _tone(660, 90, 28),
+    "bounce": _tone(520, 45, 14),
     "miss": _tone(180, 380, 160, harmonics=(1.0, 0.5, 0.33)),
     "point": _arpeggio((523, 659, 784, 1047), 80, 60),
     "record": _arpeggio((659, 784, 988, 1319, 1568), 70, 60),
@@ -123,9 +124,13 @@ class Audio:
         self.played = (self.played + [name])[-200:]
         self.mixer.add(SOUNDS[name])
 
+    def sound_for(self, event, level):
+        """The name of the sound an event makes (None for a silent one)."""
+        return PATTERN_SOUND.get(feedback.pattern_for(event, level))
+
     def play_events(self, events, level):
         for event in events:
-            name = PATTERN_SOUND.get(feedback.pattern_for(event, level))
+            name = self.sound_for(event, level)
             if name:
                 self.play(name)
 

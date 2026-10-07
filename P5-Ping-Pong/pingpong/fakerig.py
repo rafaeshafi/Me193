@@ -55,7 +55,8 @@ def swing_offset(t, t0, dur, vpk, *, back=0.5, back_s=0.20, back_gap_s=0.22, rec
 
 
 class ScriptedPlayer:
-    """Glides the hand to each ball's arrival point and swings so the gyro peaks at the ball's t_c."""
+    """Glides the hand to each ball's arrival point and swings so the stroke ends at the ball's t_c (the gyro peaks the
+    judge's contact lag earlier)."""
 
     def __init__(self, box, *, w_pk=600.0, swing_s=0.15, timing_s=0.0, rest_uv=(0.0, -0.4), cards=(),
                  pose_motion=False, swing_dir=(1.0, 0.0)):
@@ -78,14 +79,15 @@ class ScriptedPlayer:
             ball = game.incoming
             if ball is None or game.paused:
                 return
-            peak = ball.t_c_ns + round(self.timing_s * S)
+            peak = ball.t_c_ns + round(self.timing_s * S) - round(game.judge.contact_lag_s * S)   # the stroke ends at t_c
             planned = self._peaks.get(ball.ball_id)
             if planned == peak:
                 return
             if planned is None:                              # first sight of this ball: head for its arrival point
-                glide = min(0.43, 0.5 * max(0.0, (ball.t_c_ns - now_ns) / S))
+                # (finished before the backswing starts: the camera cannot tell a glide from a stroke that follows it closely)
+                glide = min(0.43, 0.5 * max(0.0, (ball.t_c_ns - now_ns) / S - game.judge.contact_lag_s - 0.30))
                 self._segments.append((now_ns, now_ns + round(glide * S), self._base_uv(now_ns),
-                                       self.box.to_uv(*ball.aim_ab)))
+                                       self.box.to_uv(ball.aim_ab[0], 0.5)))      # across the court, at the nominal depth
             self._peaks[ball.ball_id] = peak                 # (re)plan the swing: a pause moves t_c
 
     @property

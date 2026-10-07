@@ -66,8 +66,9 @@ class Verdict:
     kind: str            # "HIT" | "MISS" | "IGNORED"
     q_pos: float
     e_s: float           # timing error in seconds (negative = early)
-    d_min_sw: float      # closest paddle approach in shoulder widths
+    d_min_sw: float      # closest paddle approach in shoulder widths (across the court)
     gates: tuple = ()    # tuple of GateResult
+    contact_ns: int = 0  # when the paddle meets the ball: the swing's stroke end, never before it was seen
 
 
 @dataclass(frozen=True)

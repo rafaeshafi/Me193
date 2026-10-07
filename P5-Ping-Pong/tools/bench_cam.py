@@ -184,7 +184,8 @@ def _mqtt(env, official, add, ask):
 
 
 def _hud(show, add, ask):
-    state = hud.HudState(phase="RALLY", streak=12, record=17, ball=(0.2, 0.5, 0.1), message="NEW RECORD",
+    state = hud.HudState(phase="RALLY", streak=12, record=17, ball=(0.2, 0.3, 1.0), paddle=(0.0, 0.16, 0.3),
+                         rest=(0.0, 0.16, 0.3), zone=(1.0, -0.1), message="NEW RECORD",
                          last_kmh=27.0, last_label="perfect")
     show(hud.render(state, size=(1280, 720)))
     if ask("A sample HUD is on screen. From where you play, can you read the big score and see the ball? [y/N]"):

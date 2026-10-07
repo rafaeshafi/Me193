@@ -1,0 +1,85 @@
+"""Where the time goes: every stage between a hand moving and the player seeing, hearing or feeling the answer.
+
+    hand -> hub IMU -> BLE bursts -> arrival stamp          imu_s      (the hub sends no timestamps: a sample is stamped
+                                                                       when it ARRIVES; the camera's poses are aligned to
+                                                                       that clock by CAMERA_LAG_S, bench_cam measures it)
+    peak of the gyro's rate -> end of the forward stroke    stroke_s   (where the player means the paddle to meet the ball)
+    frame drawn -> light from the screen                    display_s  (+ up to loop_s: the loop runs at ~60 Hz)
+    sound written -> heard                                  audio_s
+    motor command written -> the hub's motors move          haptic_s
+
+Only the camera's lag is measured here (against the hub); the rest are typical values with a basis, tunable in
+config_local.json or live with `--set latency.display_s=0.08`.  Compensating means placing every effect where it will
+be PERCEIVED: the ball (a deterministic flight) is drawn where it will be when the light reaches the eye, the hand is
+drawn where it will be then, the swing is dated by when the player did it, and the thump and the sound are sent early
+so they arrive with the picture.
+"""
+
+import math
+from dataclasses import dataclass
+
+import config
+
+MAX_SPEED_SW_S = 5.0        # the hand is never extrapolated faster than this (a glitch must not fling the paddle)
+MAX_LEAD_S = 0.25           # ... nor further ahead than this
+MAX_AGE_S = 0.4             # a reading older than this is not extrapolated at all
+FIT_S = 0.15                # the hand's velocity is fitted over this much of its latest history
+GAIN = 0.8                  # lead by less than the full extrapolation: a hand that turns round must not overshoot
+
+
+@dataclass(frozen=True)
+class Latency:
+    imu_s: float = 0.040
+    stroke_s: float = 0.14
+    display_s: float = 0.050
+    audio_s: float = 0.025
+    haptic_s: float = 0.050
+    loop_s: float = 1 / 60
+
+    def __post_init__(self):
+        if min(self.imu_s, self.stroke_s, self.display_s, self.audio_s, self.haptic_s, self.loop_s) < 0:
+            raise ValueError("a delay cannot be negative")
+
+    @classmethod
+    def from_config(cls):
+        return cls(imu_s=config.LAT_IMU_S, stroke_s=config.LAT_STROKE_S, display_s=config.LAT_DISPLAY_S,
+                   audio_s=config.LAT_AUDIO_S, haptic_s=config.LAT_HAPTIC_S)
+
+    @property
+    def contact_lag_s(self):
+        """From a swing's peak, as stamped on arrival, to the contact in the same clock: the stroke's length less the
+        time the hub took to tell us (the stamp is already that late)."""
+        return self.stroke_s - self.imu_s
+
+    @property
+    def view_ahead_s(self):
+        """How far ahead of now a frame is drawn, so that when the light reaches the eye it shows the world as it is then."""
+        return self.display_s + self.loop_s / 2
+
+
+def predict_hand(poses, now_ns, lat, *, min_conf=0.5, gain=GAIN):
+    """Where the hand will be when the frame being drawn now reaches the eye, from its latest readings: (u, v) or None.
+
+    The newest reading is its own age old (the camera, the pose model and the loop), was taken imu_s before its stamp
+    says (the stamps are on the hub's arrival clock) and will be seen display_s from now; the hand's velocity over
+    the last FIT_S carries it across that gap, capped and damped."""
+    good = [p for p in poses if p.conf >= min_conf]
+    if not good:
+        return None
+    last = good[-1]
+    age = (now_ns - last.t_scene_ns) / 1e9
+    recent = [p for p in good if p.t_scene_ns >= last.t_scene_ns - round(FIT_S * 1e9)]
+    if age > MAX_AGE_S or len(recent) < 2:
+        return last.u, last.v
+    ts = [(p.t_scene_ns - last.t_scene_ns) / 1e9 for p in recent]
+    mean = sum(ts) / len(ts)
+    spread = sum((t - mean) ** 2 for t in ts)
+    if spread < 1e-9:
+        return last.u, last.v
+    vu = sum((t - mean) * p.u for t, p in zip(ts, recent)) / spread
+    vv = sum((t - mean) * p.v for t, p in zip(ts, recent)) / spread
+    speed = math.hypot(vu, vv)
+    if speed > MAX_SPEED_SW_S:
+        vu, vv = vu * MAX_SPEED_SW_S / speed, vv * MAX_SPEED_SW_S / speed
+    lead = min(MAX_LEAD_S, max(0.0, age) + lat.imu_s + lat.view_ahead_s)
+    return last.u + gain * vu * lead, last.v + gain * vv * lead

@@ -1,4 +1,4 @@
-"""Court projection and HUD rendering (pure numpy frames, no window)."""
+"""HUD rendering: the scene plus the score panels, prompts, x-ray, camera corner (pure numpy frames, no window)."""
 
 import numpy as np
 import pytest
@@ -17,26 +17,6 @@ def state(**kw):
     return hud.HudState(**kw)
 
 
-def test_far_end_is_higher_and_narrower_than_the_near_end():
-    fx, fy, fs = canvas.project(0.5, 0.0, 0.0, W, H)
-    nx, ny, ns = canvas.project(0.5, 1.0, 0.0, W, H)
-    assert fy < ny and fs < ns
-    assert abs(fx - W / 2) < abs(nx - W / 2)
-
-
-def test_lateral_position_maps_left_and_right_symmetrically():
-    lx, _, _ = canvas.project(-0.4, 0.6, 0.0, W, H)
-    rx, _, _ = canvas.project(0.4, 0.6, 0.0, W, H)
-    assert (lx + rx) / 2 == pytest.approx(W / 2, abs=1)
-    assert rx > lx
-
-
-def test_height_lifts_the_ball_up_the_screen():
-    _, y0, _ = canvas.project(0.0, 0.5, 0.0, W, H)
-    _, y1, _ = canvas.project(0.0, 0.5, 0.3, W, H)
-    assert y1 < y0
-
-
 def test_render_returns_a_bgr_frame_of_the_requested_size():
     frame = hud.render(state(), size=(W, H))
     assert frame.shape == (H, W, 3) and frame.dtype == np.uint8
@@ -44,7 +24,7 @@ def test_render_returns_a_bgr_frame_of_the_requested_size():
 
 def test_a_ball_in_flight_changes_the_picture():
     empty = hud.render(state(phase="RALLY"), size=(W, H))
-    ball = hud.render(state(phase="RALLY", ball=(0.2, 0.5, 0.1)), size=(W, H))
+    ball = hud.render(state(phase="RALLY", ball=(0.2, 0.3, 1.0)), size=(W, H))
     assert diff(empty, ball) > 5_000
 
 
@@ -67,11 +47,35 @@ def test_the_xray_panel_lists_gate_results_when_enabled():
     assert diff(off, on) > 10_000
 
 
-def test_a_camera_background_shows_through():
+def test_the_camera_is_a_small_picture_in_the_corner_and_nothing_else_moves():
     cam = np.full((360, 640, 3), (0, 200, 0), dtype=np.uint8)
     plain = hud.render(state(), size=(W, H))
     with_cam = hud.render(state(), size=(W, H), background=cam)
+    pw, ph = hud.PIP_SIZE
+    x0, y0 = W - pw - 24, H - ph - 60
     assert diff(plain, with_cam) > 100_000
+    assert tuple(with_cam[y0 + ph // 2, x0 + pw // 2]) == (0, 200, 0)
+    mask = np.ones((H, W), dtype=bool)
+    mask[y0 - 2:y0 + ph + 3, x0 - 2:x0 + pw + 3] = False
+    assert diff(plain[mask], with_cam[mask]) == 0                         # outside the corner: the same picture
+
+
+def test_a_ring_marks_your_hand_in_the_camera_picture():
+    cam = np.full((360, 640, 3), (0, 200, 0), dtype=np.uint8)
+    without = hud.render(state(), size=(W, H), background=cam)
+    marked = hud.render(state(hand_img=(0.25, 0.5)), size=(W, H), background=cam)
+    assert diff(without, marked) > 300
+    unmarked = hud.render(state(hand_img=(0.25, 0.5)), size=(W, H))
+    assert diff(unmarked, hud.render(state(), size=(W, H))) == 0           # no picture, no ring
+
+
+def test_the_score_panels_sit_beside_the_table_and_name_what_they_show(monkeypatch):
+    seen = drawn_text(monkeypatch)
+    hud.render(state(mode="survival", streak=7, record=12), size=(W, H))
+    assert {"STREAK", "BEST", "7", "12"} <= set(seen)
+    seen.clear()
+    hud.render(state(mode="match", player_points=3, cpu_points=5), size=(W, H))
+    assert {"YOU", "CPU", "3", "5"} <= set(seen)
 
 
 @pytest.mark.parametrize("phase", ["LOBBY", "COUNTDOWN", "RALLY", "POINT_OVER", "MATCH_OVER"])
@@ -79,8 +83,8 @@ def test_a_camera_background_shows_through():
 def test_every_phase_renders_in_both_modes_without_error(phase, mode):
     frame = hud.render(state(phase=phase, mode=mode, countdown=2, streak=4, record=9, player_points=3,
                              cpu_points=5, last_kmh=88.4, last_label="perfect", spin_text="TOPSPIN",
-                             paddle_ab=(0.4, 0.5), arrival_ab=(0.85, 0.5), mqtt_status="ok", flash=((0, 255, 0), 0.3),
-                             message="NEW RECORD"), size=(W, H))
+                             ball=(0.2, 0.3, 1.0), paddle=(0.1, 0.16, 0.3), rest=(0.1, 0.16, 0.3), zone=(1.1, -0.1),
+                             mqtt_status="ok", flash=((0, 255, 0), 0.3), message="NEW RECORD"), size=(W, H))
     assert frame.shape == (H, W, 3)
 
 
@@ -233,85 +237,6 @@ def test_the_top_bar_shows_the_hubs_battery_and_goes_amber_when_it_is_low(monkey
     assert diff(low[top], fine[top]) > 1000                                # the colour differs: amber vs green
 
 
-# --- the hand plane: where the paddle and the target are drawn, in the judge's own units ------------------------------------
-BOX_SW = (3.0, 2.0)                                   # the reach box in shoulder widths
-S_PX = hud.PLANE_SW_PX * H                            # pixels per shoulder width on the hand plane
-
-
-def on_ring(frame, color, cx, cy, r, tol=3):
-    """Is `color` drawn within `tol` px of radius r, to the right, left, above and below the centre?"""
-    def hit(x, y):
-        return any(tuple(frame[y + dy, x + dx]) == color for dx in range(-tol, tol + 1) for dy in range(-tol, tol + 1)
-                   if 0 <= y + dy < H and 0 <= x + dx < W)
-    return all(hit(cx + dx, cy + dy) for dx, dy in ((r, 0), (-r, 0), (0, r), (0, -r)))
-
-
-def test_a_shoulder_width_is_the_same_number_of_pixels_across_and_up_on_the_hand_plane():
-    # the court's own mapping squashed the height 2.5x against the width: rings that looked like they touched were a
-    # shoulder width apart and the judge said miss
-    cx, cy = hud.plane_xy((0.5, 0.5), BOX_SW, W, H)
-    ax, ay = hud.plane_xy((0.5 + 1.0 / BOX_SW[0], 0.5), BOX_SW, W, H)          # one shoulder width to the player's right
-    bx, by = hud.plane_xy((0.5, 0.5 + 1.0 / BOX_SW[1]), BOX_SW, W, H)          # one shoulder width up
-    assert (ax - cx, ay - cy) == (round(S_PX), 0) and (bx - cx, by - cy) == (0, -round(S_PX))
-    assert hud.plane_xy((0.0, 1.0), BOX_SW, W, H)[1] > 0.25 * H                 # the whole box stays below the score
-
-
-def test_your_paddle_is_a_table_tennis_paddle_whose_face_is_the_hit_zone():
-    frame = hud.render(state(phase="RALLY", paddle_ab=(0.5, 0.5), box_sw=BOX_SW, radius_sw=0.55), size=(W, H))
-    cx, cy = hud.plane_xy((0.5, 0.5), BOX_SW, W, H)
-    r = round(0.55 * S_PX)
-    assert tuple(frame[cy, cx + round(0.6 * r)]) == canvas.RUBBER_RED             # red rubber inside the face
-    assert tuple(frame[cy - round(0.6 * r), cx]) == canvas.RUBBER_RED
-    assert tuple(frame[cy, cx + round(1.25 * r)]) != canvas.RUBBER_RED            # and not beyond the hit radius
-    assert tuple(frame[cy + round(1.5 * r), cx]) == canvas.WOOD                   # the wooden handle hangs below
-
-
-@pytest.mark.parametrize("angle, side", [(45.0, -1), (-45.0, 1), (0.0, 0)])
-def test_the_paddle_turns_with_the_hub_a_positive_angle_is_clockwise_as_the_player_sees_it(angle, side):
-    # clockwise: the handle, which hangs down, swings to the LEFT of the screen (like a clock hand moving from 6 to 9)
-    frame = hud.render(state(phase="RALLY", paddle_ab=(0.5, 0.5), box_sw=BOX_SW, radius_sw=0.55, paddle_angle=angle),
-                       size=(W, H))
-    cx, cy = hud.plane_xy((0.5, 0.5), BOX_SW, W, H)
-    r = 0.55 * S_PX
-    probe = (round(cx + side * 1.5 * r * 0.7071), round(cy + 1.5 * r * (0.7071 if side else 1.0)))
-    assert tuple(frame[probe[1], probe[0]]) == canvas.WOOD
-    straight_down = tuple(frame[round(cy + 1.5 * r), cx])
-    assert (straight_down == canvas.WOOD) is (side == 0)                        # the handle left the straight-down line
-    assert tuple(frame[cy, cx + round(0.6 * r)]) == canvas.RUBBER_RED          # and the face stays where the hand is
-
-
-def test_the_paddle_moves_with_the_hand_on_the_same_plane():
-    frame = hud.render(state(phase="RALLY", paddle_ab=(0.8, 0.3), box_sw=BOX_SW, radius_sw=0.55), size=(W, H))
-    px, py = hud.plane_xy((0.8, 0.3), BOX_SW, W, H)
-    assert tuple(frame[py, px + round(0.4 * 0.55 * S_PX)]) == canvas.RUBBER_RED
-
-
-def test_the_target_is_a_small_ring_the_ball_has_to_land_inside_the_paddle():
-    frame = hud.render(state(phase="RALLY", arrival_ab=(0.5, 0.5), box_sw=BOX_SW, radius_sw=0.55), size=(W, H))
-    cx, cy = hud.plane_xy((0.5, 0.5), BOX_SW, W, H)
-    assert on_ring(frame, hud.AMBER, cx, cy, hud.TARGET_R)
-    assert not on_ring(frame, hud.AMBER, cx, cy, round(0.55 * S_PX))              # no longer the size of the hit zone
-
-
-def test_the_ball_inside_the_paddle_face_is_a_hit_and_outside_it_is_not():
-    # the face is drawn over the target ring's surroundings: the arrival point sits inside the face exactly when the
-    # judge will accept the hand
-    r = 0.55 * S_PX
-    for dist_sw, inside in ((0.3, True), (0.9, False)):
-        ab = (0.5 + dist_sw / BOX_SW[0], 0.5)
-        px, py = hud.plane_xy((0.5, 0.5), BOX_SW, W, H)
-        tx, ty = hud.plane_xy(ab, BOX_SW, W, H)
-        assert (((tx - px) ** 2 + (ty - py) ** 2) ** 0.5 <= r) is inside
-
-
-def test_the_computer_has_its_own_blue_paddle_at_the_far_end_that_swings_when_it_hits():
-    resting = hud.render(state(phase="RALLY", cpu_x_m=0.2), size=(W, H))
-    swinging = hud.render(state(phase="RALLY", cpu_x_m=0.2, cpu_swing=0.25), size=(W, H))
-    px, py, _ = canvas.project(0.2, 0.0, hud.CPU_PADDLE_LIFT_M, W, H)
-    assert tuple(resting[py, px]) == canvas.RUBBER_BLUE                           # a rubber face at the far end
-    assert diff(resting, swinging) > 500                                          # the swing moves the handle
-
-
 def test_the_survival_mode_is_called_rally_on_screen(monkeypatch):
     seen = drawn_text(monkeypatch)
     hud.render(state(mode="survival", level_name="Rookie"), size=(W, H))
@@ -319,26 +244,3 @@ def test_the_survival_mode_is_called_rally_on_screen(monkeypatch):
     seen.clear()
     hud.render(state(mode="match", level_name="Rookie"), size=(W, H))
     assert any(text.startswith("MATCH") for text in seen)
-
-
-def test_the_incoming_ball_arrives_on_the_target_ring_not_at_the_edge_of_the_table():
-    ab = (0.8, 0.3)
-    tx, ty = hud.plane_xy(ab, BOX_SW, W, H)
-    arrived = hud.render(state(phase="RALLY", arrival_ab=ab, box_sw=BOX_SW, ball=(canvas_x(ab), 1.0, 0.0)), size=(W, H))
-    far = hud.render(state(phase="RALLY", arrival_ab=ab, box_sw=BOX_SW, ball=(canvas_x(ab), 0.3, 0.1)), size=(W, H))
-    assert tuple(arrived[ty, tx]) == (40, 160, 255)                           # the ball's own colour, on the target
-    assert tuple(far[ty, tx]) != (40, 160, 255)                               # still out on the table
-
-
-def canvas_x(ab):
-    from pingpong import physics
-    return physics.x_of_a(ab[0])
-
-
-def test_the_arrival_window_is_outlined_so_the_player_sees_where_balls_can_come():
-    frame = hud.render(state(phase="RALLY", box_sw=BOX_SW, reach=0.6), size=(W, H))
-    cx, cy = hud.plane_xy((0.5, 0.5), BOX_SW, W, H)
-    left = cx - round(0.5 * 0.6 * BOX_SW[0] * S_PX)
-    assert tuple(frame[cy, left]) == hud.GREY
-    assert tuple(frame[cy, cx - round(0.5 * BOX_SW[0] * S_PX)]) != hud.GREY      # the full box is not what is outlined
-

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from queue import SimpleQueue
 
 from pingpong import levels, live, posegyro
+from pingpong import latency as latency_mod
 from pingpong import overrides as overrides_mod
 from pingpong import recorder as recorder_mod
 from pingpong.clock import FakeClock
@@ -166,7 +167,8 @@ def replay(loaded, *, overrides=None, record_dir=None):
         target=meta["target"], seed=meta["seed"], source="replay", scope=meta["scope"], no_motor=meta["no_motor"],
         gyro_per_dps=units["gyro_per_dps"], accel_per_g=units["accel_per_g"], fs_raw=units["fs_raw"],
         stale_ms=meta["stale_ms"], threaded=False, log=lambda *_: None,
-        spin_probs_fn=(lambda feat: probs_by_feat.get(tuple(feat))) if probs_by_feat else None, overrides=overrides)
+        spin_probs_fn=(lambda feat: probs_by_feat.get(tuple(feat))) if probs_by_feat else None, overrides=overrides,
+        latency=latency_mod.Latency(**meta["latency"]) if meta.get("latency") else None)
     poses = sorted(loaded.poses, key=lambda p: p.t_scene_ns)
     starts, seen = [], set()
     for e in loaded.events:

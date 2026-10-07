@@ -3,7 +3,7 @@
 import config
 import pytest
 
-from pingpong import app, levels
+from pingpong import app, levels, physics
 from pingpong.events import PaddlePose, TagEvent
 from pingpong.sources_fake import FakeMqttClient
 
@@ -78,13 +78,13 @@ def test_the_hud_state_shows_the_ball_and_the_last_shot():
     assert st.mqtt_status in ("ok", "off", "offline")
 
 
-def test_the_hud_state_carries_the_shape_of_the_hand_plane_and_the_levels_hit_zone():
+def test_the_hud_state_carries_the_reach_of_the_paddle_in_metres_for_the_level_and_the_box():
     session = app.make_session(level=1)
-    st, box = session.hud_state(), session.game.judge.box
-    assert st.box_sw == pytest.approx((box.u_max - box.u_min, box.v_max - box.v_min))
-    assert st.radius_sw == levels.LEVELS[1].radius_sw and st.reach == levels.LEVELS[1].reach == 0.6
+    box = session.game.judge.box
+    metres_per_sw = 2 * 0.8 * physics.HALF_WIDTH_M / (box.u_max - box.u_min)       # the box's width is the table's
+    assert session.hud_state().reach_m == pytest.approx(levels.LEVELS[1].radius_sw * metres_per_sw)
     session.game.set_level(levels.LEVELS[3])
-    assert session.hud_state().radius_sw == 0.35 and session.hud_state().reach == 1.0
+    assert session.hud_state().reach_m == pytest.approx(levels.LEVELS[3].radius_sw * metres_per_sw)
 
 
 def test_a_soft_notice_is_only_a_hint_and_gives_way_to_a_real_one():
@@ -97,14 +97,16 @@ def test_a_soft_notice_is_only_a_hint_and_gives_way_to_a_real_one():
     assert session.hud_state().message == ""                                     # and nothing shows once the game is on
 
 
-def test_the_ball_is_reported_while_it_is_in_flight():
+def test_the_ball_is_reported_in_the_worlds_metres_while_it_is_in_flight():
     session = app.make_session()
     session.on_start()
     session.clock.advance_s(3.0)
     session.tick()
     session.clock.advance_s(0.3)
     st = session.hud_state()
-    assert st.ball is not None and 0.0 <= st.ball[1] <= 1.0 and st.arrival_ab is not None
+    x, y, z = st.ball
+    assert abs(x) <= physics.HALF_WIDTH_M and 0.0 <= y < 1.0 and physics.HIT_Z_M < z <= physics.CPU_Z_M
+    assert st.zone is not None and st.zone[0] > st.zone[1]                         # the stretch of table it can be hit over
 
 
 def test_the_xray_keeps_the_gates_of_the_last_judged_swing():

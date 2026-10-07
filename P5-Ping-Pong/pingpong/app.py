@@ -5,12 +5,12 @@ in --fake mode and in tests.  run_scripted() is a scripted fake player on a fake
 clock -- the automated version of "play.py --fake reaches 10 hits".
 """
 
-import dataclasses
 import math
 import random
 from collections import deque
 
-from pingpong import feedback, levels, pd, physics
+from pingpong import feedback, levels
+from pingpong import latency as latency_mod
 from pingpong.clock import FakeClock
 from pingpong.events import PaddlePose, SwingEvent
 from pingpong.hud import HudState
@@ -20,22 +20,22 @@ from pingpong.paddle import ReachBox
 from pingpong.policy import CpuPolicy
 from pingpong.rules import GameCore
 from pingpong.scoring import ScoreTracker
+from pingpong.view import View
 
 S = 1_000_000_000
-CPU_SWING_S = 0.3          # how long the computer's paddle takes to hit the ball (the HUD animates it)
-CPU_RECOVER_S = 0.6        # ... and to drift back to the middle after a return
 DEFAULT_BOX = ReachBox(u_min=-1.0, u_max=1.0, v_min=-0.5, v_max=0.5)
 FLASH = {"perfect": ((255, 255, 255), 0.25), "good": ((0, 200, 0), 0.18), "early": ((0, 140, 255), 0.2),
          "late": ((0, 140, 255), 0.2), "fault": ((0, 0, 255), 0.35)}
 
 
 class Session:
-    def __init__(self, game, clock, actuator=None, mqtt_status=None, hub_status=None):
+    def __init__(self, game, clock, actuator=None, mqtt_status=None, hub_status=None, latency=None):
         self.game, self.clock, self.actuator = game, clock, actuator
         self._mqtt_status = mqtt_status or (lambda: "off")
         self._hub_status = hub_status or (lambda: "ok")
+        self.latency = latency or latency_mod.Latency.from_config()
         self.poses = deque(maxlen=90)
-        self.paddle_ab = None
+        self.view = View(game, self.latency, self.poses)
         self.xray = False
         self._gates, self._last_kmh, self._last_label, self._spin = (), None, "", ""
         self._message, self._message_until = "", 0
@@ -47,7 +47,15 @@ class Session:
         self.leaderboard_fn = None               # () -> ((name, score), ...) for the end screen
         self._stats_key, self._stats = object(), {}
         self._flash, self._flash_until = None, 0
-        self._cpu_swing_ns = None
+        self._sounds, self._last_tick_ns = [], None      # (due ns, name) waiting for the moment the picture shows them
+
+    @property
+    def paddle_angle(self):
+        return self.view.paddle_angle
+
+    @paddle_angle.setter
+    def paddle_angle(self, degrees):
+        self.view.paddle_angle = degrees
 
     def set_notice(self, text, soft=False):
         """A standing message for the lobby (e.g. "UNCALIBRATED"); pauses and event banners win over it.
@@ -71,7 +79,6 @@ class Session:
     # --- inputs ------------------------------------------------------------------------------
     def on_pose(self, pose):
         self.poses.append(pose)
-        self.paddle_ab = self.game.judge.box.to_ab(pose.u, pose.v)
 
     def on_start(self):
         return self.game.start(self.clock.now_ns())
@@ -85,14 +92,20 @@ class Session:
                 self.game.set_level(level)
 
     def on_swing(self, swing):
-        events = self.game.on_swing(swing, list(self.poses), self.clock.now_ns())
+        now = self.clock.now_ns()
+        events = self.game.on_swing(swing, list(self.poses), now)
         self._absorb(events)
+        self.view.start_stroke(events, now)                 # the paddle lunges (a hit, or a swing at nothing)
         return events
 
     def tick(self, data_ns=None):
-        events = self.game.tick(self.clock.now_ns(), data_ns)
+        now = self.clock.now_ns()
+        events = self.game.tick(now, data_ns)
         self._absorb(events)
         self._countdown_sounds(events)
+        self._bounce_sound(now)
+        self._flush_sounds(now)
+        self._last_tick_ns = now
         return events
 
     def _countdown_sounds(self, events):
@@ -127,12 +140,40 @@ class Session:
                 "max_kmh": st["max_kmh"], "duration_s": (e.t_ns - (g.started_at_ns or e.t_ns)) / S,
                 "started_at_ns": g.started_at_ns}
 
+    def _queue_sounds(self, events, now):
+        """A hit's sound is due when the picture shows the contact (less the time the speakers take); the rest are due now."""
+        for e in events:
+            name = self.audio.sound_for(e, self.game.level)
+            if name:
+                due = now
+                if e.kind == "hit" and "contact_ns" in e.data:
+                    due = max(now, e.data["contact_ns"] - round(self.latency.audio_s * S))
+                self._sounds.append((due, name))
+        self._flush_sounds(now)
+
+    def _flush_sounds(self, now):
+        if self.audio is None or not self._sounds:
+            return
+        ready = [name for due, name in self._sounds if due <= now]
+        self._sounds = [(due, name) for due, name in self._sounds if due > now]
+        for name in ready:
+            self.audio.play(name)
+
+    def _bounce_sound(self, now):
+        """The bounce is heard as it is seen: sent early by the speakers' delay."""
+        if self.audio is None or self._last_tick_ns is None or self.game.paused:
+            return
+        lead = round(self.latency.audio_s * S)
+        for leg in (self.game.incoming_leg, self.game.outgoing_leg):
+            if leg is not None and leg.p_land <= 1.0 and self._last_tick_ns < leg.bounce_ns - lead <= now:
+                self.audio.play("bounce")
+
     def _absorb(self, events):
         now = self.clock.now_ns()
         if self.actuator is not None:
-            feedback.play(events, self.game.level, self.actuator)
+            feedback.play(events, self.game.level, self.actuator, latency=self.latency, now_ns=now)
         if self.audio is not None:
-            self.audio.play_events(events, self.game.level)
+            self._queue_sounds(events, now)
         st = self._game_stats()
         for e in events:
             if e.kind == "hit":
@@ -146,7 +187,7 @@ class Session:
             elif e.kind in ("game_over", "match_over") and self.on_game_over is not None:
                 self.on_game_over(self._summary(e))
             if e.kind == "serve":
-                self._cpu_swing_ns = e.t_ns                  # the computer hits the ball: its paddle swings
+                self.view.cpu_swing_ns = e.t_ns              # the computer hits the ball: its paddle swings
             if e.kind == "verdict":
                 self._gates = e.data["verdict"].gates
             elif e.kind == "hit":
@@ -176,60 +217,27 @@ class Session:
         if not leaderboard and g.phase == "MATCH_OVER" and self.leaderboard_fn is not None:
             leaderboard = self.leaderboard_fn()
         remaining = g.seconds_to_serve(now)
+        v = self.view
+        view = v.view_ns(now)
+        paddle, rest = v.paddle(now, view)
         return HudState(
             phase=g.phase, mode=g.mode, level_name=g.level.name, streak=g.tracker.streak,
             record=g.tracker.record, player_points=g.player_points, cpu_points=g.cpu_points,
             target=g.target_points, countdown=None if remaining is None else max(1, math.ceil(remaining)),
-            ball=self._ball(now), cpu_x_m=self._cpu_x(now), paddle_ab=self.paddle_ab,
-            arrival_ab=g.incoming.aim_ab if g.incoming is not None else None,
+            ball=v.ball(view), paddle=paddle, rest=rest, paddle_angle=v.paddle_angle, reach_m=v.reach_m(),
+            zone=v.zone(now), cpu_x_m=v.cpu_x(view), cpu_swing=v.cpu_swing(view),
             last_kmh=self._last_kmh, last_label=self._last_label, spin_text=self._spin,
             mqtt_status=self._mqtt_status(), hub_status=self._hub_status(),
             message=(self._paused_text() or (self._message if now < self._message_until else "")
                      or ((self._notice or self._soft_notice) if g.phase == "LOBBY" else "")),
             gates=self._gates, show_xray=self.xray,
             flash=self._flash if now < self._flash_until else None, leaderboard=tuple(leaderboard),
-            player_name=self.player,
-            box_sw=(g.judge.box.u_max - g.judge.box.u_min, g.judge.box.v_max - g.judge.box.v_min),
-            radius_sw=g.level.radius_sw, reach=g.level.reach, cpu_swing=self._cpu_swing(now))
+            player_name=self.player)
 
     def _paused_text(self):
         if not self.game.paused:
             return ""
         return "PAUSED: " + ", ".join(sorted(self.game.pause_reasons)) + " lost"
-
-    def _cpu_swing(self, now):
-        """How far through its stroke the computer's paddle is (0..1), None when it is not hitting."""
-        if self._cpu_swing_ns is None:
-            return None
-        progress = (now - self._cpu_swing_ns) / (CPU_SWING_S * S)
-        return progress if 0.0 <= progress < 1.0 else None
-
-    def _cpu_x(self, now):
-        """The computer's paddle: after its return it stands where it hit and drifts back to the middle; while it
-        chases your shot it moves to where the ball will land (always arrives in Rally, can fall short in Match)."""
-        g, leg = self.game, self.game.outgoing_leg
-        if g.phase == "RALLY" and g.incoming is not None and g.incoming_leg is not None:
-            back = g.incoming_leg
-            return back.x_start * max(0.0, 1.0 - max(0.0, (now - back.t0_ns) / S) / CPU_RECOVER_S)
-        if g.phase != "RALLY" or leg is None:
-            return 0.0
-        level = g.level
-        if g.mode != "match":                          # Survival never misses: the drawn paddle always gets there
-            level = dataclasses.replace(level, cpu_speed_ms=50.0, tau_s=min(level.tau_s, 0.25 * leg.flight_s))
-        return pd.paddle_x(level, leg.x_end, 0.0, max(0.0, (now - leg.t0_ns) / S))
-
-    def _ball(self, now):
-        g = self.game
-        if g.phase != "RALLY":
-            return None
-        if g.incoming is not None and g.incoming_leg is not None:
-            x, p, h = g.incoming_leg.position(now)
-            return x, max(0.0, min(1.0, p)), h
-        leg = g.outgoing_leg
-        if leg is not None and now <= leg.end_ns:
-            x, p, h = leg.position(now)
-            return x, max(0.0, min(1.0, 1.0 - p)), h
-        return None
 
 
 def _spin_text(top, side):
@@ -243,16 +251,19 @@ def _spin_text(top, side):
 
 def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=None, client=None,
                  source="live", scope="record_session", no_publish=False, seed=1, box=None,
-                 omega_lo=300.0, omega_hi=1200.0, t_pk=250.0, spin_probs_fn=None, learner=None, resume=False):
+                 omega_lo=300.0, omega_hi=1200.0, t_pk=250.0, spin_probs_fn=None, learner=None, resume=False,
+                 latency=None):
     clock = clock or FakeClock(start_ns=1_000_000_000)
+    latency = latency or latency_mod.Latency.from_config()
     box = box or DEFAULT_BOX
     tracker = ScoreTracker(scope=scope)
     publisher = ScorePublisher(client, scope=scope, source=source, no_publish=no_publish, resume=resume) \
         if client else None
-    game = GameCore(judge=HitJudge(box, t_pk=t_pk), tracker=tracker, policy=CpuPolicy(random.Random(seed), learner=learner),
+    game = GameCore(judge=HitJudge(box, t_pk=t_pk, contact_lag_s=latency.contact_lag_s), tracker=tracker,
+                    policy=CpuPolicy(random.Random(seed), learner=learner),
                     publisher=publisher, level=levels.LEVELS[level], mode=mode, target_points=target,
                     omega_lo=omega_lo, omega_hi=omega_hi, spin_probs_fn=spin_probs_fn)
-    return Session(game, clock, actuator=actuator,
+    return Session(game, clock, actuator=actuator, latency=latency,
                    mqtt_status=(lambda: "ok") if client is not None and not no_publish else None)
 
 
@@ -277,12 +288,13 @@ def play_until(session, stop, w_pk=600.0, dt=0.01, max_sim_s=300.0, feat=None, d
         if ball is None:
             continue
         if ball.t_c_ns - int(0.5 * S) <= now <= ball.t_c_ns + int(0.05 * S) and step % 3 == 0:
-            u, v = game.judge.box.to_uv(*ball.aim_ab)
+            u, v = game.judge.box.to_uv(ball.aim_ab[0], 0.5)         # across the court, at the nominal depth
             session.on_pose(PaddlePose(t_scene_ns=now, u=u + du, v=v, conf=0.9, hand="right"))
         if now >= ball.t_c_ns and swung != ball.ball_id:
             swung = ball.ball_id
+            peak = ball.t_c_ns - round(game.judge.contact_lag_s * S) + round(timing_s * S)   # the stroke ends at t_c
             session.on_swing(SwingEvent(
-                kind="IMPACT", t_ns=ball.t_c_ns + round(timing_s * S), w_pk=w_pk, dur_ms=150.0, n_reversals=0,
+                kind="IMPACT", t_ns=peak, w_pk=w_pk, dur_ms=150.0, n_reversals=0,
                 axis_unit=(1, 0, 0), net_rot_unit=(1, 0, 0), a_lin_unit=(0, 0, 1), clipped=False,
                 feat=feat or (0.0,) * 12))
     return (clock.now_ns() - t_begin) / S
