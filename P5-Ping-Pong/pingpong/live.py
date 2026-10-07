@@ -291,7 +291,7 @@ class LiveRig:
         game = self.session.game
         trace = tuple(rate for _, rate in self.imu.trace(1.5))
         return dataclasses.replace(self.session.hud_state(), swing_trace=trace, swing_scale=game.omega_hi,
-                                   swing_threshold=game.judge.t_pk,
+                                   swing_threshold=game.judge.t_pk, hub_battery=self.hub.battery_pct(),
                                    swing_label="CAMERA SWING" if self.swing_source == "pose" else "IMU SWING")
 
     def loop_stats(self):

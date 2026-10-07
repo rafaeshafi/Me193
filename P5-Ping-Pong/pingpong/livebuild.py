@@ -149,6 +149,9 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
         hub.close()
         raise
     rig.calibration, rig.player, rig.session.player = calibration, args.player, args.player
+    battery = hub.battery_pct()
+    if battery is not None and battery < 20:
+        log(f"WARNING: the hub's battery is at {battery}%: charge it before a long session or the graded take")
     if learner is not None:
         rig.closers.append(("learner", lambda: qbandit.save_for(args.player, learner, root=player_root)))
     if not args.no_audio:

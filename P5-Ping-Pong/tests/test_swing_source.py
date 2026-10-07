@@ -131,3 +131,18 @@ def test_measured_units_or_the_camera_as_the_swing_sensor_need_no_such_warning(t
     live.build_live(args_for("--player", "rafae", "--swing-source", "pose"), FakeEnv(), player_root=tmp_path,
                     log=messages.append)
     assert not any("bench_hub" in m for m in messages)                    # the camera has its own fixed units
+
+
+def test_a_low_hub_battery_is_warned_about_and_reaches_the_screen(tmp_path):
+    env = FakeEnv()
+    env.hub_device.set_battery(12)
+    messages = []
+    rig = live.build_live(args_for("--player", "rafae"), env, player_root=tmp_path, log=messages.append)
+    assert any("battery" in m and "12" in m for m in messages)
+    assert rig.hud_state().hub_battery == 12
+    fine = FakeEnv()
+    fine.hub_device.set_battery(80)
+    quiet = []
+    live.build_live(args_for("--player", "rafae"), fine, player_root=tmp_path, log=quiet.append)
+    assert not any("battery" in m for m in quiet)
+    assert live.build_live(args_for("--player", "rafae", "--no-hub"), FakeEnv(), player_root=tmp_path).hud_state().hub_battery is None

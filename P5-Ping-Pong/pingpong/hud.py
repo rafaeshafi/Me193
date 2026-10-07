@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pingpong import canvas, physics
 
 GREEN, RED, AMBER, WHITE, GREY = (80, 220, 80), (70, 70, 240), (40, 170, 255), (255, 255, 255), (170, 170, 170)
+LOW_BATTERY = 20                 # percent: the hub's number goes amber below this
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class HudState:
     spin_text: str = ""
     mqtt_status: str = "off"         # ok | offline | off
     hub_status: str = "ok"           # ok | stale | off
+    hub_battery: int | None = None   # percent, None until the hub has reported
     message: str = ""
     gates: tuple = ()
     show_xray: bool = False
@@ -75,8 +77,10 @@ def _draw_actors(frame, s, w, h):
 def _draw_top_bar(frame, s, w, h):
     mode = "SURVIVAL" if s.mode == "survival" else "MATCH"
     canvas.draw_text(frame, f"{mode}  {s.level_name.upper()}", (24, 44), 1.0, WHITE, 2)
-    canvas.draw_text(frame, f"MQTT {s.mqtt_status.upper()}   HUB {s.hub_status.upper()}", (w - 24, 44), 0.8,
-                     GREEN if (s.mqtt_status, s.hub_status) == ("ok", "ok") else AMBER, 2, anchor="right")
+    battery = "" if s.hub_battery is None else f" {s.hub_battery}%"
+    healthy = (s.mqtt_status, s.hub_status) == ("ok", "ok") and (s.hub_battery is None or s.hub_battery >= LOW_BATTERY)
+    canvas.draw_text(frame, f"MQTT {s.mqtt_status.upper()}   HUB {s.hub_status.upper()}{battery}", (w - 24, 44), 0.8,
+                     GREEN if healthy else AMBER, 2, anchor="right")
     if s.mode == "survival":
         canvas.draw_text(frame, str(s.streak), (w // 2, 150), 4.2, WHITE, 8, anchor="center")
         canvas.draw_text(frame, f"BEST {max(s.record, s.streak)}", (w // 2, 200), 1.1, AMBER, 2, anchor="center")

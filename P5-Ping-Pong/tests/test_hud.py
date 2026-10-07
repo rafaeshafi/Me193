@@ -217,3 +217,17 @@ def test_the_xray_panel_stays_clear_of_the_centred_best_line(monkeypatch):
                                                                                   real(frame, x, y, w, h, *a, **kw)))
     hud.render(state(phase="RALLY", show_xray=True, gates=(GateResult("J1", True, "timing +10 ms"),)), size=(W, H))
     assert boxes and all(x >= 715 for x, _, _, _ in boxes) and all(x + w <= W - 10 for x, _, w, _ in boxes)
+
+
+# --- the hub's battery ----------------------------------------------------------------------------------------------------
+def test_the_top_bar_shows_the_hubs_battery_and_goes_amber_when_it_is_low(monkeypatch):
+    seen = drawn_text(monkeypatch)
+    hud.render(state(hub_status="ok", hub_battery=83), size=(W, H))
+    assert any("HUB OK 83%" in text for text in seen)
+    seen.clear()
+    hud.render(state(hub_status="ok", hub_battery=None), size=(W, H))
+    assert any(text.endswith("HUB OK") for text in seen)                  # unknown (not yet reported): no number
+    low = hud.render(state(hub_status="ok", hub_battery=12, mqtt_status="ok"), size=(W, H))
+    fine = hud.render(state(hub_status="ok", hub_battery=80, mqtt_status="ok"), size=(W, H))
+    top = (slice(20, 60), slice(W - 700, W - 20))
+    assert diff(low[top], fine[top]) > 1000                                # the colour differs: amber vs green
