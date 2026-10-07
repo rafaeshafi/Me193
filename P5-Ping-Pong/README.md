@@ -32,6 +32,7 @@ and **Match** (first to 7; the computer misses more the harder, spinnier and wid
 - [Playing](#playing)
 - [The score on MQTT](#the-score-on-mqtt)
 - [What it shows and records](#what-it-shows-and-records)
+- [Demo day: the graded take](#demo-day-the-graded-take)
 - [When something goes wrong](#when-something-goes-wrong)
 - [Project layout and tests](#project-layout-and-tests)
 - [Questions](#questions)
@@ -184,6 +185,26 @@ x-ray / report ("hand 0.62 SW from the ball (limit 0.45)"), try a number, replay
 **Tuning the levels.** `./pp sim` plays the whole game loop with a scripted player and prints, per level and
 swing strength, how often the computer misses a ball, how often you would fault, and how long rallies last
 (`--quality 0.4` for a sloppier player: hard swings start to fault where the level's threshold is low).
+
+## Demo day: the graded take
+
+**Ten minutes before:** hub charged and awake, Continuity Camera off, the cards on a stand inside the camera frame,
+`./pp ready`, `./pp env_check`, one rehearsal with `--no-publish`. See what the broker holds right now:
+
+```bash
+mosquitto_sub -h test.mosquitto.org -t ME193/Rogers/RafaeShafi --retained-only -C 1 -W 5
+```
+
+**The take** is a fresh session and the last one that publishes: `./pp play --player rafae --level 2`. In a second
+Terminal keep `./pp watch_score --secs 600` running as durable evidence, screen-record (Cmd+Shift+5) and film the
+haptic with a phone. A crash mid-take: restart with `--resume` so the best so far stays on the broker.
+
+**After it** use only `--no-publish` (a rehearsal would publish its own `1.0, 2.0, ...` over the graded value; the
+lobby warns you when the broker holds one). If the broker lost the value: `./pp republish_best --yes`.
+
+**Five-minute live demo:** subscriber window visible; START card, then level cards 1 → 2 (the flight visibly
+shortens); one Survival rally with the x-ray (**X**) and km/h; a Match at Club to 7 (or the first three points); the
+haptic on camera; `./pp play --board`. The recorded video is the fallback.
 
 ## When something goes wrong
 
