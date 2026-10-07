@@ -110,7 +110,7 @@ def _beep(hub, note):
         pass
 
 
-def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), frame_hz=30.0):
+def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), frame_hz=30.0, warn=None):
     """-> 0 saved, 1 cancelled, 2 could not start."""
     from pingpong.vision import VisionWorker
 
@@ -122,8 +122,9 @@ def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), fr
         return 2
     camera = source == "pose"
     if not camera and not config.is_measured("GYRO_PER_DPS"):
-        print("WARNING: the hub's gyro units were never measured (GYRO_PER_DPS is a guess): run './pp bench_hub "
-              "--guided' first (its three 360-degree turns), or no swing may be recognised at all", file=sys.stderr)
+        (warn or (lambda text: print(text, file=sys.stderr)))(
+            "WARNING: the hub's gyro units were never measured (GYRO_PER_DPS is a guess): run './pp bench_hub "
+            "--guided' first (its three 360-degree turns), or no swing may be recognised at all")
     if args.no_hub:
         hub = NoHub()
     else:
@@ -213,7 +214,7 @@ def _selftest():
     with tempfile.TemporaryDirectory() as tmp:
         args = parse_args(["--card-color", "red", "--card-serial", "1131", "--player", "selftest"])
         code = run(env, args, profile_root=Path(tmp), show=lambda frame: None, wait_key=lambda ms: 255,
-                   notify=lambda note: None, size=(320, 180), frame_hz=2.0)
+                   notify=lambda note: None, size=(320, 180), frame_hz=2.0, warn=lambda text: None)
         cal = profile.load("selftest", root=Path(tmp))
     assert code == 0 and cal is not None and cal.calibrated, (code, cal)
     dot = sum(a * b for a, b in zip(cal.swing.u_fwd, script.u_true))
