@@ -45,6 +45,9 @@ def make_parser():
     ap.add_argument("--no-spin", action="store_true", help="ignore the trained spin model: every ball is flat")
     ap.add_argument("--learn", action="store_true", help="the computer learns where you fail (Q-learning, saved per player)")
     ap.add_argument("--no-store", action="store_true", help="do not save finished games to the leaderboard database")
+    ap.add_argument("--set", action="append", default=[], metavar="section.name=value",
+                    help="tune without editing code, e.g. level.radius_sw=0.8, level.late_s=0.25, swing.t_pk=150, "
+                         "judge.d95_s=0.2 (repeatable; ./pp report shows them; ./pp replay starts from them)")
     ap.add_argument("--board", action="store_true", help="print the leaderboard and exit")
     ap.add_argument("--db", default=None, help="leaderboard database (default: data/pingpong.db)")
     ap.add_argument("--card-color", default=None, help="Connection Card colour (default: config_local.json)")

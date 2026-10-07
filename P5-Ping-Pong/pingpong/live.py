@@ -25,6 +25,7 @@ import cv2
 
 import config
 from pingpong import app, mqtt_link, posegyro
+from pingpong import overrides as overrides_mod
 from pingpong import recorder as recorder_mod
 from pingpong.haptics import Actuator, ActuatorCore
 from pingpong.imu_worker import ImuWorker
@@ -305,7 +306,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
              mode="survival", target=7, seed=1, source="live", scope=None, no_publish=False, no_motor=False,
              threaded=False, lag_s=None, gyro_per_dps=None, accel_per_g=None, fs_raw=None, stale_ms=None,
              to_image=None, record_dir=None, player="rafae", vision=None, recorder=None, spin_probs_fn=None,
-             learner=None, pose_gyro=None, resume=False, log=print):
+             learner=None, pose_gyro=None, resume=False, overrides=None, log=print):
     """Wire every piece into one LiveRig.  The real play.py and the fake rig both come through here,
     so the wiring that matters on hardware (haptic blank windows, phase-gated tag search, the pose
     lock, status lights) is exactly the wiring the tests run.
@@ -328,7 +329,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         scope=scope or config.RECORD_SCOPE, t0_ns=clock.now_ns(), calibration=calibration, gyro_per_dps=gpd,
         accel_per_g=apg, fs_raw=fs, lag_s=config.CAMERA_LAG_S if lag_s is None else lag_s,
         stale_ms=config.STALE_MS if stale_ms is None else stale_ms, no_motor=no_motor, learn=learner is not None,
-        clock=clock)
+        overrides=overrides, clock=clock)
     imu = ImuWorker(hub.imu if pose_gyro is None else queue.SimpleQueue(), SwingDetector(params), shake=shake,
                     recorder=recorder)
     actuator = None                                      # no hub (--no-hub): no haptics, the sounds carry the cues
@@ -355,6 +356,8 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
                   stale_ms=stale_ms, recorder=recorder, pose_gyro=pose_gyro,
                   swing_source=calibration.swing.source, log=log)
     session.bind_status(hub=rig.hub_status, mqtt=mqtt_link.status_fn(mqtt_client) if publishing else None)
+    if overrides:
+        overrides_mod.apply(rig, overrides)
     if publishing:
         mqtt_link.attach(mqtt_client, session.game.publisher)
     return rig

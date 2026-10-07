@@ -174,6 +174,13 @@ mosquitto_sub -h test.mosquitto.org -t 'ME193/Rogers/#' -v
   record, countdown ticks (`--no-audio` to turn off). `--no-record` and `--no-store` switch the
   recordings and the leaderboard off.
 
+**Tuning without editing code.** `./pp play --set level.radius_sw=0.8 --set level.late_s=0.25` changes the hit
+radius or window for every level (tags and keys keep it), `--set swing.t_pk=150` the weakest swing that counts,
+`--set judge.d95_s=0.2` how long after the window a miss is declared. The names are the fields of the level table
+in `pingpong/levels.py`, the detector's `SwingParams` and the judge. `./pp report` lists the settings a session ran
+with, and `./pp replay` of that session starts from them (`--set` there wins), so the loop is: play, read the
+x-ray / report ("hand 0.62 SW from the ball (limit 0.45)"), try a number, replay it on the same swings.
+
 **Tuning the levels.** `./pp sim` plays the whole game loop with a scripted player and prints, per level and
 swing strength, how often the computer misses a ball, how often you would fault, and how long rallies last
 (`--quality 0.4` for a sloppier player: hard swings start to fault where the level's threshold is low).

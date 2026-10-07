@@ -28,6 +28,7 @@ class GameCore:
                  target_points=7, omega_lo=300.0, omega_hi=1200.0, spin_probs_fn=None,
                  countdown_s=3.0, point_pause_s=2.0):
         self.judge, self.tracker, self.policy, self.publisher = judge, tracker, policy, publisher
+        self.level_overrides = {}                      # --set level.X=v: applied to whichever level is chosen
         if publisher is not None:
             publisher.on_resume = tracker.seed_record      # --resume: the retained best is where this run starts
         self.level = level or levels.LEVELS[1]
@@ -49,7 +50,7 @@ class GameCore:
     def set_level(self, level):
         if self.phase not in BETWEEN_RALLIES:
             return False
-        self.level = level
+        self.level = dataclasses.replace(level, **self.level_overrides) if self.level_overrides else level
         return True
 
     def set_mode(self, mode):

@@ -12,6 +12,7 @@ import cv2
 
 import config
 from pingpong import benchstats, posegyro, profile, qbandit, spin
+from pingpong import overrides as overrides_mod
 from pingpong import recorder as recorder_mod
 from pingpong import store as store_mod
 from pingpong.hub import NoHub, card_kwargs
@@ -86,6 +87,12 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
 
     swing_source = resolve_swing_source(args, log)
     camera = swing_source == "pose"
+    try:
+        settings = overrides_mod.check(overrides_mod.parse(getattr(args, "set", None) or []))
+    except ValueError as exc:
+        raise LiveSetupError(f"--set: {exc}") from exc
+    if settings:
+        log(f"settings changed from the defaults: {overrides_mod.format_settings(settings)}")
     card = None if args.no_hub else require_card(args)
     guest = profile.slug(args.player) == "guest"
     calibration = (None if guest else profile.load(args.player, root=player_root, source=swing_source)) \
@@ -132,7 +139,7 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
             no_publish=no_publish, no_motor=args.no_motor, threaded=env.threaded,
             to_image=getattr(env, "to_image", None), record_dir=record_dir, player=args.player,
             spin_probs_fn=None if model is None else model.probs, learner=learner,
-            pose_gyro=posegyro.PoseGyro() if camera else None, resume=bool(getattr(args, "resume", False)), log=log)
+            pose_gyro=posegyro.PoseGyro() if camera else None, resume=bool(getattr(args, "resume", False)), overrides=settings, log=log)
     except BaseException:
         if capture is not None:
             capture.release()

@@ -10,7 +10,7 @@ from collections import Counter, defaultdict
 
 import numpy as np
 
-from pingpong import benchstats
+from pingpong import benchstats, overrides
 
 S = 1_000_000_000
 GATES = ("J1", "J2", "J3", "J4", "J5", "J6")
@@ -91,6 +91,7 @@ def summarize(loaded):
         "kmh": _spread([h["kmh"] for h in hits]), "labels": dict(Counter(h["label"] for h in hits)),
         "hub": benchstats.rate_stats(imu_t),
         "swing_source": (meta.get("calibration") or {}).get("swing", {}).get("source", "imu"),
+        "overrides": meta.get("overrides") or {},
         "pose": {"n": len(pose_t), "fps": (len(pose_t) - 1) / pose_span if pose_span > 0 else 0.0},
         "pauses": _pauses(events, t0, end), "hub_trouble": sum(1 for e in events if e["k"] == "hub" and e["d"]["status"] != "ok"),
         "loop_p95_ms": summary["loop"]["p95_ms"] if summary else None,
@@ -107,9 +108,11 @@ def _level_name(meta, events):
 
 def format_report(s):
     t, w, k = s["timing_ms"], s["w_pk"], s["kmh"]
-    lines = [f"Session: {s['player']} / {s['level']} {s['mode']} / source {s['source']} / {s['duration_s']:.1f} s",
-             f"Balls {s['balls']} | swings {s['swings']} | hits {s['hits']} | misses {s['misses']} | faults "
-             f"{s['faults']} | rejected {s['rejected']} | ignored {s['ignored']} | best streak {s['best_streak']}"]
+    lines = [f"Session: {s['player']} / {s['level']} {s['mode']} / source {s['source']} / {s['duration_s']:.1f} s"]
+    if s["overrides"]:
+        lines.append("Settings changed from the defaults: " + overrides.format_settings(s["overrides"]))
+    lines.append(f"Balls {s['balls']} | swings {s['swings']} | hits {s['hits']} | misses {s['misses']} | faults "
+                 f"{s['faults']} | rejected {s['rejected']} | ignored {s['ignored']} | best streak {s['best_streak']}")
     if t["n"]:
         lines.append(f"Hit timing vs the ball (ms, negative = early): mean {t['mean']:+.0f}, p10 {t['p10']:+.0f}, "
                      f"p90 {t['p90']:+.0f} (n {t['n']})")

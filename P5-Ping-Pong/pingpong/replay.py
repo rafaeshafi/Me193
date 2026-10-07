@@ -18,41 +18,16 @@ from dataclasses import dataclass
 from queue import SimpleQueue
 
 from pingpong import levels, live, posegyro
+from pingpong import overrides as overrides_mod
 from pingpong import recorder as recorder_mod
 from pingpong.clock import FakeClock
 from pingpong.profile import Calibration
 from pingpong.sources_fake import FakeDoubleMotor
-from pingpong.swing import SwingParams
 
 S = 1_000_000_000
 STEP_NS = S // 240
 PUMP_NS = S // 60
-JUDGE_SETTINGS = ("t_pk", "d95_s", "min_dur_ms", "max_dur_ms", "max_reversals", "min_conf", "refractory_s",
-                  "max_hits_per_s")
-SECTIONS = {"swing": tuple(f.name for f in dataclasses.fields(SwingParams)), "judge": JUDGE_SETTINGS,
-            "level": tuple(f.name for f in dataclasses.fields(levels.Level))}
-
-
-def parse_overrides(items):
-    """["level.late_s=0.4", ...] -> {"level": {"late_s": 0.4}}."""
-    out = {}
-    for item in items:
-        key, sep, value = item.partition("=")
-        section, dot, name = key.partition(".")
-        if not (sep and dot and name):
-            raise ValueError(f"expected section.name=value, got {item!r}")
-        out.setdefault(section, {})[name] = float(value) if "." in value or "e" in value.lower() else int(value)
-    return out
-
-
-def check_overrides(overrides):
-    for section, settings in overrides.items():
-        if section not in SECTIONS:
-            raise ValueError(f"unknown section {section!r}: choose from {', '.join(SECTIONS)}")
-        for name in settings:
-            if name not in SECTIONS[section]:
-                raise ValueError(f"unknown {section} setting {name!r}: choose from {', '.join(SECTIONS[section])}")
-    return overrides
+parse_overrides, check_overrides = overrides_mod.parse, overrides_mod.check      # the names the tools and tests use
 
 
 class ReplayHub:
@@ -162,30 +137,17 @@ class ReplayResult:
         return self.rig.session.game.tracker.record
 
 
-def _apply_settings(rig, overrides):
+def _start(rig, record):
     game = rig.session.game
-    if "swing" in overrides:
-        rig.imu.set_params(dataclasses.replace(rig.imu.detector.p, **overrides["swing"]))
-        if "t_pk" in overrides["swing"] and "t_pk" not in overrides.get("judge", {}):
-            game.judge.t_pk = overrides["swing"]["t_pk"]               # the judge's J3 follows the detector
-    for name, value in overrides.get("judge", {}).items():
-        setattr(game.judge, name, value)
-
-
-def _start(rig, record, overrides):
-    game = rig.session.game
-    level = levels.LEVELS[record["level"]]
-    if "level" in overrides:
-        level = dataclasses.replace(level, **overrides["level"])
-    game.set_level(level)
+    game.set_level(levels.LEVELS[record["level"]])                  # the game applies any level setting itself
     game.set_mode(record["mode"])
     game.start(record["started_at_ns"])
 
 
 def replay(loaded, *, overrides=None, record_dir=None):
     """Run a recorded session again; -> ReplayResult (and a new recording if record_dir is given)."""
-    overrides = check_overrides(overrides or {})
     meta, units = loaded.meta, loaded.meta["units"]
+    overrides = overrides_mod.merge(meta.get("overrides"), check_overrides(overrides or {}))   # the recording's own, then yours
     clock = FakeClock(start_ns=meta["t0_ns"])
     hub, lag_ns = ReplayHub(), round(meta["camera_lag_s"] * S)
     hub._clock = clock
@@ -201,8 +163,7 @@ def replay(loaded, *, overrides=None, record_dir=None):
         target=meta["target"], seed=meta["seed"], source="replay", scope=meta["scope"], no_motor=meta["no_motor"],
         gyro_per_dps=units["gyro_per_dps"], accel_per_g=units["accel_per_g"], fs_raw=units["fs_raw"],
         stale_ms=meta["stale_ms"], threaded=False, log=lambda *_: None,
-        spin_probs_fn=(lambda feat: probs_by_feat.get(tuple(feat))) if probs_by_feat else None)
-    _apply_settings(rig, overrides)
+        spin_probs_fn=(lambda feat: probs_by_feat.get(tuple(feat))) if probs_by_feat else None, overrides=overrides)
     poses = sorted(loaded.poses, key=lambda p: p.t_scene_ns)
     starts, seen = [], set()
     for e in loaded.events:
@@ -237,7 +198,7 @@ def replay(loaded, *, overrides=None, record_dir=None):
         for deliver in ((deliver_poses, deliver_imu) if camera else (deliver_imu, deliver_poses)):
             deliver(now)
         while i_start < len(starts) and starts[i_start]["started_at_ns"] <= now:
-            _start(rig, starts[i_start], overrides)
+            _start(rig, starts[i_start])
             i_start += 1
         while next_pump <= now:
             rig.pump()
