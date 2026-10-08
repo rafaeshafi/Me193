@@ -269,6 +269,10 @@ def _hit_pop(frame, s, w, h):
 def _message(frame, s, w, h):
     if not s.message:
         return
+    if s.message == "GO!":                                                # the first ball: a big word in the middle
+        ui.glow(frame, w / 2, h / 2 + 30, 230, MINT, 0.5)
+        fonts.draw(frame, "GO!", w / 2, h / 2 + 30, 170, WHITE, outline=NAVY, outline_px=12, shadow=(0, 9, NAVY, 0.3))
+        return
     color = PURPLE if "RECORD" in s.message else rgb(255, 160, 20)
     if s.phase == "LOBBY":                                                # a standing notice: below the start prompt
         lines = fonts.wrap_lines(s.message, w - 160, 30)

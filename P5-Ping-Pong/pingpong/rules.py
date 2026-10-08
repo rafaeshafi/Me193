@@ -58,6 +58,7 @@ class GameCore:
         self._pause_reasons, self._paused_at = set(), None
         self.started_at_ns = None            # exactly when start() was last called (a replay needs it)
         self.held = None                     # (when, (x, y, z)): the ball sitting on your paddle until it is let go
+        self.remote = None                   # versus.Remote: the opponent is a person at another laptop, not the computer
         self._hand = self._pending = self._pose_horizon_ns = None
 
     @property
@@ -90,6 +91,8 @@ class GameCore:
         if self.phase == "MATCH_OVER":
             self.player_points = self.cpu_points = 0
         self.phase = "COUNTDOWN"
+        if self.remote is not None:
+            self.remote.on_start(now_ns)
         self.started_at_ns = now_ns
         self._hand = self._pending = self.held = None
         self._serve_at = now_ns + round(self.countdown_s * S)
@@ -102,10 +105,10 @@ class GameCore:
         a fact once the IMU stream has reached the deadline: if the hub goes quiet around the
         swing window the wall clock alone must not call the ball a miss.
         """
+        events = [] if self.remote is None else self.remote.step(self, now_ns)          # heard even while the game waits for them
         if self.paused:
-            return []
+            return events
         data_ns = now_ns if data_ns is None else min(now_ns, data_ns)
-        events = []
         for _ in range(16):
             step = self._advance(now_ns, data_ns)
             if not step:
@@ -125,7 +128,10 @@ class GameCore:
                 return self._cpu_response(self._cpu_at)
             if self.incoming is not None and self._gone(now_ns, data_ns):
                 self._observe(1.0, True)                                  # the player failed to return the ball
-                return [GameEvent("miss", now_ns, {"ball_id": self.incoming.ball_id})] + self._end_rally("miss", now_ns)
+                events = [GameEvent("miss", now_ns, {"ball_id": self.incoming.ball_id})] + self._end_rally("miss", now_ns)
+                if self.remote is not None:
+                    self.remote.sent_miss(self, "miss", now_ns)
+                return events
         return []
 
     def _gone(self, now_ns, data_ns):
@@ -206,6 +212,8 @@ class GameCore:
     # --- the CPU serves / returns ------------------------------------------------------------
     def _serve(self, t0_ns, x_start=0.0):
         """The computer hits a ball at the player: a serve from the middle, or (x_start) a return from where it met yours."""
+        if self.remote is not None:
+            return self.remote.serve(self, t0_ns)
         survival = self.mode == "survival"
         plan = self.policy.serve(self.level, self.s_prev, self.tracker.streak, self.player_a, survival)
         leg = physics.plan_leg(t0_ns, plan.v, x_start, plan.aim_ab, plan.topspin, plan.sidespin)
@@ -312,9 +320,13 @@ class GameCore:
                           strength=strength)
         self.s_prev = strength
         self.player_a, self.incoming = paddle_a, None
-        self.outgoing_leg = physics.plan_return(
-            contact_ns, sp.v_out, contact, (0.5 + sp.aim_a / 1.6, 0.5), topspin=sp.T, sidespin=sp.S, fault=sp.fault,
-            loft_m=stroke.loft_m)
+        if self.remote is None:
+            self.outgoing_leg = physics.plan_return(
+                contact_ns, sp.v_out, contact, (0.5 + sp.aim_a / 1.6, 0.5), topspin=sp.T, sidespin=sp.S, fault=sp.fault,
+                loft_m=stroke.loft_m)
+        else:
+            sp = self.remote.shape(self, sp, strength)                  # at the match's pace, not the computer's
+            self.outgoing_leg = self.remote.plan(self, contact_ns, sp, contact, stroke)
         data = {"label": sp.label, "v_out": sp.v_out, "kmh": shotmod.kmh(sp.v_out), "topspin": sp.T,
                 "sidespin": sp.S, "q_total": sp.q_total, "gates": verdict.gates, "e_s": verdict.e_s,
                 "contact_ns": contact_ns, "contact": contact, "mode": self.hit_mode,
@@ -326,8 +338,10 @@ class GameCore:
             data["met_ns"] = met_ns                                   # when the ball met the paddle; contact_ns is when it left it
         self._observe(1.0 if sp.fault else 0.5 * (1.0 - sp.q_total), bool(sp.fault))
         if sp.fault:
-            events = [GameEvent("fault", now_ns, dict(data, fault=sp.fault))]
-            return events + self._end_rally("fault", now_ns)
+            events = [GameEvent("fault", now_ns, dict(data, fault=sp.fault))] + self._end_rally("fault", now_ns)
+            if self.remote is not None:
+                self.remote.sent_miss(self, "fault", now_ns)
+            return events
         counted = self.tracker.on_valid_hit(ball.ball_id)
         if counted and self.publisher:
             self.publisher.update(self.tracker.value())
@@ -336,7 +350,11 @@ class GameCore:
         # rally began -- never in a first rally with nothing to beat (that would buzz every hit).
         if counted and self._record_before > 0 and self.tracker.streak == self._record_before + 1:
             events.append(GameEvent("record", now_ns, {"value": self.tracker.record}))
-        self._out_shot, self._cpu_at = sp, self.outgoing_leg.arrival_ns
+        self._out_shot = sp
+        if self.remote is None:
+            self._cpu_at = self.outgoing_leg.arrival_ns
+        else:
+            self.remote.send_hit(self, now_ns)                              # the other person answers when they answer
         return events
 
     def _observe(self, reward, terminal):

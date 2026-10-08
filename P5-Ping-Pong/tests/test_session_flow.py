@@ -275,3 +275,17 @@ def test_a_session_without_sound_or_a_hub_goes_through_the_menus_just_the_same()
     settle(s)
     hold(s, START_AT, 1.8)
     assert hud(s).screen == "MODE"
+
+
+def test_go_flashes_on_the_screen_when_the_first_ball_is_served_and_not_on_every_ball():
+    s = make()
+    settle(s)
+    key(s, SPACE)
+    seen = []
+    for _ in range(int(7 / (1 / 30))):
+        hold(s, ELSEWHERE, 1 / 30)
+        seen.append((s.game.phase, hud(s).message))
+    went = [message for phase, message in seen if phase == "RALLY"]
+    assert "GO!" in went[:30]                                      # in the first second of the rally
+    assert "GO!" not in [message for phase, message in seen if phase == "COUNTDOWN"]
+    assert all(message != "GO!" for message in went[45:])           # and it has gone again

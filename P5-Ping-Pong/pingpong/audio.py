@@ -13,6 +13,7 @@ import numpy as np
 
 from pingpong import feedback
 from pingpong import music as music_module
+from pingpong.music import render
 
 RATE = 44_100
 PEAK = 0.8
@@ -149,7 +150,7 @@ class Audio:
         self.mixer, self.enabled, self.played = Mixer(), False, []
         self.library = {**SOUNDS, **music_module.STINGERS}
         self.music_on, self._muted, self._wanted, self._playing = music, False, None, None
-        self._stream = None
+        self._stream, self.prewarm = None, None
 
     @property
     def muted(self):
@@ -195,6 +196,9 @@ class Audio:
                                                 latency="low", callback=self._callback, **options)
             self._stream.start()
             self.enabled = True
+            if self.music_on:                              # the tunes are numbers to make: do it now, off the game's thread
+                self.prewarm = threading.Thread(target=lambda: [render(name) for name in music_module.TRACKS], daemon=True)
+                self.prewarm.start()
             self._apply_music()
         except Exception as exc:                      # no output device, no permission, no sounddevice
             self._stream, self.enabled = None, False

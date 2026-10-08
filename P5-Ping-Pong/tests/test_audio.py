@@ -235,3 +235,16 @@ def test_a_machine_with_no_sound_just_has_no_music():
     a = audio.Audio(backend=None)
     a.play_music("menu")
     assert a.music_playing is None and not a.enabled
+
+
+def test_the_tunes_are_made_in_the_background_as_soon_as_the_sound_starts_so_no_frame_waits_for_them():
+    from pingpong import music
+
+    music.render.cache_clear()
+    a = audio.Audio(backend=FakeSound())
+    a.start()
+    a.prewarm.join(timeout=10)
+    assert not a.prewarm.is_alive() and music.render.cache_info().currsize == 2
+    silent = audio.Audio(backend=FakeSound(), music=False)
+    silent.start()
+    assert silent.prewarm is None

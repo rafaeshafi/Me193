@@ -333,3 +333,12 @@ def test_a_fist_round_the_handle_can_be_any_skin():
     canvas.draw_paddle(frame, 100, 100, 20, hand=True, skin=(10, 200, 30))
     gx, gy = canvas.paddle_grip(100, 100, 20, 0.0, handle_up=False)
     assert tuple(frame[round(gy), round(gx)]) == (10, 200, 30)
+
+
+def test_go_is_a_big_word_in_the_middle_of_the_screen_not_a_banner(monkeypatch):
+    sizes = {}
+    real = fonts.draw
+    monkeypatch.setattr(fonts, "draw", lambda frame, text, x, y, size, *a, **kw: (sizes.setdefault(text, (x, y, size)), real(frame, text, x, y, size, *a, **kw))[1])
+    hud.render(state(phase="RALLY", message="GO!"), size=(W, H))
+    x, y, size = sizes["GO!"]
+    assert size >= 120 and abs(x - W / 2) < 5 and H * 0.4 < y < H * 0.7

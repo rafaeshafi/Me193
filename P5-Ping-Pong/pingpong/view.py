@@ -87,6 +87,8 @@ class View:
             return g.held[1]                                           # the ball sits on your paddle until it is let go
         if out is not None and view >= out.t0_ns:
             limit = out.arrival_ns + round(physics.FLY_ON_S * S) if out.terminal == "arrive" else out.end_ns
+            if g.remote is not None and g.remote.awaiting and out.terminal == "arrive":
+                return out.position(min(view, out.arrival_ns))         # at their end it waits for them to hit it
             return out.position(view) if view <= limit else None       # a ball nobody returns is seen to go on by
         if inc is not None and view <= inc.arrival_ns + round(physics.FLY_ON_S * S):
             return inc.position(view)
@@ -97,7 +99,8 @@ class View:
         """How far through its stroke the computer's paddle is (0..1), None when it is not hitting.  The stroke is timed
         to meet the ball exactly as it leaves (the middle of the swing), so it starts before the serve or the return."""
         g, half = self.game, CPU_SWING_S / 2 * S
-        contacts = [t for t in (self.cpu_swing_ns, g.next_cpu_contact_ns) if t is not None]
+        waited_for = g.outgoing_leg.arrival_ns if g.remote is not None and g.remote.awaiting and g.outgoing_leg is not None else None
+        contacts = [t for t in (self.cpu_swing_ns, waited_for if g.remote is not None else g.next_cpu_contact_ns) if t is not None]
         near = [t for t in contacts if abs(view - t) < half]
         if not near:
             return None
@@ -107,6 +110,8 @@ class View:
         """The computer's paddle: after its return it stands where it hit and drifts back to the middle; while it chases
         your shot it moves to where the ball will land (always arrives in Rally, can fall short in Match)."""
         g, leg = self.game, self.game.outgoing_leg
+        if g.remote is not None:
+            return g.remote.paddle_x                                 # the other person's paddle, where they hold it
         if g.phase == "RALLY" and g.incoming is not None and g.incoming_leg is not None:
             back = g.incoming_leg
             return back.x_start * max(0.0, 1.0 - max(0.0, (view - back.t0_ns) / S) / CPU_RECOVER_S)

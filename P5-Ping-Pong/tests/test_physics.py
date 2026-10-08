@@ -212,3 +212,72 @@ def test_the_same_holds_for_a_ball_going_the_other_way():
     l = ret(v=5.0, start=(0.0, 0.2, 0.4))
     assert l.time_at_z(2.0) > l.time_at_z(1.0) > 0
     assert l.position(l.time_at_z(2.0))[2] == pytest.approx(2.0, abs=1e-3)
+
+
+# --- a ball between two people (online play) -------------------------------------------------------------------------------------------------
+import itertools  # noqa: E402
+
+
+def mirror(point):
+    x, y, z = point
+    return -x, y, physics.TABLE_LEN_M - z
+
+
+CASES = [dict(v=2.5, start=(0.1, 0.22, 0.3), aim=(0.5, 0.5), top=0.0, side=0.0, loft=0.0),
+         dict(v=5.0, start=(-0.4, 0.3, 0.6), aim=(0.2, 0.5), top=0.6, side=-0.5, loft=0.1),
+         dict(v=7.0, start=(0.5, 0.25, 0.0), aim=(0.9, 0.5), top=-0.7, side=0.9, loft=0.0),
+         dict(v=3.2, start=(0.0, 0.22, 0.9), aim=(0.05, 0.5), top=0.0, side=0.3, loft=0.2)]
+
+
+def both(case, end_z=physics.TABLE_LEN_M - physics.HIT_Z_M, t0=1_000_000_000):
+    sent = physics.plan_return(t0, case["v"], case["start"], case["aim"], case["top"], case["side"], loft_m=case["loft"], end_z=end_z)
+    seen = physics.plan_mirrored(t0 + 7, case["v"], case["start"], case["aim"], case["top"], case["side"], loft_m=case["loft"])
+    return sent, seen
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_the_ball_a_player_sends_arrives_at_the_other_as_its_mirror_image(case):
+    sent, seen = both(case)
+    assert seen.flight_s == pytest.approx(sent.flight_s) and seen.arrival_ns - seen.t0_ns == sent.arrival_ns - sent.t0_ns
+    for k in range(0, 21):
+        dt = sent.flight_s * 1.3 * k / 20
+        mine = sent.position(sent.t0_ns + round(dt * 1e9))
+        theirs = seen.position(seen.t0_ns + round(dt * 1e9))
+        assert theirs == pytest.approx(mirror(mine), abs=1e-6), (case, k)
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_the_ball_meets_the_receiver_at_the_sweet_spot_plane_like_a_ball_from_the_computer(case):
+    sent, seen = both(case)
+    assert sent.z_end == pytest.approx(physics.TABLE_LEN_M - physics.HIT_Z_M)
+    assert seen.z_end == pytest.approx(physics.HIT_Z_M) and seen.terminal == "arrive"
+    assert seen.aim_ab == pytest.approx((1.0 - case["aim"][0], case["aim"][1]))
+    assert seen.x_end == pytest.approx(-sent.x_end) and seen.sidespin == pytest.approx(-case["side"])
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_the_received_ball_bounces_on_the_receivers_own_half_and_clears_the_net(case):
+    _, seen = both(case)
+    bounce = seen.position(seen.bounce_ns)
+    assert 0.0 < bounce[2] < physics.NET_Z_M and abs(bounce[0]) <= physics.HALF_WIDTH_M + 0.4 and bounce[1] == pytest.approx(0.0, abs=0.02)
+    at_net = seen.position(seen.time_at_z(physics.NET_Z_M))
+    assert at_net[1] >= physics.NET_H_M + physics.NET_CLEAR_M - 1e-6
+
+
+def test_a_received_ball_is_met_by_a_paddle_depth_the_way_the_computers_ball_is():
+    _, seen = both(CASES[0])
+    earlier, later = seen.time_at_z(0.6), seen.time_at_z(0.0)
+    assert seen.t0_ns < earlier < later and later > seen.arrival_ns                  # nearer the edge is later, even past the arrival
+
+
+def test_the_computers_returns_still_end_at_its_own_strike_plane():
+    leg = physics.plan_return(0, 4.0, (0.0, 0.22, 0.3), (0.5, 0.5))
+    assert leg.z_end == pytest.approx(physics.CPU_Z_M)
+
+
+def test_a_serve_starts_over_your_own_sweet_spot_and_goes_to_the_other():
+    leg = physics.plan_serve_out(0, 3.0, 0.0, (0.5, 0.5))
+    assert leg.z_start == pytest.approx(physics.HIT_Z_M) and leg.y_start == pytest.approx(physics.STRIKE_Y_M)
+    assert leg.z_end == pytest.approx(physics.TABLE_LEN_M - physics.HIT_Z_M)
+    seen = physics.plan_mirrored(0, 3.0, (0.0, physics.STRIKE_Y_M, physics.HIT_Z_M), (0.5, 0.5))
+    assert seen.z_start == pytest.approx(physics.TABLE_LEN_M - physics.HIT_Z_M)

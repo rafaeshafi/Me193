@@ -128,16 +128,15 @@ def blit(frame, color_or_bgr, alpha, x0, y0, opacity=1.0):
     if fx1 <= fx0 or fy1 <= fy0:
         return
     sx0, sy0 = fx0 - x0, fy0 - y0
-    a = alpha[sy0:sy0 + fy1 - fy0, sx0:sx0 + fx1 - fx0].astype(np.uint16)
-    if opacity < 1.0:
-        a = a * round(255 * max(0.0, opacity)) // 255
-    a = a[:, :, None]
+    weight = alpha[sy0:sy0 + fy1 - fy0, sx0:sx0 + fx1 - fx0].astype(np.float32) * (max(0.0, opacity) / 255.0)
     roi = frame[fy0:fy1, fx0:fx1]
+    shown = roi.astype(np.float32)
     if isinstance(color_or_bgr, np.ndarray):
-        src = color_or_bgr[sy0:sy0 + fy1 - fy0, sx0:sx0 + fx1 - fx0].astype(np.uint16)
+        src = color_or_bgr[sy0:sy0 + fy1 - fy0, sx0:sx0 + fx1 - fx0].astype(np.float32)
     else:
-        src = np.array(color_or_bgr, dtype=np.uint16)
-    roi[:] = ((roi.astype(np.uint16) * (255 - a) + src * a + 127) // 255).astype(np.uint8)
+        src = np.array(color_or_bgr, dtype=np.float32)
+    shown += (src - shown) * weight[:, :, None]
+    roi[:] = (shown + 0.5).astype(np.uint8)
 
 
 def draw(frame, text, x, y, size, color, *, anchor="mm", outline=None, outline_px=0, shadow=None, opacity=1.0):

@@ -171,10 +171,28 @@ def plan_leg(t0_ns, v, x_start, aim_ab, topspin=0.0, sidespin=0.0, fault=None):
                  0.64 + 0.16 * aim_ab[1], aim_ab, topspin, sidespin, fault)
 
 
-def plan_return(t0_ns, v, start, aim_ab, topspin=0.0, sidespin=0.0, fault=None, loft_m=0.0):
+def plan_return(t0_ns, v, start, aim_ab, topspin=0.0, sidespin=0.0, fault=None, loft_m=0.0, end_z=CPU_Z_M):
     """Your ball to the computer: from where you struck it, bouncing on its half, to its strike point at lateral a.
 
     loft_m raises the first arc above the lowest one that clears the net (a stroke that lifts): the time of flight and the
-    place it lands do not change, only how high it goes."""
-    return _plan(t0_ns, v, tuple(start), (x_of_a(aim_ab[0]), STRIKE_Y_M, CPU_Z_M), RETURN_BOUNCE, aim_ab, topspin,
+    place it lands do not change, only how high it goes.  end_z is the depth the ball is aimed to arrive at: the computer's
+    strike plane, or (online) the other player's sweet spot, TABLE_LEN_M - HIT_Z_M from your end."""
+    return _plan(t0_ns, v, tuple(start), (x_of_a(aim_ab[0]), STRIKE_Y_M, end_z), RETURN_BOUNCE, aim_ab, topspin,
                  sidespin, fault, loft_m)
+
+
+# --- a ball between two people (online play) ----------------------------------------------------------------------------------------
+def plan_serve_out(t0_ns, v, x_start, aim_ab, topspin=0.0, sidespin=0.0):
+    """A serve in a game with another person: struck over your own sweet spot, arriving over theirs."""
+    return plan_return(t0_ns, v, (x_start, STRIKE_Y_M, HIT_Z_M), aim_ab, topspin, sidespin, end_z=TABLE_LEN_M - HIT_Z_M)
+
+
+def plan_mirrored(t0_ns, v, start, aim_ab, topspin=0.0, sidespin=0.0, fault=None, loft_m=0.0):
+    """The ball the player at the other end sent with plan_return(..., end_z=TABLE_LEN_M - HIT_Z_M), as it comes at YOU.
+
+    Seen from the other end of the table everything is turned about the net: left is right, near is far, and a sidespin
+    that bends the ball to their right bends it to your left.  The flight is the same flight, so both screens show the same ball:
+    it leaves their contact point and arrives over your sweet spot (HIT_Z_M), where the computer's balls arrive too."""
+    sx, sy, sz = start
+    return _plan(t0_ns, v, (-sx, sy, TABLE_LEN_M - sz), (-x_of_a(aim_ab[0]), STRIKE_Y_M, HIT_Z_M), RETURN_BOUNCE,
+                 (1.0 - aim_ab[0], aim_ab[1]), topspin, -sidespin, fault, loft_m)

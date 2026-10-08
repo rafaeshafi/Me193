@@ -166,15 +166,17 @@ class Session:
             self.on_start()
 
     def _countdown_sounds(self, events):
-        """A tick per countdown digit (3-2-1) and a "go" when the first ball is served."""
-        if self.audio is None:
-            return
+        """A tick per countdown digit (3-2-1), and a "go" (heard, and flashed on the screen) when the first ball is served."""
         remaining = self.game.seconds_to_serve(self.clock.now_ns())
         digit = None if remaining is None else max(1, math.ceil(remaining))
-        if digit is not None and digit != self._last_digit:
-            self.audio.play("tick")
-        elif digit is None and self._last_digit is not None and any(e.kind == "serve" for e in events):
-            self.audio.play("go")
+        went = digit is None and self._last_digit is not None and any(e.kind == "serve" for e in events)
+        if went:
+            self._set_message("GO!", self.clock.now_ns(), 0.8)
+        if self.audio is not None:
+            if digit is not None and digit != self._last_digit:
+                self.audio.play("tick")
+            elif went:
+                self.audio.play("go")
         self._last_digit = digit
 
     # --- events -> feedback + HUD memory ---------------------------------------------------------
