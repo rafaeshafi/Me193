@@ -133,8 +133,9 @@ def results(frame, state):
 def _friend_buttons(frame, u):
     """After a game with a friend: a rematch (which waits for them to say yes, and is not there if they have gone) and leaving."""
     if u.opponent_gone:
-        ui.pill(frame, holdstart.BUTTON[0] * 1280 + holdstart.BUTTON[2] * 640, 120, 300, 54, f"{u.opponent} LEFT", fill=(CORAL, CORAL_DARK), size=26,
-                gloss=False, outline=WHITE, scale=anim.pop(arrival(u, 0.6, 0.5)))
+        text, width = f"{u.opponent} LEFT", holdstart.BUTTON[2] * 1280 * 0.94              # (inside the corner the button would have had)
+        ui.pill(frame, holdstart.BUTTON[0] * 1280 + holdstart.BUTTON[2] * 640, 120, width, 54, text, fill=(CORAL, CORAL_DARK),
+                size=fonts.fit_size(text, width - 36, max_size=26, min_size=12), gloss=False, outline=WHITE, scale=anim.pop(arrival(u, 0.6, 0.5)))
     elif u.rematch_pending:
         start_button(frame, u, "WAITING...", holdstart.BUTTON, target="again", entrance=arrival(u, 0.6, 0.5),
                      colors=(rgb(190, 200, 215), rgb(150, 162, 182)), hint_text=f"for {u.opponent}")

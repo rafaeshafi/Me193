@@ -42,7 +42,7 @@ def online(frame, state):
     _host_card(frame, state, view)
     _games(frame, state, view)
     if view.message and view.status != "offline":
-        _notice(frame, w / 2 + 120, 655, view.message)
+        _notice(frame, w / 2 + 120, 646, view.message)
     back_button(frame, u, menu_layout.BACK_BUTTON)
     hint(frame, "hold the hub on a speed to host   •   or on a game to join   •   ENTER  <  >  1-3   •   DELETE  back", cx=w / 2 + 120)
     pointer(frame, state)

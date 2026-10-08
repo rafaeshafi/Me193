@@ -350,3 +350,12 @@ def test_the_leaderboard_is_on_the_results_and_the_players_own_row_is_marked():
 def test_a_screen_nobody_has_heard_of_is_a_clear_error():
     with pytest.raises(ValueError):
         hud.render(hud.HudState(screen="NOPE", ui=UiState(screen="NOPE")), size=(W, H))
+
+
+def test_the_note_that_a_friend_left_stays_inside_the_screen_whatever_the_length_of_their_name():
+    gone = Results(won=None, title="THEY LEFT", stats=FRIEND_WIN.stats)
+    for name in ("AL", "A" * 16):
+        frame = render_friend("RESULTS", t_s=3.0, opponent=name, results=gone, opponent_name=name, opponent_gone=True)
+        edge = frame[100:142, W - 14:]                                               # the last columns of the pill's row: the court, not coral
+        coral = np.array(cast.rgb(235, 76, 84), dtype=np.int32)
+        assert (np.abs(edge.astype(np.int32) - coral).sum(axis=2) < 60).sum() == 0, name

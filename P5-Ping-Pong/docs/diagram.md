@@ -34,3 +34,26 @@ opened on the main thread of the terminal that was granted Camera/Bluetooth; tea
 Offline: `pingpong/fakerig.py` plays a scripted player through the real parser, hub link, swing detector,
 vision worker, tag voter and haptics on a simulated clock (`./pp play --selftest`); `pingpong/replay.py`
 feeds a recorded session back through the same code.
+
+## Playing a friend (two Macs, each running everything above)
+
+```
+ MAYA's Mac                                                                        RAFAE's Mac
+ Flow (ONLINE / WAIT screens) -> actions -> Session._online_action                 same
+ online.Online: list, host, join, pairing  <-- lobby: ME193-pp/v1/lobby/<CODE> -->  online.Online
+        |  (retained: who hosts, pace, points; cleared by withdraw() or by the host's last will)
+        v  pairing: guest says join{gid} until the host answers welcome{to=gid, sid} (or busy{to=gid})
+ GameCore.remote = versus.Remote  <-- room: .../room/<CODE>/host | .../guest -->    versus.Remote
+        |     hit / miss / rematch: numbered, in order, acked by every ping, resent after 2.5 s   (QoS 1)
+        |     pos (my paddle, 15 Hz), ping / pong (the PING chip)                                  (QoS 0)
+        v                                         test.mosquitto.org or --net-broker
+ my ball leaves here: plan_return(end_z = the far end)      their game starts the same ball at them:
+ and waits at the far end for their answer                  plan_mirrored (x -> -x, z -> 2.74 - z, side spin turned)
+```
+
+No clock is shared: a ball starts flying when its message is read, so each player has the ball's own flight to react in, and the
+receiver's game alone decides hit or miss. While a friend's game is on, `GameCore.play_friend` swaps in a tracker of its own and
+no publisher, so nothing in it can reach the score topic; `end_friend` puts the single-player ones back. Only `config.OWNER`'s
+player ever publishes the score. An in-memory network (`pingpong/loopnet.py`) and `pingpong/friendrig.py` play two whole
+pipelines against each other without a broker.
+
