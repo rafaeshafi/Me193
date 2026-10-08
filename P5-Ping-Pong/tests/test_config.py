@@ -93,3 +93,20 @@ def test_a_bench_number_counts_as_measured_only_when_config_local_holds_it(monke
     assert config.is_measured("GYRO_PER_DPS") and not config.is_measured("ACCEL_PER_G")
     monkeypatch.setattr(config, "MEASURED", set())
     assert not config.is_measured("GYRO_PER_DPS")
+
+
+def test_online_play_uses_the_class_broker_unless_told_another_and_that_never_moves_the_score(monkeypatch):
+    monkeypatch.setattr(config, "NET_BROKER_HOST", None)
+    assert config.net_broker() == (config.BROKER_HOST, config.BROKER_PORT)
+    monkeypatch.setattr(config, "NET_BROKER_HOST", "192.168.1.20")
+    monkeypatch.setattr(config, "NET_BROKER_PORT", 1884)
+    assert config.net_broker() == ("192.168.1.20", 1884)
+    assert (config.BROKER_HOST, config.BROKER_PORT) == ("test.mosquitto.org", 1883)           # the score topic's broker is untouched
+
+
+def test_pp_net_broker_names_a_broker_for_online_play_only(monkeypatch):
+    monkeypatch.setattr(config, "NET_BROKER_HOST", None)
+    monkeypatch.setattr(config, "NET_BROKER_PORT", 1883)
+    monkeypatch.setenv("PP_NET_BROKER", "10.0.0.5:18830")
+    config._apply()
+    assert config.net_broker() == ("10.0.0.5", 18830) and config.BROKER_HOST == "test.mosquitto.org"

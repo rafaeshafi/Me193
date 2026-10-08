@@ -23,6 +23,7 @@ from pingpong import shot as shotmod
 from pingpong.events import GameEvent, GateResult, Verdict
 from pingpong.judge import BallWindow, pose_at
 from pingpong.policy import reach_deficit_m
+from pingpong.scoring import ScoreTracker
 
 S = 1_000_000_000
 BETWEEN_RALLIES = ("LOBBY", "POINT_OVER", "MATCH_OVER")
@@ -348,7 +349,7 @@ class GameCore:
         events = [GameEvent("hit", now_ns, dict(data, streak=self.tracker.streak))]
         # A record is announced once per rally, when the streak passes the best that stood when the
         # rally began -- never in a first rally with nothing to beat (that would buzz every hit).
-        if counted and self._record_before > 0 and self.tracker.streak == self._record_before + 1:
+        if counted and self.remote is None and self._record_before > 0 and self.tracker.streak == self._record_before + 1:
             events.append(GameEvent("record", now_ns, {"value": self.tracker.record}))
         self._out_shot = sp
         if self.remote is None:
@@ -394,6 +395,30 @@ class GameCore:
             self.phase = "POINT_OVER"
             self.point_over_until_ns = now_ns + round(self.point_pause_s * S)
         return events
+
+    def play_friend(self, remote, target_points):
+        """Turn this game into one with another person: their Remote, a tracker of its own and no publisher (the score on the broker
+        is for games against the computer, and a friend's rallies must never reach it).  -> what end_friend needs to put it back."""
+        saved = (self.tracker, self.publisher, self.target_points)
+        self.tracker, self.publisher, self.target_points, self.remote = ScoreTracker(scope=self.tracker.scope), None, target_points, remote
+        self._record_before = 0
+        return saved
+
+    def end_friend(self, saved):
+        """The game against the computer again, with the tracker and the publisher it had."""
+        self.tracker, self.publisher, self.target_points = saved
+        self.remote, self._record_before = None, self.tracker.record
+
+    def walkover(self, now_ns):
+        """The other person is gone: the game ends where it stands, with no winner named and the score as it was."""
+        if self.phase in ("LOBBY", "MATCH_OVER"):
+            return []
+        self.phase = "MATCH_OVER"
+        self.incoming = self.incoming_leg = self.outgoing_leg = self._cpu_at = self._pending = self.held = None
+        self.tracker.end_rally()
+        self._end_game()
+        return [GameEvent("match_over", now_ns, {"winner": None, "walkover": True, "player_points": self.player_points,
+                                                 "cpu_points": self.cpu_points})]
 
     def _end_game(self):
         end_game = getattr(self.policy, "end_game", None)

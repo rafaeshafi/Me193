@@ -14,6 +14,9 @@ Usage:
     ./pp play --swing-source pose     # the camera's hand speed detects swings (auto when the hub measured < 25 Hz)
     ./pp play --no-hub                # camera only: no hub, no haptics (bring-up, or a flat battery)
     ./pp play --board                 # the leaderboard (best streaks, match wins) and nothing else
+    ./pp play --player maya --online  # play a friend over the internet: the list of open games, or host one (see the README)
+    ./pp play --player maya --host    # open a game for a friend right away (--level sets the speed)
+    ./pp play --player maya --join KQMDA   # join the friend's game with this code right away
 
 No keyboard needed: point with the hub (it is the cursor over the whole screen) and hold on a button to press it.
 Keys:  SPACE start now (and swing in --fake)  ENTER next  , . or arrows move  DELETE back  1-3 opponent  M game  X x-ray  D motors  S sound
@@ -66,6 +69,11 @@ def make_parser():
     ap.add_argument("--card-color", default=None, help="Connection Card colour (default: config_local.json)")
     ap.add_argument("--card-serial", default=None, help="Connection Card serial, a 4-digit string")
     ap.add_argument("--player", default="rafae", help="player profile; 'guest' = no saved calibration, never publishes")
+    ap.add_argument("--online", action="store_true", help="play a friend over the internet: open the list of their games straight away")
+    ap.add_argument("--host", action="store_true", help="open a game for a friend at once (--level sets the speed, --target the points)")
+    ap.add_argument("--join", metavar="CODE", default=None, help="join the game with this code at once")
+    ap.add_argument("--net-broker", metavar="HOST[:PORT]", default=None,
+                    help="the MQTT broker online games are played over (default: the class broker; the score topic's never moves)")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--no-window", action="store_true")
     from pingpong import livebuild
@@ -75,9 +83,26 @@ def make_parser():
 
 
 def parse_args(argv=None):
-    args = make_parser().parse_args(argv)
+    import config
+    from pingpong import netproto
+
+    ap = make_parser()
+    args = ap.parse_args(argv)
     if args.mode == "rally":                       # what the screen calls the survival mode
         args.mode = "survival"
+    if args.join is not None:
+        args.join = netproto.clean_code(args.join)
+        if args.join is None:
+            ap.error("--join: that is not a game code (five letters, like KQMDA)")
+    if args.host and args.join:
+        ap.error("--host and --join are two ways in: choose one")
+    if args.classic and (args.online or args.host or args.join):
+        ap.error("playing a friend needs the menus: drop --classic")
+    if args.net_broker:
+        try:
+            config.NET_BROKER_HOST, config.NET_BROKER_PORT = config.parse_broker(args.net_broker)
+        except ValueError as exc:
+            ap.error(f"--net-broker: {exc}")
     return args
 
 
@@ -133,18 +158,19 @@ def fake_loop(session, *, show, wait_key, mouse_xy):
 
 def make_flow(args):
     """The way into a game (intro, title, the choice of game and of opponent, the results), or None for --classic."""
-    from pingpong.flow import Flow
+    from pingpong import livebuild
 
-    return None if args.classic else Flow(intro=not args.no_intro, level_tag=args.level, mode=args.mode)
+    return livebuild.flow_for(args)
 
 
 def make_fake_session(args, clock=None):
     """The --fake game: the mouse is the hand, so pointing it at the screen and holding works as with the hub."""
-    from pingpong import app
+    from pingpong import app, netlink, online
     from pingpong.clock import Clock
 
     return app.make_session(level=args.level, mode=args.mode, target=args.target, clock=clock or Clock(), client=None,
-                            source="fake", seed=args.seed, hold_start=True, flow=make_flow(args))
+                            source="fake", seed=args.seed, hold_start=True, flow=make_flow(args),
+                            online=online.Online(netlink.Network(), name=args.player))
 
 
 def run_fake(args):
@@ -164,6 +190,7 @@ def run_fake(args):
         fake_loop(session, show=lambda frame: cv2.imshow(TITLE, frame), wait_key=cv2.waitKey,
                   mouse_xy=lambda: mouse["xy"])
     finally:
+        session.close_online()
         if session.audio is not None:
             session.audio.stop()
         cv2.destroyAllWindows()

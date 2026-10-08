@@ -5,7 +5,7 @@ import pytest
 
 from pingpong import cast, fonts, hud, menu_layout, ui
 from pingpong.cast import rgb
-from pingpong.uistate import Results, UiState
+from pingpong.uistate import OnlineView, Results, UiState
 
 W, H = 1280, 720
 GOLD_FILL = rgb(255, 214, 70)
@@ -47,13 +47,13 @@ def drawn_text(monkeypatch):
     return seen
 
 
-MENUS = ("TITLE", "MODE", "OPPONENT", "VS", "RESULTS")
+MENUS = ("TITLE", "MODE", "OPPONENT", "VS", "RESULTS", "ONLINE", "WAIT")
 
 
 @pytest.mark.parametrize("screen", MENUS)
 def test_every_screen_is_a_full_picture_and_the_same_every_time(screen):
     results = Results(won=True, title="YOU WIN!", stats=(("HITS", "31"),)) if screen == "RESULTS" else None
-    a, b = render(screen, t_s=1.7, results=results), render(screen, t_s=1.7, results=results)
+    a, b = render(screen, t_s=1.7, results=results, online=HOSTING), render(screen, t_s=1.7, results=results, online=HOSTING)
     assert a.shape == (H, W, 3) and a.dtype == np.uint8 and np.array_equal(a, b)
     assert a.std() > 20                                                       # not a flat colour
 
@@ -61,16 +61,16 @@ def test_every_screen_is_a_full_picture_and_the_same_every_time(screen):
 @pytest.mark.parametrize("screen", MENUS)
 def test_a_screen_comes_in_over_its_first_second_and_settles(screen):
     results = Results(won=True, title="YOU WIN!", stats=(("HITS", "31"),)) if screen == "RESULTS" else None
-    first, later, settled = (render(screen, t_s=t, results=results) for t in (0.0, 0.5, 3.0))
+    first, later, settled = (render(screen, t_s=t, results=results, online=HOSTING) for t in (0.0, 0.5, 3.0))
     assert diff(first, later) > 20_000 and diff(later, settled) > 2_000
 
 
-@pytest.mark.parametrize("screen", ("TITLE", "MODE", "OPPONENT", "RESULTS"))
+@pytest.mark.parametrize("screen", ("TITLE", "MODE", "OPPONENT", "RESULTS", "ONLINE", "WAIT"))
 @pytest.mark.parametrize("a, b", [(0.4, 0.4), (0.99, 0.01)])
 def test_the_pointer_is_drawn_wherever_the_hand_is_over_the_screen(screen, a, b):
     results = Results(title="GAME OVER") if screen == "RESULTS" else None
-    plain = render(screen, t_s=3.0, results=results)
-    pointed = render(screen, t_s=3.0, cursor=(a, b), results=results)
+    plain = render(screen, t_s=3.0, results=results, online=HOSTING)
+    pointed = render(screen, t_s=3.0, cursor=(a, b), results=results, online=HOSTING)
     cx, cy = round(min(1, a) * (W - 1)), round((1 - b) * (H - 1))
     spot = (slice(max(0, cy - 70), cy + 71), slice(max(0, cx - 70), cx + 71))
     assert diff(plain[spot], pointed[spot]) > 1_500
@@ -103,13 +103,13 @@ def test_the_title_says_what_is_wrong_with_the_hub_and_the_broker_in_a_notice_an
 
 
 # --- the choice of game -----------------------------------------------------------------------------------------------------------------
-def test_the_choice_of_game_has_two_cards_and_a_back_button(monkeypatch):
+def test_the_choice_of_game_has_three_cards_and_a_back_button(monkeypatch):
     seen = drawn_text(monkeypatch)
     render("MODE", t_s=3.0)
-    assert {"RALLY", "MATCH", "BACK"} <= set(seen) and any("CHOOSE" in text for text in seen)
+    assert {"RALLY", "MATCH", "ONLINE", "BACK"} <= set(seen) and any("CHOOSE" in text for text in seen)
 
 
-@pytest.mark.parametrize("name", ["rally", "match", "back"])
+@pytest.mark.parametrize("name", ["rally", "match", "online", "back"])
 def test_pointing_at_a_button_makes_it_pop_and_the_hold_fills_it(name):
     idle = render("MODE", t_s=3.0, focus=1 if name == "rally" else 0)        # (with nothing pointed at, the keys' choice stands out)
     over = render("MODE", t_s=3.0, hover=name, progress=0.0)
@@ -170,6 +170,144 @@ def test_the_two_come_in_from_the_sides_and_the_face_off_flashes_white_at_the_en
 
 
 # --- the results -----------------------------------------------------------------------------------------------------------------------------
+# --- playing a friend ---------------------------------------------------------------------------------------------------------------------------------
+ROOMS = ({"code": "ABCDE", "host": "MAYA", "pace": 2, "target": 7, "t": 3}, {"code": "FGHJK", "host": "LEO", "pace": 1, "target": 11, "t": 2},
+         {"code": "MNPQR", "host": "ZOE", "pace": 3, "target": 5, "t": 1})
+BROWSING = OnlineView(status="browsing", rooms=ROOMS)
+HOSTING = OnlineView(status="hosting", code="K7QMD", pace=2, target=7, live=True)
+
+
+def friend_state(screen, view=None, **kw):
+    ui_kw = {k: kw.pop(k) for k in list(kw) if k in ("t_s", "hover", "progress", "focus", "cursor", "level_tag", "rematch_pending", "opponent_gone")}
+    return hud.HudState(screen=screen, ui=UiState(screen=screen, online=view, opponent=kw.pop("opponent", ""), **ui_kw), player_name="rafae",
+                        level_name="Club", mode="match", hub_status="ok", mqtt_status="ok", anim_t=ui_kw.get("t_s", 0.0), **kw)
+
+
+def render_friend(screen, view=None, **kw):
+    return hud.render(friend_state(screen, view, **kw), size=(W, H))
+
+
+def test_the_list_offers_a_game_to_host_at_each_pace_and_the_games_others_have_opened(monkeypatch):
+    seen = drawn_text(monkeypatch)
+    render_friend("ONLINE", BROWSING, t_s=3.0)
+    assert {"PLAY A FRIEND", "HOST A GAME", "ROOKIE", "CLUB", "PRO", "OPEN GAMES", "BACK", "MAYA", "LEO", "ZOE"} <= set(seen)
+    assert any("FIRST TO 11" in text for text in seen) and any("FIRST TO 7" in text for text in seen)
+
+
+def test_only_the_games_on_the_list_get_a_row_and_an_empty_list_says_so(monkeypatch):
+    seen = drawn_text(monkeypatch)
+    render_friend("ONLINE", OnlineView(status="browsing", rooms=ROOMS[:1]), t_s=3.0)
+    assert "MAYA" in seen and "LEO" not in seen
+    seen.clear()
+    render_friend("ONLINE", OnlineView(status="browsing"), t_s=3.0)
+    assert any("NO OPEN GAMES" in text for text in seen)
+    seen.clear()
+    render_friend("ONLINE", OnlineView(status="connecting"), t_s=3.0)
+    assert any("CONNECTING" in text for text in seen)
+    seen.clear()
+    render_friend("ONLINE", OnlineView(status="offline", message="CAN'T REACH THE GAME SERVER - IS THE INTERNET ON?"), t_s=3.0)
+    assert any("GAME SERVER" in text for text in seen)
+
+
+def test_what_went_wrong_with_the_last_try_is_said_on_the_list(monkeypatch):
+    seen = drawn_text(monkeypatch)
+    plain = render_friend("ONLINE", BROWSING, t_s=3.0)
+    failed = render_friend("ONLINE", OnlineView(status="browsing", rooms=ROOMS, message="THAT GAME IS FULL"), t_s=3.0)
+    assert "THAT GAME IS FULL" in seen and diff(plain, failed) > 5_000
+
+
+@pytest.mark.parametrize("name", ["host1", "host2", "host3"])
+def test_a_pace_chip_pops_and_fills_where_the_hand_holds(name):
+    chip = menu_layout.HOST_CHIPS[int(name[4:])]
+    idle = render_friend("ONLINE", BROWSING, t_s=3.0, focus=1)
+    over = render_friend("ONLINE", BROWSING, t_s=3.0, hover=name)
+    held = render_friend("ONLINE", BROWSING, t_s=3.0, hover=name, progress=0.6)
+    area = rect_px(chip)
+    assert diff(idle[area], over[area]) > 2_000 and diff(over[area], held[area]) > 1_500
+
+
+@pytest.mark.parametrize("k", [0, 1, 2])
+def test_an_open_game_pops_and_fills_where_the_hand_holds(k):
+    idle = render_friend("ONLINE", BROWSING, t_s=3.0, focus=0)
+    over = render_friend("ONLINE", BROWSING, t_s=3.0, hover=f"join{k}")
+    held = render_friend("ONLINE", BROWSING, t_s=3.0, hover=f"join{k}", progress=0.6)
+    area = rect_px(menu_layout.ROOM_ROWS[k])
+    assert diff(idle[area], over[area]) > 5_000 and diff(over[area], held[area]) > 2_000
+
+
+def test_the_game_the_keys_have_in_focus_stands_out_like_the_one_the_hand_is_on():
+    focused = render_friend("ONLINE", BROWSING, t_s=3.0, focus=2)               # the host card, then the games: the second game
+    plain = render_friend("ONLINE", BROWSING, t_s=3.0, focus=0)
+    area = rect_px(menu_layout.ROOM_ROWS[1])
+    assert diff(focused[area], plain[area]) > 5_000
+
+
+def test_hosting_shows_the_code_one_letter_to_a_tile_and_how_to_back_out(monkeypatch):
+    seen = drawn_text(monkeypatch)
+    render_friend("WAIT", HOSTING, t_s=3.0)
+    assert {"K", "7", "Q", "M", "D", "CANCEL"} <= set(seen) and any("WAITING FOR A FRIEND" in text for text in seen)
+    assert any("CLUB" in text and "FIRST TO 7" in text for text in seen)
+
+
+def test_a_game_not_yet_on_the_list_says_it_is_being_set_up_and_joining_says_so(monkeypatch):
+    seen = drawn_text(monkeypatch)
+    render_friend("WAIT", OnlineView(status="hosting", code="K7QMD", pace=2, target=7, live=False), t_s=3.0)
+    assert any("setting up" in text.lower() for text in seen)
+    seen.clear()
+    render_friend("WAIT", OnlineView(status="joining", code="ABCDE"), t_s=3.0)
+    assert any("JOINING" in text for text in seen) and "CANCEL" in seen and "A" in seen
+
+
+def test_the_cancel_button_is_where_the_hand_has_to_hold_and_fills():
+    idle = render_friend("WAIT", HOSTING, t_s=3.0)
+    held = render_friend("WAIT", HOSTING, t_s=3.0, hover="cancel", progress=0.7)
+    assert diff(idle[rect_px(menu_layout.BACK_BUTTON)], held[rect_px(menu_layout.BACK_BUTTON)]) > 3_000
+
+
+def test_the_code_tiles_come_in_one_after_another():
+    early, later = render_friend("WAIT", HOSTING, t_s=0.45), render_friend("WAIT", HOSTING, t_s=0.9)
+    assert diff(early, later) > 20_000
+
+
+def test_the_face_off_with_a_friend_shows_their_name_and_that_it_is_online(monkeypatch):
+    seen = drawn_text(monkeypatch)
+    render_friend("VS", t_s=1.5, opponent="MAYA", level_tag=3)
+    assert {"RAFAE", "MAYA", "VS"} <= set(seen) and any("ONLINE" in text and "FIRST TO" in text for text in seen) and "COCO" not in seen
+
+
+def test_the_face_off_with_a_friend_does_not_look_like_the_one_with_the_computer():
+    friend = render_friend("VS", t_s=1.5, opponent="MAYA", level_tag=2)
+    computer = render("VS", t_s=1.5, level_tag=2, mode="match")
+    assert diff(friend, computer) > 30_000
+
+
+FRIEND_WIN = Results(won=True, title="YOU WIN!", stats=(("HITS", "31"), ("LONGEST RALLY", "12"), ("TOP SPEED", "74 km/h"), ("TIME", "2:41")))
+
+
+def test_the_results_against_a_friend_offer_a_rematch_and_leaving_and_name_them(monkeypatch):
+    seen = drawn_text(monkeypatch)
+    render_friend("RESULTS", t_s=3.0, opponent="MAYA", results=FRIEND_WIN, opponent_name="MAYA", player_points=7, cpu_points=4)
+    assert {"YOU WIN!", "REMATCH", "LEAVE", "7  -  4"} <= set(seen) and any("RAFAE" in t and "MAYA" in t for t in seen)
+    assert "PLAY AGAIN" not in seen and "OPPONENT" not in seen and "COCO" not in seen
+
+
+def test_asking_for_a_rematch_says_it_is_waiting_for_the_friend_and_a_friend_who_left_leaves_only_leaving(monkeypatch):
+    seen = drawn_text(monkeypatch)
+    render_friend("RESULTS", t_s=3.0, opponent="MAYA", results=FRIEND_WIN, opponent_name="MAYA", rematch_pending=True)
+    assert "WAITING..." in seen and "REMATCH" not in seen
+    seen.clear()
+    gone = Results(won=None, title="THEY LEFT", stats=FRIEND_WIN.stats)
+    render_friend("RESULTS", t_s=3.0, opponent="MAYA", results=gone, opponent_name="MAYA", opponent_gone=True)
+    assert "REMATCH" not in seen and "LEAVE" in seen and any("LEFT" in t for t in seen)
+
+
+def test_the_friends_avatar_is_on_the_results():
+    friend = render_friend("RESULTS", t_s=3.0, opponent="MAYA", results=FRIEND_WIN, opponent_name="MAYA")
+    computer = render("RESULTS", t_s=3.0, results=FRIEND_WIN, mode="match")
+    right = (slice(150, 480), slice(int(0.62 * W), int(0.9 * W)))
+    assert diff(friend[right], computer[right]) > 10_000
+
+
 WIN = Results(won=True, title="YOU WIN!", stats=(("HITS", "31"), ("LONGEST RALLY", "12"), ("TOP SPEED", "74 km/h"), ("TIME", "2:41")))
 LOSE = Results(won=False, title="THE CPU WINS", stats=WIN.stats)
 RECORD = Results(won=None, title="NEW RECORD!", new_record=True, stats=WIN.stats)

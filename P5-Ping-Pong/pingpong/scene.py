@@ -164,7 +164,7 @@ def _cpu_pose(cam, s):
     px, py, sc = cam.project(s.cpu_x_m, CPU_Y_M, CPU_Z_M)
     r = max(5, round(CPU_FACE_M * sc))
     angle = 0.0 if s.cpu_swing is None else 55.0 * math.sin(math.pi * s.cpu_swing)
-    return px, py, r, angle, cast.opponent_by_name(s.level_name)
+    return px, py, r, angle, cast.opponent_look(s.level_name, s.opponent_name)
 
 
 def draw_opponent(frame, cam, s, *, clip_rows=None):

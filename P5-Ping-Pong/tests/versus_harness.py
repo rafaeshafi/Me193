@@ -6,7 +6,7 @@ A "perfect" player meets every ball; "idle" never moves, so every ball it gets i
 
 import random
 
-from pingpong import app, netlink, versus
+from pingpong import app, contact, netlink, versus
 from pingpong.clock import FakeClock
 from pingpong.events import PaddlePose, SwingEvent
 
@@ -46,11 +46,37 @@ class Player:
         return events
 
 
+class ContactPlayer:
+    """A hand the camera always sees: level with each ball it means to meet (a still hand blocks, the softest return) and well away
+    from the ones it does not ("idle" never meets one, "flaky" about two in three)."""
+
+    def __init__(self, session, skill, rng=None):
+        self.session, self.skill, self._step, self.rng, self._mind = session, skill, 0, rng or random.Random(0), {}
+
+    def _meets(self, ball):
+        if self.skill == "perfect":
+            return True
+        return self.skill == "flaky" and self._mind.setdefault(ball.ball_id, self.rng.random() < 0.65)
+
+    def act(self):
+        s, game = self.session, self.session.game
+        self._step += 1
+        if self._step % 3:
+            return []                                                       # the camera: one reading in three frames
+        now = s.clock.now_ns()
+        ball, leg = game.incoming, game.incoming_leg
+        u = 0.0
+        if ball is not None and leg is not None and ball.t_c_ns - int(0.7 * S) <= now <= ball.t_c_ns + int(0.4 * S):
+            u = contact.ball_u(game.judge.box, leg.position(leg.arrival_ns)[0]) + (0.0 if self._meets(ball) else 1.4)
+        return s.on_pose(PaddlePose(t_scene_ns=now, u=u, v=0.0, conf=0.9, hand="right"))
+
+
 class Side:
-    def __init__(self, clock, link, *, host, skill, level, target, seed, name, sid="abc123"):
-        self.session = app.make_session(level=level, mode="match", target=target, clock=clock, hit_mode="swing", seed=seed)
-        self.link, self.events, self.player = link, [], Player(self.session, skill, random.Random(seed * 31 + 7))
-        self.remote = versus.Remote(link, host=host, opponent_name=name, sid=sid, seed=seed)
+    def __init__(self, clock, link, *, host, skill, level, target, seed, name, sid="abc123", gid="k3x9", hit_mode="swing"):
+        self.session = app.make_session(level=level, mode="match", target=target, clock=clock, hit_mode=hit_mode, seed=seed)
+        self.link, self.events = link, []
+        self.player = (ContactPlayer if hit_mode == "contact" else Player)(self.session, skill, random.Random(seed * 31 + 7))
+        self.remote = versus.Remote(link, host=host, opponent_name=name, sid=sid, gid=gid, seed=seed)
         self.session.game.remote = self.remote
 
     @property
@@ -63,13 +89,13 @@ class Side:
 
 
 class Rig:
-    def __init__(self, *, latency_s=0.03, target=3, level=1, host_skill="perfect", guest_skill="perfect", seed=1, **link_kw):
+    def __init__(self, *, latency_s=0.03, target=3, level=1, host_skill="perfect", guest_skill="perfect", seed=1, hit_mode="swing", **link_kw):
         self.clock = FakeClock(start_ns=1_000_000_000)
         link_kw.setdefault("rng", random.Random(seed))
         a, b = netlink.PairLink.pair(self.clock, latency_s=latency_s, **link_kw)
         self.link_a, self.link_b = a, b
-        self.host = Side(self.clock, a, host=True, skill=host_skill, level=level, target=target, seed=seed, name="MAYA")
-        self.guest = Side(self.clock, b, host=False, skill=guest_skill, level=level, target=target, seed=seed + 1, name="RAFAE")
+        self.host = Side(self.clock, a, host=True, skill=host_skill, level=level, target=target, seed=seed, name="MAYA", hit_mode=hit_mode)
+        self.guest = Side(self.clock, b, host=False, skill=guest_skill, level=level, target=target, seed=seed + 1, name="RAFAE", hit_mode=hit_mode)
 
     def start(self):
         self.host.session.on_start()

@@ -84,13 +84,27 @@ def new_code(rng):
 
 
 # --- the messages ---------------------------------------------------------------------------------------------------------------------
+def _token(x):
+    """A token that names a guest or a session: letters and digits, and not empty."""
+    if not isinstance(x, str) or not clean_sid(x):
+        raise ValueError("not a token")
+    return clean_sid(x)
+
+
 def _join(m):
-    return {"name": clean_name(m.get("name"))}
+    return {"name": clean_name(m.get("name")), "gid": _token(m["gid"])}
 
 
 def _welcome(m):
     return {"name": clean_name(m.get("name")), "pace": _int(m["pace"], 1, 3), "target": _int(m["target"], 1, TARGET_MAX),
-            "sid": clean_sid(m["sid"])}
+            "sid": _token(m["sid"]), "to": _token(m["to"])}
+
+
+def _bye(m):
+    out = {"reason": re.sub(r"[^a-z ]", "", str(m.get("reason", "")).lower())[:REASON_MAX]}
+    if "gid" in m:
+        out["gid"] = _token(m["gid"])
+    return out
 
 
 def _hit(m):
@@ -124,9 +138,9 @@ def _ping(m):
 
 
 SCHEMAS = {
-    "join": _join, "welcome": _welcome, "busy": lambda m: {}, "hit": _hit, "miss": _miss,
+    "join": _join, "welcome": _welcome, "busy": lambda m: {"to": _token(m["to"])}, "hit": _hit, "miss": _miss,
     "pos": lambda m: {"x": _num(m["x"], -X_MAX, X_MAX)}, "ping": _ping, "pong": _ping,
-    "bye": lambda m: {"reason": re.sub(r"[^a-z ]", "", str(m.get("reason", "")).lower())[:REASON_MAX]}, "rematch": lambda m: {},
+    "bye": _bye, "rematch": lambda m: {"n": _int(m["n"], 1, 10 ** 6)},
 }
 
 

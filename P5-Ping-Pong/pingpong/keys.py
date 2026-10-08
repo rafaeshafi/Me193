@@ -27,11 +27,14 @@ def handle_key(session, key, *, fake):
         if actions is not None:
             session.apply(actions)
             return None, []
-    if key == SPACE and game.phase in ("LOBBY", "MATCH_OVER"):
+    friend = getattr(game, "remote", None) is not None
+    if key == SPACE and game.phase in ("LOBBY", "MATCH_OVER") and not friend:
         session.on_start()
         return None, []
     if fake and key in SWING_KEYS and game.phase == "RALLY":
         return None, session.on_swing(fake_swing(session.clock.now_ns(), SWING_KEYS[key]))
+    if friend and key in (ord("1"), ord("2"), ord("3"), ord("m")):
+        return None, []                                           # the pace and the game were agreed with the friend
     if key in (ord("1"), ord("2"), ord("3")):
         game.set_level(levels.LEVELS[int(chr(key))])
     elif key == ord("m"):

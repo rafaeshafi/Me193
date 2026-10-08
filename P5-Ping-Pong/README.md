@@ -22,7 +22,8 @@ the computer serves a ball at you. Your webcam picture is a small corner of the 
 
 Two modes: **Rally** (called Survival in the code and on `--mode survival`: the computer is a player with its own
 paddle and never misses; how long can you keep the rally going? the balls speed up) and **Match** (first to 7; the
-computer misses more the harder, spinnier and wider you hit).
+computer misses more the harder, spinnier and wider you hit). And you can play **a friend over the internet**, each of you at
+your own laptop with your own hub: see [Playing a friend](#playing-a-friend).
 
 > Run everything that touches Bluetooth or the camera from **Terminal.app**, not from inside the
 > Claude app (macOS aborts the process there). The tools say so instead of crashing.
@@ -33,6 +34,7 @@ computer misses more the harder, spinnier and wider you hit).
 - [Setup](#setup)
 - [First time: the bench, in order](#first-time-the-bench-in-order)
 - [Playing](#playing)
+- [Playing a friend](#playing-a-friend)
 - [The score on MQTT](#the-score-on-mqtt)
 - [What it shows and records](#what-it-shows-and-records)
 - [Demo day: the graded take](#demo-day-the-graded-take)
@@ -153,7 +155,7 @@ Rally/Match.
 
 | Key | |
 |---|---|
-| SPACE | start a game now with the choices so far (and swing, in `--fake`) |
+| SPACE | start a game now with the choices so far (and swing, in `--fake`); with a friend it asks for the rematch |
 | Enter | the next screen / take the choice in focus |
 | , and . (or the arrow keys) | move along the choices |
 | Delete | back one screen |
@@ -238,6 +240,78 @@ impact and at the impact; the ball is where its flight puts it at the contact, t
 paddle your hand height puts on the table · **J3** swing big and
 clean enough · **J4** pose and IMU agree on the moment (logged only) · **J5** one hit per ball, not
 too fast · **J6** paddle not locked after the hub was shaken.
+
+## Playing a friend
+
+Anyone with a Double Motor and this code on their own laptop can play you, in real time over the internet. Each of you stands at
+your own laptop with your own hub in your fist; the table is the same table on both screens, turned about the net, so the ball
+you hit comes out of the screen at the other person, with the spin you gave it, and you see their paddle where they hold it.
+It is a **Match** (first to 7 by default) at the host's speed; the host serves first, then you take turns, and the point goes to
+whoever the other one fails to return.
+
+```bash
+./pp play --player maya --online          # the list of games friends have opened (or choose ONLINE on the choice of game)
+./pp play --player maya --host --level 2  # open a game at once (--level is the speed: 1 Rookie, 2 Club, 3 Pro; --target the points)
+./pp play --player maya --join KQMDA      # join the game with this code at once
+```
+
+**Hosting.** Choose **ONLINE**, then hold the hub on one of the three speeds on the **HOST A GAME** card. The screen shows the
+game's five-letter **code** and waits; the game is on the list for everyone who opens it. **Joining.** Choose **ONLINE** and hold
+the hub on a game in the list (the first three, newest first), or use `--join CODE` if your friend read the code out. Both
+screens then show the face-off with the two avatars (made from the names) and the 3-2-1. At the end the results offer a
+**REMATCH** (it waits until both of you have asked) and **LEAVE**; if your friend closes the window or loses the connection
+mid-game, the game ends for you with "THEY LEFT" and no winner is named.
+
+**What a friend needs on their laptop** (a Mac, like yours):
+
+```bash
+git clone <this repository> && cd ME193/P5-Ping-Pong
+python3.12 -m venv my_env && my_env/bin/pip install -r requirements.txt
+./pp ready                                     # imports + tests, no hardware
+./pp scan_hubs                                 # wake the hub and read its Connection Card colour and serial
+./pp env_check --card-color green --card-serial 0123   # camera, Bluetooth, hub rate; saves the card to config_local.json
+./pp calibrate_swing --player maya             # shoulders, reach corners, swings (a few minutes; this is what makes the hand a good paddle)
+./pp play --player maya --online
+```
+
+Their own name is the player (`--player`): it gives them their own avatar and their own calibration. Without a hub, `--no-hub`
+plays on the camera alone. **A friend's laptop never touches the score**: only the player named in `config.OWNER` (`rafae`)
+ever publishes to the score topic, so a friend running `./pp play` with their own name plays normally and nothing is sent, and
+nothing that happens in a game with a friend, even yours, is ever published or counted in your record or the leaderboard.
+
+**How it works.** Every laptop runs its own complete game. When you hit the ball your game sends the other one *what you did*
+(the ball left from here, at this speed, with this spin, aimed there: `pingpong/versus.py`); their game starts that ball flying
+at their player, mirrored (`physics.plan_mirrored`), and decides for itself whether their player returned it, and then sends
+the ball back the same way or says it missed. No clock is shared and none is needed: a ball starts flying when its message is
+read, so each player has exactly the ball's own flight to react in, however long the message took; delay only stretches the
+rally (a ball waits at the far end for the other game's answer). Messages are small JSON over MQTT (`pingpong/netproto.py`),
+checked field by field because the broker is public, with a room per game and a last will that tells the other laptop at once if
+yours dies (`netlink.py`); the lobby of open games is one retained message per game, withdrawn when it is full or its host is
+gone. A guest gives itself a token and the host's answer names it, so two guests knocking at once cannot both get the game
+(`online.py`). The host's score is the one that stands, both laptops ping each other once a second (the **PING** chip shows the
+round trip), a game whose friend has been silent for 4 s pauses ("WAITING FOR MAYA...") and is over after 20 s. I tested it
+with randomised matches over cables with 450 ms of latency, 120 ms of jitter, lost and duplicated messages: the two laptops
+always ended with the same score and winner (`tests/test_versus.py`, `tests/test_online_e2e.py`).
+
+**The network.** Games are played over the same public broker as the score, `test.mosquitto.org`, in their own corner of it
+(`ME193-pp/v1/...`, never under `ME193/`; the code refuses any other topic). Anyone running the game can see the list of open
+games and the host's name, and anyone can join one: it is a classroom game, there are no accounts. On a network that blocks
+port 1883 (some campus Wi-Fi) tether to a phone, or run your own broker for everybody on one network and point the game at it
+(this changes only where online games go, never where the score goes):
+
+```bash
+printf 'listener 1883\nallow_anonymous true\n' > /tmp/pp.conf && mosquitto -c /tmp/pp.conf    # on one laptop (brew install mosquitto)
+./pp play --player maya --online --net-broker 192.168.1.20                                      # on both (or PP_NET_BROKER=192.168.1.20)
+```
+
+| On the screen | What it means |
+|---|---|
+| CAN'T REACH THE GAME SERVER | no connection to the broker after 8 s: the network blocks 1883, or there is no internet; it keeps trying |
+| COULD NOT REACH THAT GAME | nobody answered the join for 10 s: the host closed it or lost the connection |
+| THAT GAME IS FULL | somebody else got there first |
+| THAT GAME WAS CLOSED | the host cancelled while you were joining |
+| WAITING FOR MAYA... | no word from your friend for 4 s: the game is paused until they are back |
+| THEY LEFT | your friend left or was lost for 20 s: the game ends, nobody is named the winner |
 
 ## The score on MQTT
 
@@ -339,7 +413,8 @@ play.py  config.py  pp  requirements.txt  README.md
 pingpong/   the game: sensing (hub, imu_worker, swing, shake, vision, pose, tags), game (judge, shot, physics,
             rules, policy, pd, qbandit, levels, spin), output (haptics, feedback, audio, hud, canvas), glue (live, app, profile,
             spinflow, store, recorder, replay, sessionreport, overrides, livebuild, posegyro, fakerig, threadrig,
-            sources_fake), the hand (body, posemodel, posetrain, posetake)
+            sources_fake), the hand (body, posemodel, posetrain, posetake), playing a friend (netproto, netlink, versus,
+            online, onlinesession, screens_online, loopnet: an in-memory network for the tests)
 tools/      scan_hubs  env_check  bench_hub  bench_cam  bench_haptics  calibrate_swing  reset_hub
             report  replay  train_spin  train_pose  sim  watch_score  republish_best  make_cards
 tests/      one file per module; the whole pipeline also runs on fake hardware (test_fakerig.py)

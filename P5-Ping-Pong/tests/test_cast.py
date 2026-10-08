@@ -56,3 +56,9 @@ def test_an_empty_name_still_gets_an_avatar():
 def test_looks_are_frozen_so_a_screen_cannot_change_a_character_by_accident():
     with pytest.raises(dataclasses.FrozenInstanceError):
         cast.OPPONENTS[1].name = "Someone"
+
+
+def test_a_friend_online_stands_behind_the_table_with_their_own_avatar_not_the_levels_opponent():
+    assert cast.opponent_look("Club", "") is cast.COCO
+    friend = cast.opponent_look("Club", "Maya")
+    assert friend == cast.player_look("MAYA") and friend.name == "MAYA" and friend != cast.COCO

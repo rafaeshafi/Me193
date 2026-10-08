@@ -52,6 +52,11 @@ def opponent_by_name(level_name):
     return {"Rookie": PIP, "Club": COCO, "Pro": MAX, "Insane": MAX}.get(level_name, PIP)
 
 
+def opponent_look(level_name, friend=""):
+    """Whoever stands behind the table: the friend being played online (their own avatar), else the opponent of the level."""
+    return player_look(friend) if friend else opponent_by_name(level_name)
+
+
 def opponent_for(level):
     """The opponent that stands for a level (the Insane row, which has no card, borrows the hardest one)."""
     return OPPONENTS.get(level.tag, MAX)

@@ -327,7 +327,7 @@ def test_the_hand_alone_carries_a_player_through_the_title_and_the_menus_into_a_
     env = FakeEnv()
     t0 = env.clock.now_ns()
     box = profile.Calibration.default().box
-    spots = [(0.5, 0.9), (0.95, 0.9), (0.5, 0.9), (0.72, 0.45), (0.5, 0.9), (0.5, 0.4), (0.5, 0.9)]
+    spots = [(0.5, 0.9), (0.95, 0.9), (0.5, 0.9), (0.5, 0.45), (0.5, 0.9), (0.5, 0.4), (0.5, 0.9)]
     # (seconds from the start at which the hand moves to each place): away, START, away, MATCH, away, the Club card, away
     when = [0.0, 0.4, 2.3, 2.7, 4.3, 4.7, 6.3]
 
@@ -387,3 +387,54 @@ def test_hit_mode_swing_gives_the_old_game_where_only_a_swing_the_hub_sees_meets
     assert rig.session.game.hit_mode == "swing"
     rig.close()
 
+
+
+# --- playing a friend ----------------------------------------------------------------------------------------------------------------------------
+def test_a_live_session_can_play_a_friend_over_the_network_the_environment_gives_it(tmp_path):
+    env = FakeEnv()
+    rig = live.build_live(live_args("--player", "maya"), env, player_root=tmp_path)
+    online = rig.session.online
+    assert online is not None and online.name == "MAYA" and online.net is env.make_network()
+    rig.close()
+
+
+def test_online_starts_at_the_list_of_games_and_host_and_join_go_straight_to_a_game(tmp_path):
+    rig = live.build_live(live_args("--player", "maya", "--online"), FakeEnv(), player_root=tmp_path)
+    rig.pump()
+    assert rig.session.hud_state().screen == "ONLINE" and rig.session.online.state == "browsing"
+    rig.close()
+    rig = live.build_live(live_args("--player", "maya", "--host", "--level", "3"), FakeEnv(), player_root=tmp_path)
+    rig.pump()
+    assert rig.session.hud_state().screen == "WAIT" and rig.session.online.state == "hosting" and rig.session.online.pace == 3
+    rig.close()
+    rig = live.build_live(live_args("--player", "maya", "--join", "abcde"), FakeEnv(), player_root=tmp_path)
+    rig.pump()
+    assert rig.session.hud_state().screen == "WAIT" and rig.session.online.state == "joining" and rig.session.online.code == "ABCDE"
+    rig.close()
+
+
+def test_closing_the_rig_leaves_the_list_and_says_goodbye(tmp_path):
+    env = FakeEnv()
+    rig = live.build_live(live_args("--player", "maya", "--host"), env, player_root=tmp_path)
+    rig.pump()
+    rig.pump()
+    assert env.make_network().entries
+    rig.close()
+    assert env.make_network().entries == {} and rig.session.online.state == "idle"
+
+
+def test_only_the_owner_ever_publishes_to_the_score_topic_not_a_friend_on_their_own_laptop(tmp_path):
+    env = FakeEnv()
+    friend = live.build_live(live_args("--player", "maya"), env, player_root=tmp_path)
+    assert friend.mqtt_client is None and friend.session.hud_state().mqtt_status == "off"
+    friend.close()
+    env = FakeEnv()
+    owner = live.build_live(live_args("--player", "Rafae"), env, player_root=tmp_path)
+    assert owner.mqtt_client is env.mqtt_client
+    owner.close()
+
+
+def test_a_friend_is_told_in_the_log_that_nothing_will_be_published(tmp_path):
+    lines = []
+    live.build_live(live_args("--player", "maya"), FakeEnv(), player_root=tmp_path, log=lines.append).close()
+    assert any("score topic" in line and "not published" in line for line in lines)

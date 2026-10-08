@@ -22,6 +22,7 @@ GREEN, RED, AMBER, WHITE, GREY = (80, 220, 80), (70, 70, 240), (40, 170, 255), (
 NAVY, SKY, CORAL, ORANGE, GOLD = rgb(24, 48, 96), rgb(54, 160, 255), rgb(255, 104, 104), rgb(255, 146, 30), rgb(255, 196, 40)
 MINT, PURPLE, SLATE = rgb(54, 190, 112), rgb(150, 100, 240), rgb(112, 126, 150)
 LOW_BATTERY = 20                 # percent: the hub's number goes amber below this
+PING_OK_MS = 250                 # a line slower than this (there and back) is shown as a worry in an online game
 PIP_SIZE = (256, 144)            # the camera picture in the corner (px)
 CARD_W, CARD_H = 318, 100
 LABEL_COLOR = {"perfect": GOLD, "good": MINT, "early": ORANGE, "late": ORANGE}
@@ -73,6 +74,8 @@ class HudState:
     screen: str = "GAME"             # GAME, or one of the screens round it: INTRO | TITLE | MODE | OPPONENT | VS | RESULTS
     ui: UiState | None = None        # what that screen is told (flow.py)
     results: Results | None = None   # the results screen's words and numbers
+    opponent_name: str = ""          # a friend being played online (their avatar stands behind the table); "" against the computer
+    ping_ms: float | None = None     # how long a message takes there and back (online play), None until the first answer
 
 
 @lru_cache(maxsize=4)
@@ -129,7 +132,7 @@ def _card(frame, x, y, side, look, name, label, value, color, mood, t):
 
 def _score_cards(frame, s, w):
     me = cast.player_look(s.player_name or "player")
-    opp = cast.opponent_by_name(s.level_name)
+    opp = cast.opponent_look(s.level_name, s.opponent_name)
     if s.mode == "survival":
         _card(frame, 20, 16, "left", me, me.name, "STREAK", s.streak, SKY, "happy", s.anim_t)
         _card(frame, w - 20 - CARD_W, 16, "right", None, "BEST", "STREAK", max(s.record, s.streak), ORANGE, "happy", s.anim_t)
@@ -146,7 +149,7 @@ def _pill_text(frame, cx, y, text, size, color=NAVY, fill=WHITE, opacity=0.92, p
 
 def _chips(frame, s, w):
     """Which game, against which level, in a tag under your card."""
-    name = levels.MODE_NAMES.get(s.mode, s.mode.upper())
+    name = "ONLINE" if s.opponent_name else levels.MODE_NAMES.get(s.mode, s.mode.upper())
     middle = f"FIRST TO {s.target}   \u2022   " if s.mode == "match" else ""
     text = f"{name}   \u2022   {middle}{s.level_name.upper()}"
     tw, _ = fonts.measure(text, 21)
@@ -155,9 +158,15 @@ def _chips(frame, s, w):
 
 
 def _status(frame, s, h):
-    healthy = (s.mqtt_status, s.hub_status) == ("ok", "ok") and (s.hub_battery is None or s.hub_battery >= LOW_BATTERY)
     battery = "" if s.hub_battery is None else f" {s.hub_battery}%"
-    text = f"MQTT {s.mqtt_status.upper()}    HUB {s.hub_status.upper()}{battery}"
+    hub_ok = s.hub_status == "ok" and (s.hub_battery is None or s.hub_battery >= LOW_BATTERY)
+    if s.opponent_name:                                              # a friend: how good the line is matters, the score topic does not
+        ping = "..." if s.ping_ms is None else f"{s.ping_ms:.0f} ms"
+        healthy = hub_ok and s.ping_ms is not None and s.ping_ms < PING_OK_MS
+        text = f"ONLINE   PING {ping}    HUB {s.hub_status.upper()}{battery}"
+    else:
+        healthy = (s.mqtt_status, s.hub_status) == ("ok", "ok") and hub_ok
+        text = f"MQTT {s.mqtt_status.upper()}    HUB {s.hub_status.upper()}{battery}"
     tw, _ = fonts.measure(text, 18)
     ui.panel(frame, 20, h - 52, tw + 52, 34, radius=17, fill=WHITE, opacity=0.86, shadow=False)
     cv2.circle(frame, (40, h - 35), 7, MINT if healthy else rgb(255, 170, 30), -1, cv2.LINE_AA)

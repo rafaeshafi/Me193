@@ -322,7 +322,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
              threaded=False, lag_s=None, gyro_per_dps=None, accel_per_g=None, fs_raw=None, stale_ms=None,
              to_image=None, record_dir=None, player="rafae", vision=None, recorder=None, spin_probs_fn=None,
              learner=None, pose_gyro=None, resume=False, overrides=None, latency=None, pose_model=None, hold_start=False,
-             hit_mode="swing", flow=None, log=print):
+             hit_mode="swing", flow=None, online=None, log=print):
     """Wire every piece into one LiveRig.  The real play.py and the fake rig both come through here,
     so the wiring that matters on hardware (haptic blank windows, phase-gated tag search, the pose
     lock, status lights) is exactly the wiring the tests run.
@@ -334,7 +334,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
     hold_start: the game also starts when the hub is held on the START button (live play; a replay starts its games
     where the recording says).  flow: the intro, title and menus in front of the game (live play; None: the plain lobby).
     hit_mode: "swing" (a swing the IMU sees meets the ball) or "contact" (the hand moving into the ball does, and the
-    hub's flick is the spin); a replay passes the recorded one."""
+    hub's flick is the spin); a replay passes the recorded one.  online: an online.Online, so the menus can play a friend."""
     camera = calibration.swing.source == "pose"
     latency = latency or latency_mod.Latency.from_config()
     pose_model = pose_model or posemodel.PoseModel.default()
@@ -388,6 +388,9 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         overrides_mod.apply(rig, overrides)
     if publishing:
         mqtt_link.attach(mqtt_client, session.game.publisher)
+    if online is not None:
+        session.attach_online(online)
+        rig.closers.append(("online", online.close))                # a friend hears goodbye, and the game leaves the list
     return rig
 
 

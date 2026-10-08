@@ -1,3 +1,5 @@
+import pytest
+
 import play
 
 
@@ -186,7 +188,7 @@ def test_the_fake_game_opens_with_the_intro_and_goes_through_the_menus_with_the_
     session = play.make_fake_session(play.parse_args(["--fake", "--no-audio", "--no-intro", "--mode", "match"]), clock=clock)
     assert session.hud_state().screen == "TITLE" and session.flow.mode == "match"
     assert play.make_fake_session(play.parse_args(["--fake", "--no-audio"])).hud_state().screen == "INTRO"
-    spots = [(0.5, 0.12), (0.95, 0.1), (0.5, 0.12), (0.72, 0.55), (0.5, 0.12), (0.5, 0.6), (0.5, 0.12)]     # (mouse x, y as fractions of the window)
+    spots = [(0.5, 0.12), (0.95, 0.1), (0.5, 0.12), (0.5, 0.55), (0.5, 0.12), (0.5, 0.6), (0.5, 0.12)]     # (mouse x, y as fractions of the window)
     when = [0.0, 0.4, 2.3, 2.7, 4.3, 4.7, 6.3]
     seen, state = [], {"n": 0}
 
@@ -214,3 +216,46 @@ def test_live_play_hits_by_hand_contact_unless_asked_for_swings():
     assert play.parse_args([]).hit_mode == "contact"
     assert play.parse_args(["--hit-mode", "swing"]).hit_mode == "swing"
 
+
+
+# --- the way into a game with a friend ---------------------------------------------------------------------------------------------------------------
+def test_the_command_line_has_flags_for_playing_a_friend():
+    args = play.parse_args(["--online"])
+    assert args.online and not args.host and args.join is None
+    assert play.parse_args(["--host", "--level", "2"]).host
+    assert play.parse_args(["--join", "abcde"]).join == "ABCDE"                       # cleaned like a code typed anywhere
+
+
+def test_a_game_code_that_is_not_one_is_refused_before_anything_starts(capsys):
+    with pytest.raises(SystemExit):
+        play.parse_args(["--join", "ab/de"])
+    assert "code" in capsys.readouterr().err
+
+
+def test_host_and_join_exclude_each_other_and_the_classic_lobby_cannot_play_a_friend(capsys):
+    for argv in (["--host", "--join", "ABCDE"], ["--online", "--classic"], ["--host", "--classic"]):
+        with pytest.raises(SystemExit):
+            play.parse_args(argv)
+    capsys.readouterr()
+
+
+def test_net_broker_names_the_broker_for_online_games_only(monkeypatch):
+    import config
+
+    monkeypatch.setattr(config, "NET_BROKER_HOST", None)
+    monkeypatch.setattr(config, "NET_BROKER_PORT", 1883)
+    play.parse_args(["--online", "--net-broker", "192.168.1.20:1884"])
+    assert config.net_broker() == ("192.168.1.20", 1884) and config.BROKER_HOST == "test.mosquitto.org"
+
+
+def test_the_flow_for_a_friend_starts_where_the_flags_say():
+    assert play.make_flow(play.parse_args(["--online"])).screen == "ONLINE"
+    flow = play.make_flow(play.parse_args(["--host", "--level", "3"]))
+    assert flow.screen == "WAIT" and flow.level_tag == 3
+    assert play.make_flow(play.parse_args(["--join", "abcde"])).screen == "WAIT"
+    assert play.make_flow(play.parse_args([])).screen == "INTRO"
+
+
+def test_the_fake_game_can_play_a_friend_too():
+    session = play.make_fake_session(play.parse_args(["--fake", "--host"]))
+    assert session.online is not None and session.flow.screen == "WAIT"

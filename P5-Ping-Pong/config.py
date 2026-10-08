@@ -2,7 +2,7 @@
 
 Defaults live here.  The bench tools write what they MEASURE into
 config_local.json (never hand-copied) and it overlays these defaults at import.
-Environment overrides: PP_BROKER=host[:port], PP_RECORD_SCOPE=<scope>.
+Environment overrides: PP_BROKER=host[:port], PP_NET_BROKER=host[:port] (online play only), PP_RECORD_SCOPE=<scope>.
 """
 
 import json
@@ -16,7 +16,10 @@ LOCAL_PATH = HERE / "config_local.json"
 BROKER_HOST = "test.mosquitto.org"
 BROKER_PORT = 1883
 KEEPALIVE_S = 30
+NET_BROKER_HOST = None                            # online play (a friend's game): None = the broker above; friends on one network can
+NET_BROKER_PORT = 1883                            # run their own mosquitto and set PP_NET_BROKER (the score topic's broker never moves)
 SCORE_TOPIC = "ME193/Rogers/RafaeShafi"          # the assigned topic, exact casing
+OWNER = "rafae"                                   # the one player (profile) whose games are published to it: nobody else's ever is
 # Extras live OUTSIDE ME193/ so a ME193/# or ME193/Rogers/# listener never sees them.
 EXTRAS_PREFIX = "ME193-pp/RafaeShafi"
 STATUS_TOPIC = EXTRAS_PREFIX + "/status"
@@ -69,6 +72,11 @@ def parse_broker(text):
     if not host:
         raise ValueError(f"bad broker {text!r}")
     return host, int(port) if sep else 1883
+
+
+def net_broker():
+    """(host, port) of the broker online games are played over."""
+    return (NET_BROKER_HOST, NET_BROKER_PORT) if NET_BROKER_HOST else (BROKER_HOST, BROKER_PORT)
 
 
 def parse_record_scope(text):
@@ -135,6 +143,8 @@ def _apply():
         MEASURED.update(local)
     if os.environ.get("PP_BROKER"):
         globals()["BROKER_HOST"], globals()["BROKER_PORT"] = parse_broker(os.environ["PP_BROKER"])
+    if os.environ.get("PP_NET_BROKER"):
+        globals()["NET_BROKER_HOST"], globals()["NET_BROKER_PORT"] = parse_broker(os.environ["PP_NET_BROKER"])
     if os.environ.get("PP_RECORD_SCOPE"):
         globals()["RECORD_SCOPE"] = parse_record_scope(os.environ["PP_RECORD_SCOPE"])
 

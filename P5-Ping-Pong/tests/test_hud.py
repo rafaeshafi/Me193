@@ -342,3 +342,32 @@ def test_go_is_a_big_word_in_the_middle_of_the_screen_not_a_banner(monkeypatch):
     hud.render(state(phase="RALLY", message="GO!"), size=(W, H))
     x, y, size = sizes["GO!"]
     assert size >= 120 and abs(x - W / 2) < 5 and H * 0.4 < y < H * 0.7
+
+
+# --- a friend online ------------------------------------------------------------------------------------------------------------------------------
+def test_a_friend_is_named_on_the_right_card_and_stands_behind_the_table(monkeypatch):
+    seen = []
+    real = fonts.draw
+    monkeypatch.setattr(fonts, "draw", lambda frame, text, *a, **kw: (seen.append(text), real(frame, text, *a, **kw))[1])
+    computer = hud.render(state(phase="RALLY", mode="match", level_name="Club"), size=(W, H))
+    assert "COCO" in seen
+    seen.clear()
+    friend = hud.render(state(phase="RALLY", mode="match", level_name="Club", opponent_name="MAYA"), size=(W, H))
+    assert "MAYA" in seen and "COCO" not in seen
+    assert diff(computer, friend) > 20_000
+    assert any("ONLINE" in text for text in seen)                                      # the tag under your card
+
+
+def test_an_online_game_shows_the_ping_in_place_of_the_score_topics_state_and_worries_when_it_is_slow(monkeypatch):
+    seen = []
+    real = fonts.draw
+    monkeypatch.setattr(fonts, "draw", lambda frame, text, *a, **kw: (seen.append(text), real(frame, text, *a, **kw))[1])
+    hud.render(state(phase="RALLY", mode="match", opponent_name="MAYA", ping_ms=48.4, mqtt_status="off"), size=(W, H))
+    assert any("PING 48 ms" in text for text in seen) and not any("MQTT" in text for text in seen)
+    seen.clear()
+    hud.render(state(phase="RALLY", mode="match", opponent_name="MAYA", ping_ms=None), size=(W, H))
+    assert any("PING ..." in text for text in seen)
+    fast = hud.render(state(phase="RALLY", mode="match", opponent_name="MAYA", ping_ms=40.0), size=(W, H))
+    slow = hud.render(state(phase="RALLY", mode="match", opponent_name="MAYA", ping_ms=900.0), size=(W, H))
+    chip = (slice(H - 56, H - 14), slice(16, 420))
+    assert diff(fast[chip], slow[chip]) > 3_000

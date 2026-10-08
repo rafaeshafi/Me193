@@ -17,6 +17,7 @@ from pingpong.flow import Flow
 from pingpong.hud import HudState
 from pingpong.judge import HitJudge
 from pingpong.mqtt_pub import ScorePublisher
+from pingpong.onlinesession import OnlineMixin
 from pingpong.paddle import ReachBox
 from pingpong.policy import CpuPolicy
 from pingpong.rules import GameCore
@@ -29,7 +30,7 @@ FLASH = {"perfect": ((255, 255, 255), 0.25), "good": ((0, 200, 0), 0.18), "early
          "late": ((0, 140, 255), 0.2), "fault": ((0, 0, 255), 0.35)}
 
 
-class Session:
+class Session(OnlineMixin):
     def __init__(self, game, clock, actuator=None, mqtt_status=None, hub_status=None, latency=None, hand_model=None,
                  hold_start=None, flow=None):
         self.game, self.clock, self.actuator = game, clock, actuator
@@ -103,6 +104,8 @@ class Session:
             if actions is not None:
                 self.apply(actions)
                 return
+        if self.game.remote is not None:
+            return                                           # a friend's game is not started or retuned by a card
         if tag.role == "START":
             self.on_start()
         elif tag.role == "LEVEL":
@@ -138,6 +141,7 @@ class Session:
         if self.flow is None:
             return
         self._hand_ab = holdstart.hand_ab(self.game.judge.box, self.poses, now)
+        self._online_tick(now)
         self.apply(self.flow.update(now, self._hand_ab, self.game.phase))
 
     def apply(self, actions):
@@ -151,6 +155,8 @@ class Session:
                 self.actuator.submit(value)
             elif kind == "music" and self.audio is not None:
                 self.audio.play_music(value)
+            elif kind == "online":
+                self._online_action(*value)
 
     def _start_game(self, level_tag, mode):
         self.game.set_level(levels.LEVELS[level_tag])
@@ -198,7 +204,7 @@ class Session:
                 "record": g.tracker.record, "player_points": g.player_points, "cpu_points": g.cpu_points,
                 "winner": e.data.get("winner"), "hits": st["hits"], "misses": st["misses"], "faults": st["faults"],
                 "max_kmh": st["max_kmh"], "duration_s": (e.t_ns - (g.started_at_ns or e.t_ns)) / S,
-                "started_at_ns": g.started_at_ns}
+                "started_at_ns": g.started_at_ns, "opponent": self.opponent_name, "walkover": bool(e.data.get("walkover"))}
 
     def _queue_sounds(self, events, now):
         """A hit's sound is due when the picture shows the contact (less the time the speakers take); the rest are due now."""
@@ -246,8 +252,9 @@ class Session:
                 st["faults"] += 1
             elif e.kind in ("game_over", "match_over"):
                 self._last_summary = self._summary(e)
-                self._set_mood("sad" if e.data.get("winner") == "player" else "cheer", now, 600)
-                if self.on_game_over is not None:
+                if not e.data.get("walkover"):
+                    self._set_mood("sad" if e.data.get("winner") == "player" else "cheer", now, 600)
+                if self.on_game_over is not None and self.game.remote is None:          # (a friend's games are not on the leaderboard)
                     self.on_game_over(self._last_summary)
             if e.kind == "serve":
                 self.view.cpu_swing_ns = e.t_ns              # the computer hits the ball: its paddle swings
@@ -286,7 +293,7 @@ class Session:
     # --- HUD -------------------------------------------------------------------------------------------
     def hud_state(self, leaderboard=()):
         g, now = self.game, self.clock.now_ns()
-        if not leaderboard and g.phase == "MATCH_OVER" and self.leaderboard_fn is not None:
+        if not leaderboard and g.phase == "MATCH_OVER" and self.leaderboard_fn is not None and g.remote is None:
             leaderboard = self.leaderboard_fn()
         remaining = g.seconds_to_serve(now)
         v = self.view
@@ -310,13 +317,14 @@ class Session:
             zone=v.zone(now), cpu_x_m=v.cpu_x(view), cpu_swing=v.cpu_swing(view),
             last_kmh=self._last_kmh, last_label=self._last_label, spin_text=self._spin,
             mqtt_status=self._mqtt_status(), hub_status=self._hub_status(),
-            message=(self._paused_text() or (self._message if now < self._message_until else "")
+            message=(self._waiting_text() or self._paused_text() or (self._message if now < self._message_until else "")
                      or ((self._notice or self._soft_notice) if g.phase == "LOBBY" else "")),
             gates=self._gates, show_xray=self.xray,
             flash=self._flash if now < self._flash_until else None, leaderboard=tuple(leaderboard),
             player_name=self.player, start_button=button, cursor=cursor,
             cpu_mood=self._cpu_mood if now < self._mood_until else "happy", anim_t=(now - self._t0_ns) / S,
-            point_for=self._point_for if g.phase == "POINT_OVER" else "", screen=screen, ui=ui_state, results=results)
+            point_for=self._point_for if g.phase == "POINT_OVER" else "", screen=screen, ui=ui_state, results=results,
+            opponent_name=self.opponent_name, ping_ms=None if g.remote is None else g.remote.ping_ms)
 
     def _paused_text(self):
         if not self.game.paused:
@@ -337,7 +345,7 @@ def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=Non
                  source="live", scope="record_session", no_publish=False, seed=1, box=None,
                  omega_lo=300.0, omega_hi=1200.0, t_pk=250.0, spin_probs_fn=None, learner=None, resume=False,
                  latency=None, hand_model=None, hold_start=False, shot_model=None, hit_mode="swing", wrist_frame=None,
-                 gyro_window=None, flow=None):
+                 gyro_window=None, flow=None, online=None):
     clock = clock or FakeClock(start_ns=1_000_000_000)
     latency = latency or latency_mod.Latency.from_config()
     box = box or DEFAULT_BOX
@@ -351,9 +359,12 @@ def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=Non
                     hit_mode=hit_mode, wrist_frame=wrist_frame, gyro_window=gyro_window, imu_delay_s=latency.imu_s)
     if flow is True:
         flow = Flow(intro=True, level_tag=level, mode=mode)
-    return Session(game, clock, actuator=actuator, latency=latency, hand_model=hand_model,
-                   hold_start=holdstart.HoldStart() if hold_start else None, flow=flow or None,
-                   mqtt_status=(lambda: "ok") if client is not None and not no_publish else None)
+    session = Session(game, clock, actuator=actuator, latency=latency, hand_model=hand_model,
+                      hold_start=holdstart.HoldStart() if hold_start else None, flow=flow or None,
+                      mqtt_status=(lambda: "ok") if client is not None and not no_publish else None)
+    if online is not None:
+        session.attach_online(online)
+    return session
 
 
 def play_until(session, stop, w_pk=600.0, dt=0.01, max_sim_s=300.0, feat=None, du=0.0, timing_s=0.0):

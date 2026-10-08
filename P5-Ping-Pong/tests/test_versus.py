@@ -183,6 +183,88 @@ def test_a_lost_laptop_the_brokers_will_announces_is_noticed_without_waiting():
     assert rig.guest.remote.gone and rig.guest.remote.reason == "lost"
 
 
+def test_a_goodbye_that_names_another_guest_or_another_session_is_not_my_partner_leaving():
+    rig = Rig().start()
+    rig.run(1)
+    rig.link_b.send({"t": "bye", "reason": "left", "gid": "someoneelse"})                  # a guest the host turned away, going
+    rig.link_a.send({"t": "bye", "reason": "left", "sid": "othersession"})
+    rig.run(0.3)
+    assert not rig.host.remote.gone and not rig.guest.remote.gone
+    rig.link_b.send({"t": "bye", "reason": "left", "gid": "k3x9"})                         # my partner, by its token
+    rig.link_a.send({"t": "bye", "reason": "lost", "sid": SID})                            # and the host, by the session
+    rig.run(0.3)
+    assert rig.host.remote.gone and rig.guest.remote.gone
+
+
+def test_a_second_guest_who_asks_to_join_a_game_that_has_begun_is_told_it_is_busy():
+    rig = Rig().start()
+    rig.run(0.5)
+    rig.link_b.poll()
+    rig.link_b.send({"t": "join", "name": "LATE", "gid": "zz11"})
+    rig.link_b.send({"t": "join", "name": "MAYA", "gid": "k3x9"})                          # (my own guest asking again: no answer)
+    for _ in range(30):
+        rig.clock.advance_s(0.01)
+        rig.host.tick()
+    answers = [m for m in rig.link_b.poll() if m["t"] == "busy"]
+    assert [m["to"] for m in answers] == ["zz11"]
+    assert not rig.host.remote.gone
+
+
+def test_a_rematch_asked_for_is_seen_once_and_a_copy_of_it_later_is_not_a_second_one():
+    rig = Rig().start()
+    rig.run(1)
+    assert not rig.guest.remote.rematch_seen
+    rig.host.remote.send_rematch()
+    rig.run(0.3)
+    assert rig.guest.remote.rematch_seen
+    rig.guest.remote.rematch_seen = False                                                  # (a new game started and forgot it)
+    rig.link_a.send({"t": "rematch", "n": rig.host.remote._n, "sid": SID})                 # the broker delivers it twice
+    rig.run(0.3)
+    assert not rig.guest.remote.rematch_seen
+    rig.host.remote.send_rematch()
+    rig.run(0.3)
+    assert rig.guest.remote.rematch_seen
+
+
+def test_a_new_game_forgets_a_rematch_that_started_it():
+    rig = Rig().start()
+    rig.guest.remote.rematch_seen = True
+    rig.guest.session.game.phase = "MATCH_OVER"
+    rig.guest.session.on_start()
+    assert not rig.guest.remote.rematch_seen
+
+
+def test_when_the_other_person_leaves_the_game_ends_where_it_stands_for_the_one_who_stays():
+    for word in ("left", "lost"):
+        rig = Rig(host_skill="perfect", guest_skill="perfect", target=7).start()
+        rig.run(7)
+        assert rig.guest.game.phase in ("RALLY", "POINT_OVER")
+        rig.link_a.send({"t": "bye", "reason": word})
+        rig.run(0.3)
+        game = rig.guest.game
+        assert game.phase == "MATCH_OVER" and not game.paused and game.incoming is None and game.outgoing_leg is None
+        over = [e for e in rig.guest.events if e.kind == "match_over"]
+        assert len(over) == 1 and over[0].data["walkover"] is True and over[0].data["winner"] is None
+
+
+def test_a_silent_cable_pauses_the_game_and_then_ends_it_as_a_walkover_with_no_pause_left_behind():
+    rig = Rig(host_skill="perfect", guest_skill="perfect").start()
+    rig.run(6)
+    rig.link_a.cut()
+    assert rig.run(30, until=lambda r: r.guest.game.phase == "MATCH_OVER")
+    assert not rig.guest.game.paused and rig.guest.remote.reason == "lost"
+    assert [e.data["walkover"] for e in rig.guest.events if e.kind == "match_over"] == [True]
+
+
+def test_a_game_that_is_already_over_has_no_walkover():
+    rig = Rig(host_skill="perfect", guest_skill="idle", target=1).start()
+    assert rig.run(30, until=lambda r: r.guest.game.phase == "MATCH_OVER")
+    before = len([e for e in rig.guest.events if e.kind == "match_over"])
+    rig.link_a.send({"t": "bye", "reason": "left"})
+    rig.run(0.3)
+    assert len([e for e in rig.guest.events if e.kind == "match_over"]) == before == 1
+
+
 # --- trust nothing -------------------------------------------------------------------------------------------------------------------------------------
 def test_junk_and_messages_from_another_session_do_nothing():
     rig = Rig(host_skill="idle", guest_skill="idle").start()
@@ -288,3 +370,20 @@ def test_whatever_the_network_and_the_players_a_match_ends_with_both_screens_agr
     assert winners[0] == ["player" if h > g else "cpu"] and winners[1] == ["cpu" if h > g else "player"]
     for side in rig.sides:
         assert not side.game.paused and side.game.publisher is None
+
+
+# --- the hand into the ball (the way the live game is played) --------------------------------------------------------------------------------------
+def test_a_match_in_contact_mode_is_played_to_the_end_across_the_cable_with_the_same_score_on_both():
+    rig = Rig(hit_mode="contact", host_skill="perfect", guest_skill="idle", target=3, latency_s=0.06).start()
+    assert rig.run(90, until=lambda r: r.host.game.phase == "MATCH_OVER" and r.guest.game.phase == "MATCH_OVER")
+    assert rig.scores() == ((3, 0), (3, 0))
+    assert "hit" in kinds(rig.host) and "hit" not in kinds(rig.guest)
+
+
+def test_two_hands_into_the_ball_keep_a_rally_going_across_the_cable_and_a_flaky_one_loses_points_to_the_other():
+    rig = Rig(hit_mode="contact", host_skill="perfect", guest_skill="perfect", target=9, latency_s=0.05).start()
+    assert rig.run(60, until=lambda r: r.host.game.tracker.streak >= 6)
+    rig = Rig(hit_mode="contact", host_skill="perfect", guest_skill="flaky", target=4, latency_s=0.05, seed=3).start()
+    assert rig.run(240, until=lambda r: r.host.game.phase == "MATCH_OVER" and r.guest.game.phase == "MATCH_OVER")
+    as_host_sees, as_guest_sees = rig.scores()
+    assert as_host_sees == as_guest_sees and max(as_host_sees) == 4

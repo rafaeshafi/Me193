@@ -20,18 +20,22 @@ import cv2  # noqa: E402
 
 from pingpong import hud, intro  # noqa: E402
 from pingpong.events import GateResult  # noqa: E402
-from pingpong.uistate import Results, UiState  # noqa: E402
+from pingpong.uistate import OnlineView, Results, UiState  # noqa: E402
 
 STATS = (("HITS", "31"), ("LONGEST RALLY", "12"), ("TOP SPEED", "74 km/h"), ("TIME", "2:41"))
 LEVELS = {1: "Rookie", 2: "Club", 3: "Pro"}
 
 
-def _menu(screen, level=2, mode="survival", t_s=3.2, **kw):
+def _menu(screen, level=2, mode="survival", t_s=3.2, opponent_name="", **kw):
     results = kw.pop("results", None)
-    return hud.HudState(screen=screen, ui=UiState(screen=screen, t_s=t_s, level_tag=level, mode=mode, **kw), player_name="rafae",
+    return hud.HudState(opponent_name=opponent_name, screen=screen, ui=UiState(screen=screen, t_s=t_s, level_tag=level, mode=mode, **kw), player_name="rafae",
                         level_name=LEVELS[level], mode=mode, results=results, hub_status="ok", mqtt_status="ok", anim_t=t_s, hub_battery=84,
                         leaderboard=(("maya", 21), ("rafae", 17), ("omar", 12), ("zed", 9)), player_points=7, cpu_points=4, streak=17,
                         record=21, target=7)
+
+
+ROOMS = ({"code": "KQMDA", "host": "maya", "pace": 2, "target": 7, "t": 3}, {"code": "FGHJK", "host": "leo", "pace": 1, "target": 11, "t": 2},
+         {"code": "MNPQR", "host": "zoe", "pace": 3, "target": 5, "t": 1})
 
 
 def _game(**kw):
@@ -46,7 +50,15 @@ def pictures():
     won = Results(won=True, title="YOU WIN!", stats=STATS)
     return {
         "title": _menu("TITLE", cursor=(0.9, 0.85), hover="start", progress=0.45),
-        "mode": _menu("MODE", cursor=(0.72, 0.45), hover="match", progress=0.5, focus=1, mode="match"),
+        "mode": _menu("MODE", cursor=(0.5, 0.45), hover="match", progress=0.5, focus=1, mode="match"),
+        "mode_online": _menu("MODE", cursor=(0.78, 0.45), hover="online", progress=0.4, focus=2, mode="match"),
+        "online": _menu("ONLINE", cursor=(0.7, 0.55), hover="join1", progress=0.45, focus=2,
+                        online=OnlineView(status="browsing", rooms=ROOMS)),
+        "online_empty": _menu("ONLINE", cursor=(0.22, 0.3), hover="host2", progress=0.5, focus=0, online=OnlineView(status="browsing")),
+        "wait": _menu("WAIT", mode="match", online=OnlineView(status="hosting", code="KQMDA", pace=2, target=7, live=True)),
+        "vs_friend": _menu("VS", t_s=1.5, mode="match", opponent="maya"),
+        "win_friend": _menu("RESULTS", mode="match", opponent="maya", results=won, cursor=(0.95, 0.9), hover="again", progress=0.3,
+                            opponent_name="maya"),
         "opponent": _menu("OPPONENT", cursor=(0.5, 0.4), hover="opp2", progress=0.4, focus=1, mode="match"),
         "vs": _menu("VS", t_s=1.5, mode="match"),
         "win": _menu("RESULTS", mode="match", results=won, cursor=(0.95, 0.9), hover="again", progress=0.3),
@@ -55,6 +67,8 @@ def pictures():
         "rally": _game(phase="RALLY", streak=7, record=12, last_kmh=63.0, last_label="perfect", spin_text="TOPSPIN"),
         "match": _game(phase="RALLY", mode="match", player_points=3, cpu_points=5, last_kmh=41.0, last_label="late", cpu_mood="smug",
                        show_xray=True, gates=(GateResult("J1", True, "timing +12 ms"), GateResult("J2", False, "hand 0.9 SW from the ball"))),
+        "match_friend": _game(phase="RALLY", mode="match", player_points=3, cpu_points=5, last_kmh=41.0, last_label="good", opponent_name="maya",
+                              ping_ms=47.0, mqtt_status="off"),
         "countdown": _game(phase="COUNTDOWN", countdown=2, countdown_t=0.15, ball=None, paddle=None),
     }
 

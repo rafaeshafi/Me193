@@ -99,17 +99,19 @@ class PairLink:
 
 # --- the room of one game over MQTT --------------------------------------------------------------------------------------------------------
 class RoomLink:
-    def __init__(self, code, role, *, client=None):
+    def __init__(self, code, role, *, client=None, ident=None):
+        """ident: the tokens that say who this end is (a guest's gid, a host's sid): its goodbye and its will carry them, so the
+        other end can tell its own partner leaving from a guest that was turned away."""
         if proto.clean_code(code) != code or role not in proto.ROLES:
             raise ValueError(f"cannot make a room link for {code!r} as {role!r}")
-        self.code, self.role = code, role
+        self.code, self.role, self.ident = code, role, dict(ident or {})
         self.topic_out = check_topic(proto.room_topic(code, role))
         self.topic_in = check_topic(proto.room_topic(code, proto.other_role(role)))
         self._inbox, self._ready = queue.SimpleQueue(), threading.Event()
         self.client = client = client or make_client()
-        client.will_set(self.topic_out, proto.encode({"t": "bye", "reason": "lost"}), qos=1)       # if this laptop dies, the other knows at once
+        client.will_set(self.topic_out, self._bye("lost"), qos=1)                    # if this laptop dies, the other knows at once
         client.on_connect, client.on_subscribe, client.on_message = self._on_connect, self._on_subscribe, self._on_message
-        client.connect_async(config.BROKER_HOST, config.BROKER_PORT, config.KEEPALIVE_S)
+        client.connect_async(*config.net_broker(), config.KEEPALIVE_S)
         client.loop_start()
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
@@ -123,6 +125,9 @@ class RoomLink:
         decoded = proto.decode(message.payload)
         if decoded is not None:
             self._inbox.put(decoded)
+
+    def _bye(self, reason):
+        return proto.encode({"t": "bye", "reason": reason, **self.ident})
 
     @property
     def ready(self):
@@ -147,7 +152,7 @@ class RoomLink:
     def close(self):
         try:
             if self.client.is_connected():
-                self.client.publish(self.topic_out, proto.encode({"t": "bye", "reason": "left"}), qos=1).wait_for_publish(1.0)
+                self.client.publish(self.topic_out, self._bye("left"), qos=1).wait_for_publish(1.0)
             self.client.disconnect()                                                  # a clean goodbye: the will stays unsaid
         except Exception:
             pass
@@ -167,7 +172,7 @@ class Lobby:
         client = self._watch_client = make_client("pp-lobby")
         client.on_connect = lambda c, userdata, flags, reason_code, properties=None: c.subscribe(check_topic(proto.lobby_filter()), qos=1)
         client.on_message = self._on_message
-        client.connect_async(config.BROKER_HOST, config.BROKER_PORT, config.KEEPALIVE_S)
+        client.connect_async(*config.net_broker(), config.KEEPALIVE_S)
         client.loop_start()
 
     def _on_message(self, client, userdata, message):
@@ -188,23 +193,31 @@ class Lobby:
             return sorted((dict(e) for e in self._rooms.values() if e["t"] >= cutoff and e["code"] != self._own), key=lambda e: -e["t"])
 
     def host(self, code, name, pace, target):
-        """Open a game for others to find; it closes when withdraw() is called, or at once if this laptop dies."""
+        """Open a game for others to find; it closes when withdraw() is called, or at once if this laptop dies (a game already
+        open is withdrawn first: a laptop hosts one game at a time)."""
+        self.withdraw()
         self._own = code
         topic = self._host_topic = check_topic(proto.lobby_topic(code))
         entry = proto.lobby_entry(code, name, pace, target, now=self._now())
         client = self._host_client = make_client("pp-host")
         client.will_set(topic, b"", qos=1, retain=True)
         client.on_connect = lambda c, userdata, flags, reason_code, properties=None: c.publish(topic, entry, qos=1, retain=True)
-        client.connect_async(config.BROKER_HOST, config.BROKER_PORT, config.KEEPALIVE_S)
+        client.connect_async(*config.net_broker(), config.KEEPALIVE_S)
         client.loop_start()
 
     def withdraw(self):
-        """Close the game you opened: it leaves everyone's list."""
-        if self._host_client is not None and self._host_topic is not None and self._host_client.is_connected():
-            try:
-                self._host_client.publish(self._host_topic, b"", qos=1, retain=True).wait_for_publish(1.0)
-            except Exception:
-                pass
+        """Close the game you opened: it leaves everyone's list, and its connection goes."""
+        client, topic, self._host_client, self._host_topic = self._host_client, self._host_topic, None, None
+        if client is None:
+            return
+        try:
+            if client.is_connected():
+                client.publish(topic, b"", qos=1, retain=True).wait_for_publish(1.0)
+            client.disconnect()
+        except Exception:
+            pass
+        finally:
+            client.loop_stop()
 
     @property
     def connected(self):
@@ -212,11 +225,20 @@ class Lobby:
 
     def close(self):
         self.withdraw()
-        for client in (self._watch_client, self._host_client):
-            if client is not None:
-                try:
-                    client.disconnect()
-                except Exception:
-                    pass
-                client.loop_stop()
-        self._watch_client = self._host_client = None
+        client, self._watch_client = self._watch_client, None
+        if client is not None:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+            client.loop_stop()
+
+
+class Network:
+    """What online.Online plays over: the lobby of open games and the rooms, over the MQTT broker."""
+
+    def lobby(self):
+        return Lobby()
+
+    def room(self, code, role, ident=None):
+        return RoomLink(code, role, ident=ident)

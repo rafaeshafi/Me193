@@ -62,6 +62,7 @@ class ScriptedPlayer:
                  pose_motion=False, swing_dir=(1.0, 0.0)):
         self.box, self.w_pk, self.swing_s, self.timing_s = box, w_pk, swing_s, timing_s
         self.pose_motion, self.swing_dir = pose_motion, swing_dir    # camera mode: the hand itself makes the stroke
+        self.idle = False                                    # a player who does not play: every ball goes by
         self.wave_windows = []                                       # (start_s, stop_s) since rig start: a 5 Hz hand wave
         self._lock = threading.RLock()                               # the real-time rig has a thread per sensor
         self.cards = [(round(a * S), round(b * S), tag) for a, b, tag in cards]    # relative to rig start
@@ -77,7 +78,7 @@ class ScriptedPlayer:
         with self._lock:
             self._now = now_ns
             ball = game.incoming
-            if ball is None or game.paused:
+            if ball is None or game.paused or self.idle:
                 return
             peak = ball.t_c_ns + round(self.timing_s * S) - round(game.judge.contact_lag_s * S)   # the stroke ends at t_c
             planned = self._peaks.get(ball.ball_id)
@@ -170,8 +171,8 @@ class FakeRig:
     def __init__(self, *, level=1, mode="survival", target=7, seed=1, calibration=None, source="live",
                  scope="record_session", w_pk=600.0, timing_s=0.0, cards=None, hz=66.0, fps=30.0, lag_s=0.10,
                  stale_ms=300.0, vibration=False, no_motor=False, record_dir=None, spin_probs_fn=None, learner=None,
-                 swing_source="imu", no_hub=False, overrides=None, hand_motion=False):
-        self.clock = FakeClock(start_ns=1_000_000_000)
+                 swing_source="imu", no_hub=False, overrides=None, hand_motion=False, clock=None, flow=None, online=None):
+        self.clock = clock or FakeClock(start_ns=1_000_000_000)             # (two rigs playing each other share one clock)
         self.origin_ns = self.clock.now_ns()
         camera = swing_source == "pose"                                # the camera, not the hub's gyro, detects swings
         calibration = calibration or Calibration.default(swing_source)
@@ -194,7 +195,7 @@ class FakeRig:
             source=source, scope=scope, no_motor=no_motor, threaded=False, lag_s=lag_s, gyro_per_dps=GPD,
             accel_per_g=1000.0, fs_raw=32767, stale_ms=stale_ms, to_image=lambda frame: frame,
             record_dir=record_dir, player="fake", spin_probs_fn=spin_probs_fn, learner=learner,
-            pose_gyro=posegyro.PoseGyro() if camera else None, overrides=overrides, log=lambda *_: None)
+            pose_gyro=posegyro.PoseGyro() if camera else None, overrides=overrides, flow=flow, online=online, log=lambda *_: None)
         self.session, self.game = self.rig.session, self.rig.session.game
         self._dt = S // 240
         self._imu_period, self._frame_period, self._pump_period = round(S / hz), round(S / fps), S // 60
@@ -212,8 +213,10 @@ class FakeRig:
     def _hand_if_visible(self, t_ns):
         return None if self._within(self.pose_blackouts, t_ns) else self.player.hand_uv(t_ns)
 
-    def step(self):
-        self.clock.advance_s(self._dt / S)
+    def step(self, advance=True):
+        """One 240 Hz step; advance=False when another rig sharing the clock has just moved it."""
+        if advance:
+            self.clock.advance_s(self._dt / S)
         now = self.clock.now_ns()
         self.player.watch(self.game, now)
         while self._next_imu <= now:

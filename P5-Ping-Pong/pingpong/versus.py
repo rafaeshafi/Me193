@@ -39,8 +39,9 @@ def versus_speed(level, strength):
 
 
 class Remote:
-    def __init__(self, link, *, host, opponent_name, sid, seed=0):
-        self.link, self.host, self.sid, self.opponent_name = link, host, sid, opponent_name
+    def __init__(self, link, *, host, opponent_name, sid, gid="", seed=0):
+        """sid: this game's token (the host makes it); gid: the guest's own token (the host knows its guest's from the join)."""
+        self.link, self.host, self.sid, self.gid, self.opponent_name = link, host, sid, gid, opponent_name
         self.rng = random.Random(seed)
         self.paddle_x = 0.0                      # where the other person's paddle is across the table, as seen from this end
         self.ping_ms = None
@@ -58,7 +59,7 @@ class Remote:
         self._my_x = x_m
 
     def on_start(self, now_ns):
-        self.awaiting, self._heard = False, now_ns                  # the wait before a game is not silence
+        self.awaiting, self._heard, self.rematch_seen = False, now_ns, False         # the wait before a game is not silence
 
     # --- sending ----------------------------------------------------------------------------------------------------------------------------------
     def _send(self, message, qos=1):
@@ -84,6 +85,10 @@ class Remote:
     def send_hit(self, game, now_ns, *, serve=False):
         self._send(dict(self._out, t="hit", n=self._next(), serve=serve, score=self._score(game), rally=game.tracker.streak))
         self.awaiting = True
+
+    def send_rematch(self):
+        """My player wants to play again."""
+        self._send({"t": "rematch", "n": self._next()})
 
     def sent_miss(self, game, reason, now_ns):
         self._send({"t": "miss", "n": self._next(), "reason": reason, "score": self._score(game)})
@@ -111,8 +116,12 @@ class Remote:
         self._last_step = now_ns
         for m in self.link.poll():
             if m["t"] == "bye":
-                if m.get("sid", self.sid) == self.sid:
+                if m.get("sid", self.sid) == self.sid and m.get("gid", self.gid) == self.gid:          # not a guest that was turned away
                     self._end(m["reason"] or "left")
+                continue
+            if m["t"] == "join":
+                if self.host and m["gid"] != self.gid:
+                    self._send({"t": "busy", "to": m["gid"]})                       # somebody late: this game has begun
                 continue
             if m["t"] not in ACCEPTS or m.get("sid") != self.sid or self.gone:
                 continue
@@ -123,6 +132,10 @@ class Remote:
             events += self._receive_hit(game, held, now_ns)
         self._x_shown(dt)
         self._keep_alive(game, now_ns)
+        if self.gone:
+            if "opponent" in game.pause_reasons:
+                game.set_pause("opponent", False, now_ns)
+            events += game.walkover(now_ns)                                         # they are not coming back: the game ends here
         return events
 
     def _read(self, game, m, now_ns):
@@ -135,7 +148,8 @@ class Remote:
             rtt = (now_ns / S - m["ts"]) * 1000.0
             self.ping_ms = rtt if self.ping_ms is None else 0.7 * self.ping_ms + 0.3 * rtt
         elif kind == "rematch":
-            self.rematch_seen = True
+            if m["n"] > self._seen_n:                                                # (a copy of one already read is not another)
+                self._seen_n, self.rematch_seen = m["n"], True
         elif kind in ("hit", "miss"):
             if m["n"] <= self._seen_n:
                 return []                                                        # a copy of one already read
@@ -147,6 +161,8 @@ class Remote:
         self.paddle_x += (self._x_target - self.paddle_x) * (1.0 - math.exp(-dt / PADDLE_SMOOTH_S))
 
     def _keep_alive(self, game, now_ns):
+        if self.gone:
+            return
         if self._last_ping is None or now_ns - self._last_ping >= PING_EVERY_S * S:
             self._last_ping = now_ns
             self._pings += 1
@@ -155,8 +171,6 @@ class Remote:
             self._last_pos = now_ns
             self._send({"t": "pos", "x": self._my_x}, qos=0)
         silent = (now_ns - self._heard) / S
-        if self.gone:
-            return
         if silent > STALE_S:
             if "opponent" not in game.pause_reasons:
                 game.set_pause("opponent", True, now_ns)

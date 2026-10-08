@@ -126,9 +126,9 @@ def test_a_host_and_a_guest_in_a_room_hear_each_other_and_not_themselves(broker)
     host, guest = netlink.RoomLink("ABCDE", "host"), netlink.RoomLink("ABCDE", "guest")
     try:
         assert wait_for(lambda: host.ready and guest.ready)
-        host.send({"t": "welcome", "name": "RAFAE", "pace": 2, "target": 7, "sid": "abc123"})
-        guest.send({"t": "join", "name": "MAYA"})
-        assert collect(host)[0] == {"t": "join", "name": "MAYA"}
+        host.send({"t": "welcome", "name": "RAFAE", "pace": 2, "target": 7, "sid": "abc123", "to": "k3x9"})
+        guest.send({"t": "join", "name": "MAYA", "gid": "k3x9"})
+        assert collect(host)[0] == {"t": "join", "name": "MAYA", "gid": "k3x9"}
         assert collect(guest)[0]["t"] == "welcome"
         time.sleep(0.2)
         assert host.poll() == [] and guest.poll() == []                                    # no echo of what each sent
@@ -143,7 +143,7 @@ def test_two_rooms_do_not_hear_each_other(broker):
     other_host = netlink.RoomLink("BBBBB", "host")
     try:
         assert wait_for(lambda: one_host.ready and one_guest.ready and other_host.ready)
-        one_guest.send({"t": "join", "name": "MAYA"})
+        one_guest.send({"t": "join", "name": "MAYA", "gid": "k3x9"})
         assert collect(one_host)[0]["t"] == "join"
         time.sleep(0.2)
         assert other_host.poll() == []
@@ -190,6 +190,33 @@ def test_a_polite_goodbye_says_left_and_not_lost(broker):
         assert host.poll() == []                                                             # and the will did not fire as well
     finally:
         host.close()
+
+
+def test_a_goodbye_and_a_last_will_say_who_is_leaving_when_the_link_was_told_who_it_is(broker):
+    host = netlink.RoomLink("ABCDE", "host", ident={"sid": "abc123"})
+    guest = netlink.RoomLink("ABCDE", "guest", ident={"gid": "k3x9"})
+    other = netlink.RoomLink("ABCDE", "guest", ident={"gid": "zz11"})
+    try:
+        assert wait_for(lambda: host.ready and guest.ready and other.ready)
+        other.close()
+        assert collect(host)[0] == {"t": "bye", "reason": "left", "gid": "zz11"}                   # polite: names the guest
+        guest.client.loop_stop()
+        guest.client._sock.close()                                                                   # no goodbye: the will
+        lost = collect(host, seconds=5)
+        assert lost and lost[0] == {"t": "bye", "reason": "lost", "gid": "k3x9"}
+    finally:
+        host.close()
+
+
+def test_a_hosts_goodbye_and_will_carry_the_session_id(broker):
+    host = netlink.RoomLink("ABCDE", "host", ident={"sid": "abc123"})
+    guest = netlink.RoomLink("ABCDE", "guest", ident={"gid": "k3x9"})
+    try:
+        assert wait_for(lambda: host.ready and guest.ready)
+        host.close()
+        assert collect(guest)[0] == {"t": "bye", "reason": "left", "sid": "abc123"}
+    finally:
+        guest.close()
 
 
 def test_a_link_to_a_broker_that_is_not_there_is_just_not_ready_and_not_alive(monkeypatch):
@@ -288,3 +315,22 @@ def test_a_mended_cable_carries_messages_again():
     a.send({"t": "pos", "x": 0.2})
     clock.advance_s(0.1)
     assert [m["x"] for m in b.poll()] == [0.2] and a.alive and b.alive
+
+
+def test_withdrawing_a_game_lets_go_of_its_connection_and_hosting_again_does_not_leave_the_old_one_open(broker):
+    lobby = netlink.Lobby()
+    watcher = netlink.Lobby()
+    watcher.watch()
+    try:
+        lobby.host("ABCDE", "RAFAE", 1, 7)
+        first = lobby._host_client
+        assert wait_for(lambda: first.is_connected() and [r["code"] for r in watcher.rooms()] == ["ABCDE"])
+        lobby.withdraw()
+        assert wait_for(lambda: watcher.rooms() == [] and not first.is_connected())
+        lobby.host("FGHJK", "RAFAE", 2, 7)
+        assert wait_for(lambda: [r["code"] for r in watcher.rooms()] == ["FGHJK"])
+        second = lobby._host_client
+        lobby.host("MNPQR", "RAFAE", 3, 7)                                                  # a second game while one is open: the first goes
+        assert wait_for(lambda: [r["code"] for r in watcher.rooms()] == ["MNPQR"] and not second.is_connected())
+    finally:
+        watcher.close(), lobby.close()

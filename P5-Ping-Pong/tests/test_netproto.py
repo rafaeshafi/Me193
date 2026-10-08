@@ -19,16 +19,17 @@ HIT = {"t": "hit", "n": 3, "v": 4.2, "start": [0.1, 0.22, 0.3], "aim": [0.4, 0.5
 
 def test_every_kind_of_message_survives_the_wire():
     for message in (
-        {"t": "join", "name": "MAYA"},
-        {"t": "welcome", "name": "RAFAE", "pace": 2, "target": 7, "sid": "ab12cd"},
-        {"t": "busy"},
+        {"t": "join", "name": "MAYA", "gid": "k3x9"},
+        {"t": "welcome", "name": "RAFAE", "pace": 2, "target": 7, "sid": "ab12cd", "to": "k3x9"},
+        {"t": "busy", "to": "k3x9"},
         HIT,
         {"t": "miss", "n": 4, "reason": "miss", "score": [3, 2]},
         {"t": "pos", "x": 0.31},
         {"t": "ping", "k": 7, "ts": 12.5},
         {"t": "pong", "k": 7, "ts": 12.5},
         {"t": "bye", "reason": "left"},
-        {"t": "rematch"},
+        {"t": "bye", "reason": "lost", "gid": "k3x9"},
+        {"t": "rematch", "n": 9},
     ):
         got = roundtrip(message)
         assert got is not None and got["t"] == message["t"], message
@@ -64,16 +65,18 @@ def test_numbers_that_are_too_big_or_small_are_pulled_into_range_not_trusted():
 
 
 def test_names_are_cleaned_and_cut_so_nobody_can_flood_the_screen_or_inject_anything():
-    assert roundtrip({"t": "join", "name": "  Maya\n\t<b>x</b>  "})["name"] == "MAYA B X B"
-    assert roundtrip({"t": "join", "name": "A" * 100})["name"] == "A" * proto.NAME_MAX
-    assert roundtrip({"t": "join", "name": ""})["name"] == "PLAYER" and roundtrip({"t": "join", "name": 5})["name"] == "PLAYER"
-    assert roundtrip({"t": "join", "name": "rémi ✓"})["name"] == "RMI"                         # what the typeface can draw
+    join = lambda name: roundtrip({"t": "join", "name": name, "gid": "g1"})                    # noqa: E731
+    assert join("  Maya\n\t<b>x</b>  ")["name"] == "MAYA B X B"
+    assert join("A" * 100)["name"] == "A" * proto.NAME_MAX
+    assert join("")["name"] == "PLAYER" and join(5)["name"] == "PLAYER"
+    assert join("rémi ✓")["name"] == "RMI"                                                     # what the typeface can draw
 
 
 def test_pace_and_target_have_to_be_a_real_level_and_a_sensible_match():
-    assert roundtrip({"t": "welcome", "name": "A", "pace": 9, "target": 7, "sid": "x"}) is None
-    assert roundtrip({"t": "welcome", "name": "A", "pace": 2, "target": 0, "sid": "x"}) is None
-    assert roundtrip({"t": "welcome", "name": "A", "pace": 3, "target": 11, "sid": "x"})["target"] == 11
+    welcome = dict(t="welcome", name="A", sid="x", to="g1")
+    assert roundtrip(dict(welcome, pace=9, target=7)) is None
+    assert roundtrip(dict(welcome, pace=2, target=0)) is None
+    assert roundtrip(dict(welcome, pace=3, target=11))["target"] == 11
 
 
 def test_a_miss_says_why_and_the_score_as_host_then_guest():
@@ -86,6 +89,20 @@ def test_the_session_id_travels_when_there_is_one_and_is_cleaned():
     assert roundtrip(dict(HIT, sid="a1b2c3"))["sid"] == "a1b2c3"
     assert "sid" not in roundtrip(HIT)
     assert roundtrip(dict(HIT, sid="x" * 80))["sid"] == "x" * proto.SID_MAX
+
+
+def test_a_guest_names_itself_so_that_the_answer_can_be_told_from_the_one_for_another_guest():
+    assert roundtrip({"t": "join", "name": "MAYA", "gid": "K3-X9!"})["gid"] == "k3x9"            # cleaned like a session id
+    for broken in ({"t": "join", "name": "MAYA"}, {"t": "join", "name": "MAYA", "gid": "!!"}, {"t": "join", "name": "MAYA", "gid": 7},
+                   {"t": "busy"}, {"t": "busy", "to": ""}, {"t": "welcome", "name": "A", "pace": 1, "target": 7, "sid": "x"}):
+        assert roundtrip(broken) is None, broken
+    assert roundtrip({"t": "bye", "reason": "lost", "gid": "k3x9"})["gid"] == "k3x9"
+    assert "gid" not in roundtrip({"t": "bye", "reason": "left"})
+
+
+def test_a_rematch_is_numbered_like_a_hit_so_that_a_copy_of_it_is_not_taken_for_another():
+    assert roundtrip({"t": "rematch", "n": 5})["n"] == 5
+    assert roundtrip({"t": "rematch"}) is None and roundtrip({"t": "rematch", "n": 0}) is None
 
 
 # --- rooms and topics -----------------------------------------------------------------------------------------------------------------------

@@ -71,6 +71,11 @@ class RealEnv:
 
         return Audio()                           # the built-in speakers through sounddevice
 
+    def make_network(self):
+        from pingpong import netlink
+
+        return netlink.Network()                 # online play: the lobby and the rooms over the MQTT broker
+
     def mqtt_roundtrip(self, topic, timeout_s=10.0):
         """Publish a unique token to `topic` and wait for the broker to echo it; -> RTT ms or None."""
         import paho.mqtt.client as mqtt

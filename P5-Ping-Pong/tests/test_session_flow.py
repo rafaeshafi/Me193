@@ -10,7 +10,7 @@ from pingpong.flow import Flow
 S = 1_000_000_000
 BOX = app.DEFAULT_BOX
 ELSEWHERE, START_AT = (0.5, 0.9), (0.95, 0.9)
-MATCH_AT, OPP2_AT = (0.72, 0.45), (0.5, 0.4)
+MATCH_AT, OPP2_AT = (0.5, 0.45), (0.5, 0.4)
 SPACE = 32
 
 

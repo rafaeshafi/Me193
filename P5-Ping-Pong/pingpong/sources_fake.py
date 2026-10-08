@@ -210,10 +210,11 @@ class FakeEnv:
     IMU notifications at `hz` -- so rate statistics come out exactly.
     """
 
-    def __init__(self, hz=66.0, hub_found=True, camera="ok", mqtt_ok=True, mqtt_rtt_ms=95.0):
+    def __init__(self, hz=66.0, hub_found=True, camera="ok", mqtt_ok=True, mqtt_rtt_ms=95.0, net=None):
         from pingpong.clock import FakeClock
 
         self.clock = FakeClock(start_ns=1_000_000_000)
+        self.net = net                  # the in-memory network online play runs over (shared by two fake players, or made when asked for)
         self.hz = hz
         self.camera = camera
         self.cameras = None         # optional {index: kind}: several cameras, e.g. an iPhone via Continuity Camera
@@ -240,6 +241,13 @@ class FakeEnv:
         from pingpong.audio import Audio
 
         return Audio(backend=FakeSound())
+
+    def make_network(self):
+        from pingpong.loopnet import LoopNet
+
+        if self.net is None:
+            self.net = LoopNet(self.clock)
+        return self.net
 
     def make_mqtt_client(self):
         self.mqtt_client = FakeMqttClient()

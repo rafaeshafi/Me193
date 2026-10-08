@@ -5,7 +5,8 @@ import pytest
 
 from tools import showcase
 
-PICTURES = {"title", "mode", "opponent", "vs", "win", "lose", "record", "rally", "match", "countdown"}
+PICTURES = {"title", "mode", "mode_online", "online", "online_empty", "wait", "vs_friend", "win_friend", "match_friend", "opponent", "vs", "win",
+            "lose", "record", "rally", "match", "countdown"}
 
 
 def test_it_writes_a_picture_of_every_screen_and_the_intro_as_a_video(tmp_path):

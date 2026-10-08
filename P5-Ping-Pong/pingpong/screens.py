@@ -11,8 +11,8 @@ import math
 import cv2
 import numpy as np
 
-from pingpong import anim, canvas, cast, characters, court3d, fonts, holdstart, intro, menu_layout, scene, screens_end, screens_pick, ui
-from pingpong.screens_common import (GOLD, NAVY, ORANGE, ORANGE_DARK, SKY, SKY_DARK, SLATE, WHITE, active, arrival, back_button, bubbles,
+from pingpong import anim, canvas, cast, characters, court3d, fonts, holdstart, intro, menu_layout, scene, screens_end, screens_online, screens_pick, ui
+from pingpong.screens_common import (GOLD, GREEN, NAVY, ORANGE, ORANGE_DARK, SKY, SKY_DARK, SLATE, WHITE, active, arrival, back_button, bubbles,
                                      button_scale, card, frosted, hint, hold_bar, pointer, progress_of, ribbon, size_of, start_button)
 
 
@@ -24,6 +24,10 @@ def render(frame, state, background=None):
         title(frame, state)
     elif screen == "MODE":
         mode(frame, state)
+    elif screen == "ONLINE":
+        screens_online.online(frame, state)
+    elif screen == "WAIT":
+        screens_online.wait(frame, state)
     elif screen == "OPPONENT":
         screens_pick.opponent(frame, state)
     elif screen == "VS":
@@ -107,19 +111,44 @@ def _match_icon(frame, cx, cy):
     fonts.draw(frame, "7", cx, cy - 14, 40, ORANGE_DARK)
 
 
+def _online_icon(frame, cx, cy, t_s):
+    """A globe with signal arcs over it, and a friend on each side."""
+    r = 50
+    cv2.circle(frame, (round(cx), round(cy)), r + 3, WHITE, -1, cv2.LINE_AA)
+    cv2.circle(frame, (round(cx), round(cy)), r, SKY, -1, cv2.LINE_AA)
+    for dx, dy, rx, ry in ((-14, -8, 20, 15), (16, 14, 18, 14), (-4, 28, 10, 7)):                 # the land
+        cv2.ellipse(frame, (round(cx + dx), round(cy + dy)), (rx, ry), 20, 0, 360, GREEN, -1, cv2.LINE_AA)
+    cv2.ellipse(frame, (round(cx), round(cy)), (r // 2, r), 0, 0, 360, WHITE, 2, cv2.LINE_AA)
+    cv2.line(frame, (round(cx - r), round(cy)), (round(cx + r), round(cy)), WHITE, 2, cv2.LINE_AA)
+    for side, name in ((-1, "MAYA"), (1, "LEO")):
+        characters.portrait(frame, cx + side * 104, cy + 20, 58, cast.player_look(name), mood="happy", t=t_s + side)
+        for k in range(1, 4):                                                                      # signal arcs between a friend and the globe
+            lit = anim.clamp01(math.sin(t_s * 4.0 - k * 0.9) * 0.8 + 0.5)
+            cv2.ellipse(frame, (round(cx + side * 78), round(cy - 6)), (4 + 6 * k, 4 + 6 * k), 0, 200 if side < 0 else -20, 340 if side < 0 else 120,
+                        tuple(round(a + (b - a) * lit) for a, b in zip(PALE_BLUE, ORANGE)), 3, cv2.LINE_AA)
+
+
 def _game_card(frame, u, name, rect, focus_target, entrance):
     on = active(u, name, focus_target)
     scale = button_scale(u, name, focus_target, entrance)
     cx, cy, cw, ch = card(frame, rect, scale, on)
     top = cy - ch / 2
-    rally = name == "rally"
-    (_rally_icon if rally else _match_icon)(frame, cx, top + 112 * scale)
-    fonts.draw(frame, "RALLY" if rally else "MATCH", cx, top + 240 * scale, round(66 * scale), NAVY)
-    lines = (("Keep it going!", "The computer never misses.", "How long can you rally?") if rally
-             else ("First to 7 points wins.", "Hit it hard, wide and spinny", "and the computer will miss."))
-    for i, line in enumerate(lines):
-        fonts.draw(frame, line, cx, top + (298 + 31 * i) * scale, round(24 * scale), NAVY if i == 0 else SLATE)
+    if name == "online":
+        _online_icon(frame, cx, top + 112 * scale, u.t_s)
+    else:
+        (_rally_icon if name == "rally" else _match_icon)(frame, cx, top + 112 * scale)
+    fonts.draw(frame, CARD_TITLE[name], cx, top + 240 * scale, round(66 * scale), NAVY)
+    for i, line in enumerate(CARD_LINES[name]):
+        size = fonts.fit_size(line, cw * 0.92, max_size=round(24 * scale), min_size=12)
+        fonts.draw(frame, line, cx, top + (298 + 31 * i) * scale, size, NAVY if i == 0 else SLATE)
     hold_bar(frame, cx, top + ch - 40 * scale, cw * 0.6, progress_of(u, name))
+
+
+CARD_TITLE = {"rally": "RALLY", "match": "MATCH", "online": "ONLINE"}
+CARD_LINES = {"rally": ("Keep it going!", "The computer never misses.", "How long can you rally?"),
+              "match": ("First to 7 points wins.", "Hit it hard, wide and spinny", "and the computer will miss."),
+              "online": ("Play a friend!", "Their laptop, their hub,", "your match.")}
+PALE_BLUE = (240, 220, 190)
 
 
 def mode(frame, state):
@@ -127,7 +156,7 @@ def mode(frame, state):
     frosted(frame, state)
     bubbles(frame, u.t_s)
     ribbon(frame, w / 2, 104, "CHOOSE YOUR GAME", (SKY, SKY_DARK), u.t_s)
-    focus = "rally" if u.focus == 0 else "match"
+    focus = ("rally", "match", "online")[min(2, u.focus)]
     for k, (name, rect) in enumerate(menu_layout.MODE_CARDS.items()):
         _game_card(frame, u, name, rect, focus, arrival(u, 0.25 + 0.15 * k, 0.5))
     back_button(frame, u, menu_layout.BACK_BUTTON)

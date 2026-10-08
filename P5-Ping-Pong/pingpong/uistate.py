@@ -4,15 +4,31 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class OnlineView:
+    """What the online screens show of online.Online."""
+    status: str = "idle"             # idle | connecting | offline | browsing | hosting | joining | paired
+    rooms: tuple = ()                # the open games to join, newest first: dicts of code, host, pace, target
+    code: str = ""                   # the game being hosted or joined
+    pace: int = 1                    # ... its pace (1 Rookie, 2 Club, 3 Pro)
+    target: int = 7                  # ... and the points to win
+    message: str = ""                # what went wrong last ("THAT GAME IS FULL"), or nothing
+    live: bool = False               # a hosted game is on the list, so a friend can find it
+
+
+@dataclass(frozen=True)
 class UiState:
-    screen: str = "TITLE"            # INTRO | TITLE | MODE | OPPONENT | VS | RESULTS
+    screen: str = "TITLE"            # INTRO | TITLE | MODE | ONLINE | WAIT | OPPONENT | VS | RESULTS
     t_s: float = 0.0                 # seconds since this screen came up (what the animations run on)
     cursor: tuple | None = None      # (a, b): where the hand points over the screen (across, up; 0..1), None when it is not seen
     hover: str | None = None         # the button the hand is on
     progress: float = 0.0            # how far the hold on it has come, 0..1
     focus: int = 0                   # the choice the keys and the cards have in focus
     mode: str = "survival"           # the game chosen so far: survival (a rally) | match
-    level_tag: int = 1               # the opponent chosen so far: 1 Rookie, 2 Club, 3 Pro
+    level_tag: int = 1               # the opponent chosen so far: 1 Rookie, 2 Club, 3 Pro (the pace, in a game with a friend)
+    online: OnlineView | None = None # the online screens: the list of open games, the code being waited on, what went wrong
+    opponent: str = ""               # the friend being played (the face-off and the results show them), else ""
+    rematch_pending: bool = False    # my player has asked for a rematch and the friend has not answered
+    opponent_gone: bool = False      # the friend has left: no rematch
 
 
 @dataclass(frozen=True)
@@ -28,6 +44,9 @@ def results_from_summary(summary, new_record):
     match = summary["mode"] == "match"
     won = (summary["winner"] == "player") if match else None
     title = ("YOU WIN!" if won else "THE CPU WINS") if match else "NEW RECORD!" if new_record else "GAME OVER"
+    if summary.get("opponent"):                                      # a friend: nobody "wins" over a computer here, and nothing is a record
+        new_record = False
+        won, title = (None, "THEY LEFT") if summary.get("walkover") else (won, "YOU WIN!" if won else "GOOD GAME!")
     seconds = int(summary["duration_s"])
     speed = f"{summary['max_kmh']:.0f} km/h" if summary["max_kmh"] > 0 else "-"
     return Results(won=won, title=title, new_record=new_record,

@@ -131,8 +131,8 @@ def hold_bar(frame, cx, y, width, progress):
         ui.panel(frame, cx - width / 2, y, max(16.0, width * progress), 16, radius=8, fill=(ORANGE, ORANGE_DARK), opacity=1.0, shadow=False)
 
 
-def back_button(frame, u, rect):
+def back_button(frame, u, rect, *, label="BACK", target="back"):
     w, h = size_of(frame)
     x0, y0, x1, y1 = rect
-    ui.pill(frame, (x0 + x1) / 2 * w, (y0 + y1) / 2 * h, (x1 - x0) * w, (y1 - y0) * h, "BACK", fill=(rgb(190, 200, 215), rgb(150, 162, 182)),
-            fill_progress=ORANGE, progress=progress_of(u, "back"), outline=WHITE, scale=button_scale(u, "back", None, 1.0), size=30)
+    ui.pill(frame, (x0 + x1) / 2 * w, (y0 + y1) / 2 * h, (x1 - x0) * w, (y1 - y0) * h, label, fill=(rgb(190, 200, 215), rgb(150, 162, 182)),
+            fill_progress=ORANGE, progress=progress_of(u, target), outline=WHITE, scale=button_scale(u, target, None, 1.0), size=30)

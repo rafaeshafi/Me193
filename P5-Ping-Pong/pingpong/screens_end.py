@@ -31,7 +31,8 @@ def _split(frame):
 
 def vs(frame, state):
     u, (w, h) = state.ui, size_of(frame)
-    me, opp = cast.player_look(state.player_name or "player"), cast.OPPONENTS[u.level_tag]
+    me = cast.player_look(state.player_name or "player")
+    opp = cast.player_look(u.opponent) if u.opponent else cast.OPPONENTS[u.level_tag]        # a friend online, else the level's opponent
     level = levels.LEVELS[u.level_tag]
     _split(frame)
     slide = (1.0 - anim.ease_out_back(anim.progress(u.t_s, start=0.0, length=0.7))) * 720
@@ -39,13 +40,15 @@ def vs(frame, state):
     characters.draw_bust(frame, 0.74 * w + slide, 400, 470, opp, mood="smug", t=state.anim_t + 1.1)
     ui.pill(frame, 0.26 * w - slide, 664, 330, 70, me.name, fill=(SKY, SKY_DARK), size=44, outline=WHITE)
     ui.pill(frame, 0.74 * w + slide, 664, 330, 70, opp.name, fill=(CORAL, CORAL_DARK), size=44, outline=WHITE)
-    ui.pill(frame, 0.74 * w + slide, 600, 150, 38, level.name.upper(), fill=LEVEL_PILL[u.level_tag], size=22, gloss=False, shadow=False)
+    ui.pill(frame, 0.74 * w + slide, 600, 170, 38, f"{level.name.upper()} PACE" if u.opponent else level.name.upper(), fill=LEVEL_PILL[u.level_tag],
+            size=22, gloss=False, shadow=False)
     pop = anim.pop(anim.progress(u.t_s, start=0.45, length=0.45))
     shake = 7 * math.sin(u.t_s * 90) * max(0.0, 1.0 - (u.t_s - 0.45) / 0.5) if u.t_s > 0.45 else 0.0
     if pop > 0:
         ui.burst(frame, w / 2 + shake, 340, 150 * pop, 104 * pop, 14, GOLD, angle_deg=u.t_s * 18, outline=ORANGE_DARK, outline_px=5)
         fonts.draw(frame, "VS", w / 2 + shake, 346, round(124 * pop), WHITE, outline=NAVY, outline_px=11, shadow=(0, 8, NAVY, 0.3))
-    game = f"MATCH   •   FIRST TO {state.target}" if u.mode == "match" else "RALLY   •   HOW LONG CAN YOU KEEP IT GOING?"
+    game = (f"ONLINE MATCH   •   FIRST TO {state.target}" if u.opponent else
+            f"MATCH   •   FIRST TO {state.target}" if u.mode == "match" else "RALLY   •   HOW LONG CAN YOU KEEP IT GOING?")
     tw, _ = fonts.measure(game, 30)
     ui.panel(frame, w / 2 - tw / 2 - 32, 38, tw + 64, 58, radius=29, fill=WHITE, opacity=0.95)
     fonts.draw(frame, game, w / 2, 68, 30, NAVY)
@@ -91,7 +94,8 @@ def _result_colors(results):
 
 def results(frame, state):
     u, r, (w, h) = state.ui, state.results or Results(), size_of(frame)
-    me, opp = cast.player_look(state.player_name or "player"), cast.opponent_by_name(state.level_name)
+    me, opp = cast.player_look(state.player_name or "player"), cast.opponent_look(state.level_name, state.opponent_name)
+    friend = bool(u.opponent)
     frosted(frame, state)
     bubbles(frame, u.t_s)
     celebrate = bool(r.won) or r.new_record
@@ -115,9 +119,25 @@ def results(frame, state):
         fonts.draw(frame, str(state.streak), w / 2, 318, round(150 * anim.pop(arrival(u, 0.5, 0.5))), WHITE, outline=NAVY, outline_px=11,
                    shadow=(0, 9, NAVY, 0.3))
         fonts.draw(frame, f"STREAK      BEST {max(state.record, state.streak)}", w / 2, 424, 30, NAVY)
-    _stats_card(frame, r.stats, 40, 530, 770)
-    _board(frame, state, 840, 480)
-    start_button(frame, u, "PLAY AGAIN", holdstart.BUTTON, target="again", entrance=arrival(u, 0.6, 0.5))
-    start_button(frame, u, "CHANGE", CHANGE_BUTTON, target="change", entrance=arrival(u, 0.7, 0.5), colors=(SKY, SKY_DARK),
-                 second="OPPONENT")
+    _stats_card(frame, r.stats, 255 if friend else 40, 530, 770)
+    if friend:
+        _friend_buttons(frame, u)
+    else:
+        _board(frame, state, 840, 480)
+        start_button(frame, u, "PLAY AGAIN", holdstart.BUTTON, target="again", entrance=arrival(u, 0.6, 0.5))
+        start_button(frame, u, "CHANGE", CHANGE_BUTTON, target="change", entrance=arrival(u, 0.7, 0.5), colors=(SKY, SKY_DARK),
+                     second="OPPONENT")
     pointer(frame, state)
+
+
+def _friend_buttons(frame, u):
+    """After a game with a friend: a rematch (which waits for them to say yes, and is not there if they have gone) and leaving."""
+    if u.opponent_gone:
+        ui.pill(frame, holdstart.BUTTON[0] * 1280 + holdstart.BUTTON[2] * 640, 120, 300, 54, f"{u.opponent} LEFT", fill=(CORAL, CORAL_DARK), size=26,
+                gloss=False, outline=WHITE, scale=anim.pop(arrival(u, 0.6, 0.5)))
+    elif u.rematch_pending:
+        start_button(frame, u, "WAITING...", holdstart.BUTTON, target="again", entrance=arrival(u, 0.6, 0.5),
+                     colors=(rgb(190, 200, 215), rgb(150, 162, 182)), hint_text=f"for {u.opponent}")
+    else:
+        start_button(frame, u, "REMATCH", holdstart.BUTTON, target="again", entrance=arrival(u, 0.6, 0.5))
+    start_button(frame, u, "LEAVE", CHANGE_BUTTON, target="change", entrance=arrival(u, 0.7, 0.5), colors=(SKY, SKY_DARK))
