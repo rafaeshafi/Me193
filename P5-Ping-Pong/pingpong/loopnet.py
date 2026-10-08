@@ -18,7 +18,7 @@ class LoopLink(netlink.PairLink):
 
     def __init__(self, net, code, role, ident):
         super().__init__(net.clock, net.link_kw.get("latency_s", 0.0), net.link_kw.get("jitter_s", 0.0), net.link_kw.get("loss0", 0.0),
-                         net.link_kw.get("dup1", 0.0), net.rng, {"cut": False})
+                         net.link_kw.get("dup1", 0.0), net.rng, {"cut": False}, net.link_kw.get("loss1", 0.0))
         self.net, self.code, self.role, self.ident = net, code, role, dict(ident or {})
         net.rooms.setdefault(code, {"host": [], "guest": []})[role].append(self)
 
@@ -35,6 +35,8 @@ class LoopLink(netlink.PairLink):
         wire = proto.encode(message)
         for peer in self._hearers():
             if qos == 0 and self.rng.random() < self.loss0:
+                continue
+            if qos == 1 and self.loss1 and self.rng.random() < self.loss1:
                 continue
             for _ in range(2 if qos == 1 and self.rng.random() < self.dup1 else 1):
                 peer._deliver(wire, self.clock.now_ns() + round((self.latency_s + self.rng.uniform(0.0, self.jitter_s)) * S))

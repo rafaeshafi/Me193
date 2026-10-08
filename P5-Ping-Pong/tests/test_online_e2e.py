@@ -2,44 +2,9 @@
 its own flow, its own online manager and a scripted player, joined by an in-memory network on one shared clock.  The hub, the camera
 and the broker are fake; everything between is what a player runs."""
 
-from pingpong import online
-from pingpong.clock import FakeClock
-from pingpong.fakerig import FakeRig
-from pingpong.flow import Flow
-from pingpong.loopnet import LoopNet
+from pingpong.friendrig import Match
 
 S = 1_000_000_000
-
-
-class Match:
-    """A host's rig and a guest's, on one clock; the guest joins the host's game by its code."""
-
-    def __init__(self, *, target=3, pace=2, host_idle=False, guest_idle=False, **net_kw):
-        self.clock = FakeClock(start_ns=1_000_000_000)
-        self.net = LoopNet(self.clock, **net_kw)
-        self.a = FakeRig(clock=self.clock, level=1, mode="survival", target=target, seed=1, cards=[],
-                         flow=Flow(intro=False, level_tag=pace, start=("host", pace)), online=online.Online(self.net, name="MAYA", seed=1))
-        self.a.run(until=lambda: self.a.session.online.code, seconds=0.5, max_s=1)
-        self.code = self.a.session.online.code
-        self.b = FakeRig(clock=self.clock, level=1, mode="survival", target=target + 4, seed=2, cards=[],
-                         flow=Flow(intro=False, start=("join", self.code)), online=online.Online(self.net, name="RAFAE", seed=2))
-        self.a.player.idle, self.b.player.idle = host_idle, guest_idle
-
-    def run(self, seconds, until=None):
-        end = self.clock.now_ns() + round(seconds * S)
-        while self.clock.now_ns() < end:
-            self.a.step()
-            self.b.step(advance=False)
-            if until is not None and until(self):
-                return True
-        return until is None
-
-    def screens(self):
-        return self.a.session.hud_state().screen, self.b.session.hud_state().screen
-
-    def close(self):
-        self.a.close()
-        self.b.close()
 
 
 def test_two_live_pipelines_pair_through_the_list_and_play_a_match_to_its_end_with_the_same_score():
@@ -89,3 +54,17 @@ def test_closing_one_laptop_in_the_middle_of_a_match_ends_it_for_the_other_with_
         assert m.net.entries == {}
     finally:
         m.a.close()
+
+
+def test_a_friends_game_is_recorded_like_any_other_and_the_recording_can_be_read_and_reported(tmp_path):
+    from pingpong import recorder, sessionreport
+
+    m = Match(target=2, guest_idle=True, record_dirs=(tmp_path / "host", tmp_path / "guest"))
+    try:
+        assert m.run(150, until=lambda m: m.screens() == ("RESULTS", "RESULTS"))
+    finally:
+        m.close()
+    for name in ("host", "guest"):
+        loaded = recorder.load(tmp_path / name)
+        report = sessionreport.format_report(sessionreport.summarize(loaded))
+        assert report and "Traceback" not in report

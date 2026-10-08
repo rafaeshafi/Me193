@@ -42,16 +42,18 @@ def make_client(prefix="pp-net"):
 # --- an in-memory pair, for tests ---------------------------------------------------------------------------------------------------------
 class PairLink:
     """One end of a cable between two games in the same process: the messages go through the real codec, arrive after a latency
-    (with jitter that never reorders them), unreliable ones can be lost, reliable ones can come twice, and the cable can be cut."""
+    (with jitter that never reorders them), unreliable ones can be lost, reliable ones can come twice (or, when the other end had
+    dropped off the broker for a moment, not at all: loss1), and the cable can be cut."""
 
-    def __init__(self, clock, latency_s, jitter_s, loss0, dup1, rng, shared):
+    def __init__(self, clock, latency_s, jitter_s, loss0, dup1, rng, shared, loss1=0.0):
         self.clock, self.latency_s, self.jitter_s, self.loss0, self.dup1, self.rng = clock, latency_s, jitter_s, loss0, dup1, rng
+        self.loss1 = loss1                                   # reliable messages lost all the same: the broker had nobody to give them to
         self._shared, self._inbox, self._last_due, self._seq, self._closed, self._peer = shared, [], 0, itertools.count(), False, None
 
     @classmethod
-    def pair(cls, clock, latency_s=0.0, jitter_s=0.0, loss0=0.0, dup1=0.0, rng=None):
+    def pair(cls, clock, latency_s=0.0, jitter_s=0.0, loss0=0.0, dup1=0.0, rng=None, loss1=0.0):
         rng, shared = rng or random.Random(0), {"cut": False}
-        a, b = cls(clock, latency_s, jitter_s, loss0, dup1, rng, shared), cls(clock, latency_s, jitter_s, loss0, dup1, rng, shared)
+        a, b = cls(clock, latency_s, jitter_s, loss0, dup1, rng, shared, loss1), cls(clock, latency_s, jitter_s, loss0, dup1, rng, shared, loss1)
         a._peer, b._peer = b, a
         return a, b
 
@@ -72,6 +74,8 @@ class PairLink:
             return
         wire = proto.encode(message)
         if qos == 0 and self.rng.random() < self.loss0:
+            return
+        if qos == 1 and self.loss1 and self.rng.random() < self.loss1:
             return
         for _ in range(2 if qos == 1 and self.rng.random() < self.dup1 else 1):
             self._peer._deliver(wire, self.clock.now_ns() + round((self.latency_s + self.rng.uniform(0.0, self.jitter_s)) * S))

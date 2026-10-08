@@ -138,3 +138,13 @@ def test_after_a_press_the_pointer_has_to_be_armed_again_so_one_hold_is_one_pres
     c.feed(ELSEWHERE, 0.2)
     assert c.feed(AT_LEFT, 1.2)[0] == "left"
     assert c.feed(AT_LEFT, 3.0) is None
+
+
+def test_a_restart_starts_the_hold_again_from_nothing_but_the_hand_stays_armed():
+    c = Clockwork()
+    c.feed(ELSEWHERE, 0.3)
+    assert c.feed(AT_LEFT, 0.7) is None and c.pointer.progress > 0.5
+    c.pointer.restart()
+    assert c.pointer.progress == 0.0 and c.pointer.armed and c.pointer.hovered == "left"
+    assert c.feed(AT_LEFT, 0.7) is None
+    assert c.feed(AT_LEFT, 0.5)[0] == "left"

@@ -49,7 +49,7 @@ class Flow:
             self.level_tag = start[1] if start[0] == "host" else level_tag
         self.focus = self._default_focus()
         self._t0 = self._last_ns = self._last_tick_ns = None
-        self._hover = None
+        self._hover, self._hover_code = None, None
         self._music = "unset"
         self.online = OnlineView()               # what the online screens show (set_online)
         self.online_game, self.opponent = False, ""         # a game with a friend: its face-off, results and rematch work differently
@@ -64,7 +64,7 @@ class Flow:
 
     # --- moving between screens ---------------------------------------------------------------------------------------------------
     def _go(self, screen, now_ns, *extra):
-        self.screen, self._t0, self._hover = screen, now_ns, None
+        self.screen, self._t0, self._hover, self._hover_code = screen, now_ns, None, None
         self.pointer.reset()
         self.focus = self._default_focus()
         return list(extra) + self._music_for(screen) + ([Action("sound", "vs")] if screen == "VS" else [])
@@ -146,7 +146,11 @@ class Flow:
         if self.screen == "RESULTS" and phase != "MATCH_OVER":
             return actions + self._go("GAME", now_ns)                       # something else started the next game
         targets = menu_layout.targets(self.screen, len(self.online.rooms), not self.opponent_gone)
+        under = dwell.hit_test(ab, targets)
+        if under is not None and under == self.pointer.hovered and self._room_code(under) != self._hover_code:
+            self.pointer.restart()                          # another game has taken the place of the one the hand is held on
         pressed = self.pointer.update(now_ns, ab, targets, True)
+        self._hover_code = self._room_code(self.pointer.hovered)
         actions += self._tick_if_new_hover(now_ns)
         if pressed:
             actions += self._press(pressed, now_ns)
@@ -155,6 +159,13 @@ class Flow:
         elif self.screen == "VS" and now_ns - self._t0 >= self.vs_s * S:
             actions += self._launch(now_ns)
         return actions
+
+    def _room_code(self, target):
+        """The code of the game a row of the list stands for at this moment (None for anything else)."""
+        if target is None or not target.startswith("join"):
+            return None
+        k = int(target[4:])
+        return self.online.rooms[k]["code"] if k < len(self.online.rooms) else None
 
     def _tick_if_new_hover(self, now_ns):
         hovered = self.pointer.hovered

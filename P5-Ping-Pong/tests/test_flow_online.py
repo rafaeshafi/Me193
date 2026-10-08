@@ -226,3 +226,23 @@ def test_a_flow_can_start_by_joining_a_game_by_its_code_and_a_failure_lands_on_t
     assert d.flow.screen == "WAIT" and online_actions(d) == [("open", None), ("join", "ABCDE")]
     d.flow.net_failed(d.t)
     assert d.flow.screen == "ONLINE"
+
+
+def test_a_game_that_comes_onto_the_list_above_the_one_being_held_on_starts_the_hold_again_so_the_wrong_game_is_never_joined():
+    d = lobby(at_online(), ROOMS[0], ROOMS[1])
+    d.run(at_target("join1", "ONLINE", 2), 0.8)
+    assert d.flow.pointer.progress > 0.5
+    lobby(d, ROOMS[2], ROOMS[0], ROOMS[1])                    # a new game (ZOE's) comes in at the top: row 1 is MAYA's now
+    d.run(at_target("join1", "ONLINE", 3), 0.2)
+    assert d.flow.screen == "ONLINE" and d.flow.pointer.progress < 0.3
+    d.run(at_target("join1", "ONLINE", 3), 1.5)
+    assert online_actions(d)[-1] == ("join", "ABCDE") and d.flow.screen == "WAIT"
+
+
+def test_a_list_that_does_not_change_under_the_hand_is_pressed_as_usual():
+    d = lobby(at_online(), ROOMS[0], ROOMS[1])
+    for _ in range(5):
+        d.run(at_target("join0", "ONLINE", 2), 0.2)
+        lobby(d, ROOMS[0], ROOMS[1])                          # the same games again, as the broker repeats them
+    d.run(at_target("join0", "ONLINE", 2), 1.0)
+    assert d.flow.screen == "WAIT" and online_actions(d)[-1] == ("join", "ABCDE")

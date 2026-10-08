@@ -175,12 +175,25 @@ def test_a_goodbye_ends_it_at_once_and_says_the_other_left():
     assert rig.guest.remote.gone and rig.guest.remote.reason == "left"
 
 
-def test_a_lost_laptop_the_brokers_will_announces_is_noticed_without_waiting():
+def test_a_laptop_the_broker_says_was_lost_is_waited_for_and_welcomed_back_if_it_returns():
     rig = Rig().start()
     rig.run(1)
-    rig.link_a.send({"t": "bye", "reason": "lost"})
-    rig.run(0.2)
-    assert rig.guest.remote.gone and rig.guest.remote.reason == "lost"
+    rig.link_a.send({"t": "bye", "reason": "lost", "sid": SID})          # the will: the broker thinks its connection dropped (a reconnect says it did not)
+    rig.link_a.cut()                                                       # and for a moment nothing else comes
+    rig.run(1.0)
+    assert rig.guest.game.paused and "opponent" in rig.guest.game.pause_reasons and not rig.guest.remote.gone
+    rig.link_a.mend()
+    assert rig.run(3, until=lambda r: not r.guest.game.paused)            # the host's next ping: it is there
+    assert not rig.guest.remote.gone and rig.guest.remote.reason == ""
+
+
+def test_a_laptop_the_broker_says_was_lost_that_does_not_come_back_ends_the_game_after_a_while():
+    rig = Rig().start()
+    rig.run(1)
+    rig.link_a.send({"t": "bye", "reason": "lost", "sid": SID})
+    rig.link_a.cut()
+    assert not rig.run(versus.LOST_GRACE_S - 1.0, until=lambda r: r.guest.remote.gone)
+    assert rig.run(3.0, until=lambda r: r.guest.remote.gone) and rig.guest.remote.reason == "lost"
 
 
 def test_a_goodbye_that_names_another_guest_or_another_session_is_not_my_partner_leaving():
@@ -191,7 +204,7 @@ def test_a_goodbye_that_names_another_guest_or_another_session_is_not_my_partner
     rig.run(0.3)
     assert not rig.host.remote.gone and not rig.guest.remote.gone
     rig.link_b.send({"t": "bye", "reason": "left", "gid": "k3x9"})                         # my partner, by its token
-    rig.link_a.send({"t": "bye", "reason": "lost", "sid": SID})                            # and the host, by the session
+    rig.link_a.send({"t": "bye", "reason": "left", "sid": SID})                            # and the host, by the session
     rig.run(0.3)
     assert rig.host.remote.gone and rig.guest.remote.gone
 
@@ -240,7 +253,9 @@ def test_when_the_other_person_leaves_the_game_ends_where_it_stands_for_the_one_
         rig.run(7)
         assert rig.guest.game.phase in ("RALLY", "POINT_OVER")
         rig.link_a.send({"t": "bye", "reason": word})
-        rig.run(0.3)
+        if word == "lost":
+            rig.link_a.cut()
+        rig.run(0.3 if word == "left" else versus.LOST_GRACE_S + 1.0)
         game = rig.guest.game
         assert game.phase == "MATCH_OVER" and not game.paused and game.incoming is None and game.outgoing_leg is None
         over = [e for e in rig.guest.events if e.kind == "match_over"]
@@ -387,3 +402,46 @@ def test_two_hands_into_the_ball_keep_a_rally_going_across_the_cable_and_a_flaky
     assert rig.run(240, until=lambda r: r.host.game.phase == "MATCH_OVER" and r.guest.game.phase == "MATCH_OVER")
     as_host_sees, as_guest_sees = rig.scores()
     assert as_host_sees == as_guest_sees and max(as_host_sees) == 4
+
+
+# --- when a message is lost ---------------------------------------------------------------------------------------------------------------------------
+def test_messages_are_taken_in_order_and_one_that_jumps_a_gap_is_left_for_when_the_missing_one_comes():
+    rig = guest_waiting_for_a_serve()
+    rig.link_a.send(dict(HIT, n=2, v=9.0))                                # the first never came
+    rig.run(0.3)
+    assert rig.guest.game.incoming_leg is None and rig.guest.remote._seen_n == 0
+    rig.link_a.send(dict(HIT, n=1, v=3.0))
+    rig.run(0.3)
+    assert rig.guest.game.incoming_leg is not None and rig.guest.remote._seen_n == 1
+
+
+def test_a_message_is_sent_again_until_the_other_has_heard_it_and_then_not_any_more():
+    rig = Rig(host_skill="perfect", guest_skill="idle", target=3).start()
+    rig.link_a.loss1 = 1.0                                                # everything the host says reliably is lost for now
+    assert not rig.run(4.5, until=lambda r: r.guest.game.incoming_leg is not None)
+    rig.link_a.loss1 = 0.0
+    assert rig.run(6, until=lambda r: r.guest.game.incoming_leg is not None)          # the serve was sent again and arrived
+    assert len([e for e in rig.guest.events if e.kind == "serve"]) == 1               # once
+    rig.run(4)
+    assert not rig.host.remote._unacked                                   # and the guest's word that it heard has made the host stop
+
+
+def test_a_miss_that_is_lost_is_sent_again_and_the_point_is_counted_once():
+    rig = Rig(host_skill="perfect", guest_skill="idle", target=3).start()
+    assert rig.run(30, until=lambda r: r.guest.game.cpu_points == 1 or r.guest.game.player_points == 1 or r.guest.game.phase == "POINT_OVER")
+    rig = Rig(host_skill="perfect", guest_skill="idle", target=3).start()
+    rig.link_b.loss1 = 1.0                                                # what the guest says (its misses) is lost
+    assert not rig.run(12, until=lambda r: r.host.game.player_points == 1)
+    rig.link_b.loss1 = 0.0
+    assert rig.run(8, until=lambda r: r.host.game.player_points >= 1)
+    rig.run(1)
+    assert rig.scores()[0] == rig.scores()[1]
+
+
+@pytest.mark.parametrize("seed", range(1, 9))
+def test_matches_over_a_line_that_loses_delays_and_doubles_what_it_carries_still_end_in_agreement(seed):
+    rig = Rig(host_skill="perfect", guest_skill="flaky", target=4, seed=seed, latency_s=0.12, jitter_s=0.06, loss0=0.3, loss1=0.25, dup1=0.2,
+              rng=random.Random(seed)).start()
+    assert rig.run(600, until=lambda r: r.host.game.phase == "MATCH_OVER" and r.guest.game.phase == "MATCH_OVER")
+    as_host_sees, as_guest_sees = rig.scores()
+    assert as_host_sees == as_guest_sees and max(as_host_sees) == 4 and not rig.host.game.paused and not rig.guest.game.paused

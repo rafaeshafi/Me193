@@ -185,3 +185,13 @@ def test_a_session_that_cannot_play_a_friend_says_so_instead_of_hanging():
     session.apply([("online", ("open", None))])
     assert session.flow.online.status == "offline" and "NOT SET UP" in session.flow.online.message
     session.apply([("online", ("host", 1))])                                           # nothing to host with: back to the list
+
+
+def test_the_big_go_comes_up_for_both_players_when_the_first_ball_is_served():
+    pair = paired_pair(host_skill="perfect", guest_skill="idle", target=1)
+    seen = {"MAYA": set(), "RAFAE": set()}
+    for _ in range(900):
+        pair.run(0.01)
+        for laptop in pair.laptops:
+            seen[laptop.name].add(laptop.session.hud_state().message)
+    assert "GO!" in seen["MAYA"] and "GO!" in seen["RAFAE"]

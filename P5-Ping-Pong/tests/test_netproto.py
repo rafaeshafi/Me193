@@ -140,3 +140,12 @@ def test_a_lobby_entry_names_the_host_the_pace_and_the_target():
 def test_nothing_in_here_is_ever_not_a_number():
     got = roundtrip(dict(HIT, v=4.0))
     assert all(math.isfinite(x) for x in [got["v"], *got["start"], *got["aim"], got["top"], got["side"], got["loft"]])
+
+
+def test_a_message_that_can_be_lost_says_how_far_it_has_heard_so_the_other_can_send_again_what_was_not_heard():
+    for message in (HIT, {"t": "miss", "n": 4, "reason": "miss", "score": [3, 2]}, {"t": "rematch", "n": 9},
+                    {"t": "ping", "k": 7, "ts": 1.5}, {"t": "pong", "k": 7, "ts": 1.5}):
+        assert roundtrip(dict(message, ack=12))["ack"] == 12 and "ack" not in roundtrip(message)
+        for broken in (-1, "x", 1.5, True, None):
+            assert roundtrip(dict(message, ack=broken)) is None, (message["t"], broken)
+    assert "ack" not in roundtrip({"t": "pos", "x": 0.1, "ack": 3})                      # (the paddle's position is not numbered)

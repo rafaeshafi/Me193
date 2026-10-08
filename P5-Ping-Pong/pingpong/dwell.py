@@ -97,6 +97,10 @@ class Pointer:
         self._dwell.reset()
         self.hovered = None
 
+    def restart(self):
+        """What is under the hand has changed while it was held on: the hold starts again from nothing (the arming stays)."""
+        self._dwell.restart_hold()
+
     def update(self, now_ns, ab, targets, active):
         """-> the id of the target pressed at this moment, else None.  ab: the hand's (a, b) in the reach box, None when it is
         not seen; targets: (id, (x0, y0, x1, y1), hold_s) of this screen; active: this screen takes presses."""

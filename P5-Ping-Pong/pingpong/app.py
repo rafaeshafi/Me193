@@ -175,7 +175,7 @@ class Session(OnlineMixin):
         """A tick per countdown digit (3-2-1), and a "go" (heard, and flashed on the screen) when the first ball is served."""
         remaining = self.game.seconds_to_serve(self.clock.now_ns())
         digit = None if remaining is None else max(1, math.ceil(remaining))
-        went = digit is None and self._last_digit is not None and any(e.kind == "serve" for e in events)
+        went = digit is None and self._last_digit is not None and (any(e.kind == "serve" for e in events) or self.game.phase == "RALLY")
         if went:
             self._set_message("GO!", self.clock.now_ns(), 0.8)
         if self.audio is not None:

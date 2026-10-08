@@ -7,8 +7,13 @@ ball back the same way; if they do not, it says so, and both games give you the 
 needed: a ball starts flying when its message is read, so the time each player has to react is the ball's own flight, however
 long the message took (the delay only stretches the rally).
 
+What must arrive (a hit, a miss, a rematch) is numbered, read strictly in order and none twice, and every message says how many of
+the other's it has heard (its ack): a numbered message not acknowledged within RESEND_S is sent again, so a line that loses messages
+(the broker keeps nothing for a laptop that dropped off it and came back) delays the game instead of leaving both games waiting
+for each other for ever.  The broker's last will ("lost") starts a LOST_GRACE_S wait, not an ending: a reconnect makes it untrue.
+
 GameCore calls into a Remote at a handful of places (game.remote is None for every other game):
-    tick      step(): read the messages, keep the pings going, and wait or give up if the other end goes quiet
+    tick      step(): read the messages, keep the pings going, send again what was not heard, and wait or give up if the other end goes quiet
     _serve    serve(): the server's serve (automatic: a slow clean ball); the receiver waits for it
     _launch   shape() the speed to the match's pace, plan() the flight to the other person, send_hit() what you did
     misses    sent_miss(): tell the other game you missed (or faulted): the point is theirs
@@ -18,6 +23,7 @@ import dataclasses
 import math
 import random
 
+from pingpong import netproto as proto
 from pingpong import physics
 from pingpong.events import GameEvent
 from pingpong.judge import BallWindow
@@ -27,6 +33,8 @@ POS_EVERY_S = 1.0 / 15
 PING_EVERY_S = 1.0
 STALE_S = 4.0                    # no word for this long and the game waits for them
 LOST_S = 20.0                    # ... and for this long and the match is over
+LOST_GRACE_S = 12.0              # the broker says their connection dropped (its last will): they may still come back, a reconnect says so
+RESEND_S = 2.5                   # a numbered message not heard by now (no ack for it) is sent again, and again every so often
 PADDLE_SMOOTH_S = 0.08           # how fast the drawn opponent follows the paddle position it was told
 READY_BEFORE_SERVE_S = 0.5       # a serve that arrives this close to the end of the countdown starts the ball at once
 ACCEPTS = ("hit", "miss", "pos", "ping", "pong", "rematch")
@@ -48,7 +56,9 @@ class Remote:
         self.gone, self.reason = False, ""
         self.rematch_seen = False
         self.awaiting = False                    # my ball is out and their answer has not come
-        self._n, self._seen_n = 0, 0
+        self._n, self._seen_n = 0, 0             # how many numbered messages I have sent, and have read of theirs (in order, none twice)
+        self._unacked, self._lost_since = {}, None           # numbered messages they have not said they heard; when the broker said they dropped
+        self._last_resend = None
         self._heard = self._last_ping = self._last_pos = self._last_step = None
         self._my_x, self._x_target, self._early, self._out = None, 0.0, None, None
         self._pings = 0
@@ -63,11 +73,32 @@ class Remote:
 
     # --- sending ----------------------------------------------------------------------------------------------------------------------------------
     def _send(self, message, qos=1):
-        self.link.send(dict(message, sid=self.sid), qos=qos)
+        message = dict(message, sid=self.sid)
+        if message["t"] in proto.ACKING:
+            message["ack"] = self._seen_n                    # what I have heard of theirs: so they know what to send again
+        self.link.send(message, qos=qos)
 
     def _next(self):
         self._n += 1
         return self._n
+
+    def _send_numbered(self, message):
+        """A message that must arrive: numbered, kept, and sent again until the other end says it has heard it."""
+        numbered = dict(message, n=self._next())
+        self._unacked[numbered["n"]] = (numbered, self._last_step or 0)
+        self._send(numbered)
+
+    def _heard_up_to(self, ack):
+        for n in [n for n in self._unacked if n <= ack]:
+            del self._unacked[n]
+
+    def _resend(self, now_ns):
+        if not self._unacked or now_ns - min(sent for _, sent in self._unacked.values()) < RESEND_S * S:
+            return
+        if self._last_resend is None or now_ns - self._last_resend >= RESEND_S * S:
+            self._last_resend = now_ns
+            for n in sorted(self._unacked):
+                self._send(self._unacked[n][0])
 
     def _score(self, game):
         """(host's points, guest's points): the score the same way round for both ends."""
@@ -83,15 +114,15 @@ class Remote:
                                    end_z=physics.TABLE_LEN_M - physics.HIT_Z_M)
 
     def send_hit(self, game, now_ns, *, serve=False):
-        self._send(dict(self._out, t="hit", n=self._next(), serve=serve, score=self._score(game), rally=game.tracker.streak))
+        self._send_numbered(dict(self._out, t="hit", serve=serve, score=self._score(game), rally=game.tracker.streak))
         self.awaiting = True
 
     def send_rematch(self):
         """My player wants to play again."""
-        self._send({"t": "rematch", "n": self._next()})
+        self._send_numbered({"t": "rematch"})
 
     def sent_miss(self, game, reason, now_ns):
-        self._send({"t": "miss", "n": self._next(), "reason": reason, "score": self._score(game)})
+        self._send_numbered({"t": "miss", "reason": reason, "score": self._score(game)})
         self.awaiting = False
 
     def serve(self, game, t0_ns):
@@ -117,7 +148,10 @@ class Remote:
         for m in self.link.poll():
             if m["t"] == "bye":
                 if m.get("sid", self.sid) == self.sid and m.get("gid", self.gid) == self.gid:          # not a guest that was turned away
-                    self._end(m["reason"] or "left")
+                    if m["reason"] == "lost":
+                        self._lost_since = self._lost_since or now_ns                  # the broker's word, not theirs: they may be back
+                    else:
+                        self._end(m["reason"] or "left")
                 continue
             if m["t"] == "join":
                 if self.host and m["gid"] != self.gid:
@@ -125,7 +159,9 @@ class Remote:
                 continue
             if m["t"] not in ACCEPTS or m.get("sid") != self.sid or self.gone:
                 continue
-            self._heard = now_ns
+            self._heard, self._lost_since = now_ns, None                              # (heard from them: they are there, whatever the broker thinks)
+            if "ack" in m:
+                self._heard_up_to(m["ack"])
             events += self._read(game, m, now_ns)
         if self._early is not None and self._ready(game, now_ns):
             held, self._early = self._early, None
@@ -147,13 +183,13 @@ class Remote:
         elif kind == "pong":
             rtt = (now_ns / S - m["ts"]) * 1000.0
             self.ping_ms = rtt if self.ping_ms is None else 0.7 * self.ping_ms + 0.3 * rtt
-        elif kind == "rematch":
-            if m["n"] > self._seen_n:                                                # (a copy of one already read is not another)
-                self._seen_n, self.rematch_seen = m["n"], True
-        elif kind in ("hit", "miss"):
-            if m["n"] <= self._seen_n:
-                return []                                                        # a copy of one already read
+        elif kind in ("hit", "miss", "rematch"):
+            if m["n"] != self._seen_n + 1:
+                return []                                      # a copy of one already read, or one past a gap (the missing one will be sent again)
             self._seen_n = m["n"]
+            if kind == "rematch":
+                self.rematch_seen = True
+                return []
             return self._receive_hit(game, m, now_ns) if kind == "hit" else self._receive_miss(game, m, now_ns)
         return []
 
@@ -170,11 +206,13 @@ class Remote:
         if self._my_x is not None and (self._last_pos is None or now_ns - self._last_pos >= POS_EVERY_S * S):
             self._last_pos = now_ns
             self._send({"t": "pos", "x": self._my_x}, qos=0)
+        self._resend(now_ns)
         silent = (now_ns - self._heard) / S
-        if silent > STALE_S:
+        lost = self._lost_since is not None
+        if silent > STALE_S or lost:
             if "opponent" not in game.pause_reasons:
                 game.set_pause("opponent", True, now_ns)
-            if silent > LOST_S:
+            if silent > LOST_S or (lost and now_ns - self._lost_since > LOST_GRACE_S * S):
                 self._end("lost")
         elif "opponent" in game.pause_reasons:
             game.set_pause("opponent", False, now_ns)

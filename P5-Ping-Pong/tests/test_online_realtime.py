@@ -6,7 +6,7 @@ import time
 import pytest
 
 import config
-from pingpong import netlink
+from pingpong import netlink, versus
 from pingpong.clock import Clock
 from tests.minibroker import MiniBroker
 from tests.online_harness import Laptop
@@ -53,7 +53,8 @@ def test_a_host_and_a_guest_find_each_other_over_mqtt_and_play_a_match_to_the_sa
             guest.session.close_online()
 
 
-def test_a_laptop_that_vanishes_mid_match_is_noticed_through_the_brokers_last_will(broker):
+def test_a_laptop_that_vanishes_mid_match_is_noticed_through_the_brokers_last_will(broker, monkeypatch):
+    monkeypatch.setattr(versus, "LOST_GRACE_S", 0.5)                                         # (twelve seconds of waiting in real life)
     net, clock = netlink.Network(), Clock()
     host = Laptop(clock, net, "MAYA", skill="perfect", seed=1, target=9, level=2, start=("host", 2), vs_s=0.3, countdown_s=0.4)
     guest = None
@@ -68,3 +69,23 @@ def test_a_laptop_that_vanishes_mid_match_is_noticed_through_the_brokers_last_wi
         assert host.session.hud_state().results.title == "THEY LEFT" and host.game.remote.reason == "lost"
     finally:
         host.session.close_online()
+
+
+def test_a_connection_that_drops_and_comes_back_in_the_middle_of_a_match_costs_a_pause_not_the_game(broker):
+    net, clock = netlink.Network(), Clock()
+    host = Laptop(clock, net, "MAYA", skill="perfect", seed=1, target=3, level=2, start=("host", 2), vs_s=0.3, countdown_s=0.4)
+    guest = None
+    try:
+        assert run_until([host], lambda: host.online.code, 5)
+        guest = Laptop(clock, net, "RAFAE", skill="perfect", seed=2, target=3, level=1, start=("join", host.online.code), vs_s=0.3, countdown_s=0.4)
+        assert run_until([host, guest], lambda: host.game.tracker.streak >= 2, 30)
+        guest.game.remote.link.client._sock.close()                                           # the wifi drops: paho notices and reconnects
+        assert run_until([host, guest], lambda: guest.game.remote.link.ready and host.game.tracker.streak >= 5, 30)
+        assert not host.game.remote.gone and not guest.game.remote.gone
+        guest.player.skill = "idle"                                                           # and now the guest lets the balls go
+        assert run_until([host, guest], lambda: host.screen == guest.screen == "RESULTS", 60)
+        assert (host.game.player_points, host.game.cpu_points) == (3, 0) == (guest.game.cpu_points, guest.game.player_points)
+    finally:
+        host.session.close_online()
+        if guest is not None:
+            guest.session.close_online()

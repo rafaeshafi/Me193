@@ -259,3 +259,45 @@ def test_the_flow_for_a_friend_starts_where_the_flags_say():
 def test_the_fake_game_can_play_a_friend_too():
     session = play.make_fake_session(play.parse_args(["--fake", "--host"]))
     assert session.online is not None and session.flow.screen == "WAIT"
+
+
+def test_two_fake_games_play_each_other_with_the_mouse_and_the_swing_keys_over_the_network():
+    from pingpong import keys
+    from pingpong.clock import FakeClock
+    from pingpong.events import PaddlePose
+    from pingpong.loopnet import LoopNet
+
+    clock = FakeClock(start_ns=1_000_000_000)
+    net = LoopNet(clock, latency_s=0.03)
+    host = play.make_fake_session(play.parse_args(["--fake", "--player", "ann", "--host", "--level", "2", "--target", "2"]), clock=clock, net=net)
+    for _ in range(150):                                                             # the host opens a game; then a friend joins it
+        clock.advance_s(0.01)
+        host.tick()
+    code = host.online.code
+    guest = play.make_fake_session(play.parse_args(["--fake", "--player", "bob", "--join", code, "--target", "9"]), clock=clock, net=net)
+    swung = {}
+
+    def play_ball(session, name, meets):
+        game = session.game
+        ball = game.incoming
+        if ball is None or not meets:
+            return
+        now = clock.now_ns()
+        if ball.t_c_ns - int(0.4 * 1e9) <= now:
+            u, v = game.judge.box.to_uv(ball.aim_ab[0], 0.5)
+            session.on_pose(PaddlePose(t_scene_ns=now, u=u, v=v, conf=0.9, hand="right"))
+        if now >= ball.t_c_ns and swung.get(name) != ball.ball_id:
+            swung[name] = ball.ball_id
+            keys.handle_key(session, ord("k"), fake=True)                              # the hard-swing key
+
+    for _ in range(9000):
+        clock.advance_s(0.01)
+        for session, name, meets in ((host, "ann", True), (guest, "bob", False)):
+            play_ball(session, name, meets)
+            session.tick()
+        if host.hud_state().screen == guest.hud_state().screen == "RESULTS":
+            break
+    assert host.hud_state().screen == guest.hud_state().screen == "RESULTS"
+    assert (host.game.player_points, host.game.cpu_points) == (2, 0) == (guest.game.cpu_points, guest.game.player_points)
+    assert guest.game.target_points == 2 and host.game.level.tag == 2
+    host.close_online(), guest.close_online()

@@ -8,7 +8,8 @@ table off the screen).  Topics live in the game's own corner of the broker, neve
     lobby/<CODE>           retained: a game somebody is hosting (who, which pace, how many points); gone when the host is
     room/<CODE>/host       what the host says to the guest              (QoS 1 for what must arrive, QoS 0 for the paddle and pings)
     room/<CODE>/guest      what the guest says to the host
-Messages: join welcome busy | hit miss | pos | ping pong | bye rematch.
+Messages: join welcome busy | hit miss | pos | ping pong | bye rematch.  hit, miss and rematch are numbered (n); each of those and the
+pings also carries ack, how many of the other's numbered messages have been heard, so what was lost can be sent again.
 """
 
 import json
@@ -26,6 +27,7 @@ X_MAX, Y_MIN, Y_MAX, Z_MIN, Z_MAX = 1.6, -0.5, 1.5, -1.0, 3.5
 LOFT_MAX = 0.6
 TARGET_MAX = 21
 ROLES = ("host", "guest")
+ACKING = ("hit", "miss", "rematch", "ping", "pong")  # these say how many of the other's numbered messages have been heard (ack)
 
 
 def _reject(constant):
@@ -160,6 +162,8 @@ def decode(raw):
         out = {"t": m["t"], **SCHEMAS[m["t"]](m)}
         if "sid" in m and m["t"] != "welcome":
             out["sid"] = clean_sid(m["sid"])
+        if "ack" in m and m["t"] in ACKING:
+            out["ack"] = _int(m["ack"], 0, 10 ** 6)
         return out
     except (ValueError, TypeError, KeyError, UnicodeDecodeError, RecursionError):
         return None

@@ -136,6 +136,10 @@ def selftest():
     cam.close()
     print(f"camera pipeline selftest OK: the hand's own speed is the swing sensor (hub at 8 Hz ignored) -> 10 hits in "
           f"{cam.now_s():.1f} simulated s, published {sent[0]}...{sent[-1]}")
+
+    from pingpong import friendrig
+
+    print(f"online selftest OK: {friendrig.selftest()}")
     return 0
 
 
@@ -163,14 +167,15 @@ def make_flow(args):
     return livebuild.flow_for(args)
 
 
-def make_fake_session(args, clock=None):
-    """The --fake game: the mouse is the hand, so pointing it at the screen and holding works as with the hub."""
+def make_fake_session(args, clock=None, net=None):
+    """The --fake game: the mouse is the hand, so pointing it at the screen and holding works as with the hub.  `net`: the network
+    to play a friend over (default: the real one)."""
     from pingpong import app, netlink, online
     from pingpong.clock import Clock
 
     return app.make_session(level=args.level, mode=args.mode, target=args.target, clock=clock or Clock(), client=None,
                             source="fake", seed=args.seed, hold_start=True, flow=make_flow(args),
-                            online=online.Online(netlink.Network(), name=args.player))
+                            online=online.Online(net or netlink.Network(), name=args.player))
 
 
 def run_fake(args):

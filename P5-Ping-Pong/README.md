@@ -285,8 +285,10 @@ at their player, mirrored (`physics.plan_mirrored`), and decides for itself whet
 the ball back the same way or says it missed. No clock is shared and none is needed: a ball starts flying when its message is
 read, so each player has exactly the ball's own flight to react in, however long the message took; delay only stretches the
 rally (a ball waits at the far end for the other game's answer). Messages are small JSON over MQTT (`pingpong/netproto.py`),
-checked field by field because the broker is public, with a room per game and a last will that tells the other laptop at once if
-yours dies (`netlink.py`); the lobby of open games is one retained message per game, withdrawn when it is full or its host is
+checked field by field because the broker is public, with a room per game and a last will that tells the other laptop if yours
+dies (it waits 12 s for you, in case it was only a dropped connection) (`netlink.py`); a hit, a miss or a rematch is numbered, read
+in order and acknowledged in every ping, and sent again after 2.5 s if it was not heard, because a broker keeps nothing for a laptop
+that dropped off it and came back; the lobby of open games is one retained message per game, withdrawn when it is full or its host is
 gone. A guest gives itself a token and the host's answer names it, so two guests knocking at once cannot both get the game
 (`online.py`). The host's score is the one that stands, both laptops ping each other once a second (the **PING** chip shows the
 round trip), a game whose friend has been silent for 4 s pauses ("WAITING FOR MAYA...") and is over after 20 s. I tested it
@@ -303,6 +305,13 @@ port 1883 (some campus Wi-Fi) tether to a phone, or run your own broker for ever
 printf 'listener 1883\nallow_anonymous true\n' > /tmp/pp.conf && mosquitto -c /tmp/pp.conf    # on one laptop (brew install mosquitto)
 ./pp play --player maya --online --net-broker 192.168.1.20                                      # on both (or PP_NET_BROKER=192.168.1.20)
 ```
+
+To try it alone on one laptop (no hub, no camera): open two Terminal windows and run
+`./pp play --fake --player ann --host` in one and `./pp play --fake --player bob --online` in the other (the mouse is the hand, SPACE, J
+and K swing, and the second player holds on the first game in the list). `./pp lobby` prints the games that are open and says whether
+the game server can be reached, which is the first thing to run on both laptops when a friend cannot find your game. Over the
+public broker a message takes about a quarter of a second from here (the PING chip shows the round trip), so a ball waits a moment
+at the far end for the other game's answer: it is slower than the same room, never unfair; a broker on your own network is much quicker.
 
 | On the screen | What it means |
 |---|---|
