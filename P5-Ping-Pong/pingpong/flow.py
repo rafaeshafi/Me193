@@ -89,6 +89,8 @@ class Flow:
     # --- playing a friend: what the Session tells the flow ---------------------------------------------------------------------------
     def set_online(self, view):
         self.online = view or OnlineView()
+        if self.screen == "ONLINE":                                       # a game that has gone from the list takes the keys' focus with it
+            self.focus = min(self.focus, min(len(self.online.rooms), menu_layout.MAX_ROOMS))
 
     def paired(self, name, pace, now_ns):
         """A friend is found (they joined, or we did): the face-off, then a match at the host's pace."""

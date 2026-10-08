@@ -246,3 +246,18 @@ def test_a_list_that_does_not_change_under_the_hand_is_pressed_as_usual():
         lobby(d, ROOMS[0], ROOMS[1])                          # the same games again, as the broker repeats them
     d.run(at_target("join0", "ONLINE", 2), 1.0)
     assert d.flow.screen == "WAIT" and online_actions(d)[-1] == ("join", "ABCDE")
+
+
+def test_a_game_that_goes_from_the_list_takes_the_keys_focus_with_it_to_the_last_one_left():
+    d = lobby(at_online(), ROOMS[0], ROOMS[1])
+    d.key(D)
+    d.key(D)
+    assert d.flow.focus == 2
+    lobby(d, ROOMS[0])                                        # the second game was taken
+    assert d.flow.focus == 1
+    d.key(ENTER)
+    assert online_actions(d)[-1] == ("join", "ABCDE")
+    e = lobby(at_online(), ROOMS[0])
+    e.key(D)
+    lobby(e)                                                  # no games left at all: back on the host card
+    assert e.flow.focus == 0
