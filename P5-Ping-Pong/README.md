@@ -276,7 +276,7 @@ python3.12 -m venv my_env && my_env/bin/pip install -r requirements.txt
 
 Their own name is the player (`--player`): it gives them their own avatar and their own calibration. Without a hub, `--no-hub`
 plays on the camera alone. **A friend's laptop never touches the score**: only the player named in `config.OWNER` (`rafae`)
-ever publishes to the score topic, so a friend running `./pp play` with their own name plays normally and nothing is sent, and
+ever publishes to the score topic, so a friend running `./pp play` with their own name plays normally and nothing is sent (the title says SCORE NOT SENT), and
 nothing that happens in a game with a friend, even yours, is ever published or counted in your record or the leaderboard.
 
 **How it works.** Every laptop runs its own complete game. When you hit the ball your game sends the other one *what you did*
@@ -392,7 +392,7 @@ swing strength, how often the computer misses a ball, how often you would fault,
 mosquitto_sub -h test.mosquitto.org -t ME193/Rogers/RafaeShafi --retained-only -C 1 -W 5
 ```
 
-**The take** is a fresh session and the last one that publishes: `./pp play --player rafae --level 2`. In a second
+**The take** is a fresh session and the last one that publishes: `./pp play --player rafae --level 2` (the player must be `rafae`: any other name plays with the score off, and the title says SCORE NOT SENT). In a second
 Terminal keep `./pp watch_score --secs 600` running as durable evidence, screen-record (Cmd+Shift+5) and film the
 haptic with a phone. A crash mid-take: restart with `--resume` so the best so far stays on the broker.
 

@@ -195,6 +195,8 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
             rig.store = db
             rig.session.on_game_over = lambda summary: _save_game(db, args.player, summary, log)
             rig.session.leaderboard_fn = lambda: tuple(db.leaderboard(rig.session.game.mode, limit=5))
+    if not (guest or owner or args.no_publish):
+        rig.session.set_notice(f"SCORE NOT SENT: only the player {config.OWNER} publishes it")
     if not calibration.calibrated:
         flags = (" --swing-source pose" + (" --no-hub" if args.no_hub else "")) if camera else ""
         rig.session.set_notice(f"UNCALIBRATED: run ./pp calibrate_swing --player {args.player}{flags}")

@@ -438,3 +438,16 @@ def test_a_friend_is_told_in_the_log_that_nothing_will_be_published(tmp_path):
     lines = []
     live.build_live(live_args("--player", "maya"), FakeEnv(), player_root=tmp_path, log=lines.append).close()
     assert any("score topic" in line and "not published" in line for line in lines)
+
+
+def test_a_calibrated_friend_is_told_on_the_title_that_their_score_is_not_sent(tmp_path):
+    saved = profile.Calibration(swing=SwingCalibration((0.0, 1.0, 0.0), 280.0, 1100.0), box=ReachBox(-1.5, 1.5, -0.9, 0.7), shoulder_w=0.2,
+                                tilt=TiltCalibration((1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 0.0, 0.0)))
+    profile.save("maya", saved, root=tmp_path)
+    profile.save("rafae", saved, root=tmp_path)
+    friend = live.build_live(live_args("--player", "maya"), FakeEnv(), player_root=tmp_path)
+    assert "NOT SENT" in friend.session.hud_state().message and "rafae" in friend.session.hud_state().message
+    owner = live.build_live(live_args("--player", "rafae"), FakeEnv(), player_root=tmp_path)
+    assert owner.session.hud_state().message == ""
+    quiet = live.build_live(live_args("--player", "maya", "--no-publish"), FakeEnv(), player_root=tmp_path)
+    assert quiet.session.hud_state().message == ""                                          # they asked for it: nothing to tell
