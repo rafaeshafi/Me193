@@ -4,6 +4,7 @@
     judge.<setting of HitJudge>    e.g. judge.d95_s=0.2         (how long after the window a miss is declared)
     level.<field of Level>         e.g. level.radius_sw=0.8     (applies to every level; tags and keys keep it)
     latency.<field of Latency>     e.g. latency.display_s=0.08  (where the time goes: see pingpong/latency.py)
+    shot.<field of ShotModel>      e.g. shot.k_top=0.6          (how the path of the hand and the twist of the hub shape a return)
 
 `./pp play --set ...` tunes a live game; `./pp replay --set ...` asks what the same recorded swings would have
 done.  A live session records the settings it ran with, and its replay starts from them.
@@ -12,14 +13,15 @@ done.  A live session records the settings it ran with, and its replay starts fr
 import dataclasses
 
 from pingpong import latency as latency_mod
-from pingpong import levels
+from pingpong import levels, strokepath
 from pingpong.swing import SwingParams
 
 JUDGE_SETTINGS = ("t_pk", "d95_s", "min_dur_ms", "max_dur_ms", "max_reversals", "min_conf", "refractory_s",
                   "max_hits_per_s", "contact_lag_s")
 SECTIONS = {"swing": tuple(f.name for f in dataclasses.fields(SwingParams)), "judge": JUDGE_SETTINGS,
             "level": tuple(f.name for f in dataclasses.fields(levels.Level)),
-            "latency": tuple(f.name for f in dataclasses.fields(latency_mod.Latency))}
+            "latency": tuple(f.name for f in dataclasses.fields(latency_mod.Latency)),
+            "shot": tuple(f.name for f in dataclasses.fields(strokepath.ShotModel))}
 
 
 def parse(items):
@@ -72,6 +74,8 @@ def apply(rig, settings):
         lat = dataclasses.replace(rig.session.latency, **settings["latency"])
         rig.session.latency = rig.session.view.latency = lat
         game.judge.contact_lag_s = lat.contact_lag_s                       # the judge follows (unless set by hand below)
+    if "shot" in settings:
+        game.shot_model = dataclasses.replace(game.shot_model, **settings["shot"])
     for name, value in settings.get("judge", {}).items():
         setattr(game.judge, name, value)
     if "level" in settings:

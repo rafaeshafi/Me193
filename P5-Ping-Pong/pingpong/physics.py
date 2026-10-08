@@ -24,6 +24,8 @@ HIT_Z_M = 0.30             # ... you meet it over your end: the ball is here whe
 STRIKE_Y_M = 0.22          # ... and both of you strike it this high above the table
 MIN_FLIGHT_S = 0.30
 SPIN_TIME_GAIN = 0.25
+SIDE_BEND = 0.45           # sidespin 1.0 bends the ball this share of the table's half width sideways at the middle of its flight
+SIDE_BEND_REBOUND = 0.25   # ... and, after the bounce, this much (the bends are on top of the straight line to the aimed point)
 NET_CLEAR_M = 0.07         # the ball passes at least this far above the net's tape
 APEX_MIN_M = 0.40          # the first arc peaks at least this high above the table
 REBOUND_APEX_M = 0.30      # the arc after the bounce peaks this high (and at least 0.05 above where it ends)
@@ -127,10 +129,10 @@ class Leg:
         p = self.progress(t_ns)
         pc = min(p, 1.0)
         x = self.x_start + (self.x_end - self.x_start) * p
-        x += 0.25 * self.sidespin * math.sin(math.pi * pc) * HALF_WIDTH_M
+        x += SIDE_BEND * self.sidespin * math.sin(math.pi * pc) * HALF_WIDTH_M
         if pc > self.p_bounce:
             q = (pc - self.p_bounce) / (1.0 - self.p_bounce)
-            x += 0.15 * self.sidespin * HALF_WIDTH_M * math.sin(math.pi * q)
+            x += SIDE_BEND_REBOUND * self.sidespin * HALF_WIDTH_M * math.sin(math.pi * q)
         return x, self._height(p), self.z_start + (self.z_end - self.z_start) * p
 
     def _height(self, p):
@@ -140,7 +142,7 @@ class Leg:
         return max(FLOOR_Y_M, arc_y(s, 0.0, self.y_end, self.apex2_m))
 
 
-def _plan(t0_ns, v, start, end, p_bounce, aim_ab, topspin, sidespin, fault):
+def _plan(t0_ns, v, start, end, p_bounce, aim_ab, topspin, sidespin, fault, loft_m=0.0):
     if v <= 0:
         raise ValueError("ball speed must be positive")
     base = D_M / v
@@ -153,7 +155,7 @@ def _plan(t0_ns, v, start, end, p_bounce, aim_ab, topspin, sidespin, fault):
     elif fault == "out":
         p_land = LONG_BOUNCE                            # it sails over the far end
     if apex1 is None:
-        apex1 = _clearing_apex(start[1], p_net / p_land)
+        apex1 = _clearing_apex(start[1], p_net / p_land) + max(0.0, loft_m)
     return Leg(
         t0_ns=int(t0_ns), v=float(v), flight_s=max(MIN_FLIGHT_S, raw), raw_s=raw, p_bounce=p_bounce, p_land=p_land,
         spin_factor=f, x_start=float(start[0]), x_end=float(end[0]), y_start=float(start[1]), y_end=float(end[1]),
@@ -169,7 +171,10 @@ def plan_leg(t0_ns, v, x_start, aim_ab, topspin=0.0, sidespin=0.0, fault=None):
                  0.64 + 0.16 * aim_ab[1], aim_ab, topspin, sidespin, fault)
 
 
-def plan_return(t0_ns, v, start, aim_ab, topspin=0.0, sidespin=0.0, fault=None):
-    """Your ball to the computer: from where you struck it, bouncing on its half, to its strike point at lateral a."""
+def plan_return(t0_ns, v, start, aim_ab, topspin=0.0, sidespin=0.0, fault=None, loft_m=0.0):
+    """Your ball to the computer: from where you struck it, bouncing on its half, to its strike point at lateral a.
+
+    loft_m raises the first arc above the lowest one that clears the net (a stroke that lifts): the time of flight and the
+    place it lands do not change, only how high it goes."""
     return _plan(t0_ns, v, tuple(start), (x_of_a(aim_ab[0]), STRIKE_Y_M, CPU_Z_M), RETURN_BOUNCE, aim_ab, topspin,
-                 sidespin, fault)
+                 sidespin, fault, loft_m)

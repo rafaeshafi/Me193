@@ -15,8 +15,8 @@ def leg(v=5.0, top=0.0, side=0.0, x_start=0.0, aim=(0.5, 0.5), fault=None):
     return physics.plan_leg(t0_ns=0, v=v, x_start=x_start, aim_ab=aim, topspin=top, sidespin=side, fault=fault)
 
 
-def ret(v=5.0, start=(0.2, 0.22, 0.3), aim=(0.5, 0.5), top=0.0, side=0.0, fault=None):
-    return physics.plan_return(t0_ns=0, v=v, start=start, aim_ab=aim, topspin=top, sidespin=side, fault=fault)
+def ret(v=5.0, start=(0.2, 0.22, 0.3), aim=(0.5, 0.5), top=0.0, side=0.0, fault=None, loft=0.0):
+    return physics.plan_return(t0_ns=0, v=v, start=start, aim_ab=aim, topspin=top, sidespin=side, fault=fault, loft_m=loft)
 
 
 def track(l, n=200):
@@ -75,6 +75,14 @@ def test_sidespin_bends_the_path_midway_but_not_without_spin():
     assert abs(curved.position(t_mid)[0] - straight.position(t_mid)[0]) > 0.05
 
 
+def test_a_typical_sidespin_bends_the_ball_far_enough_to_see_and_a_full_one_stays_believable():
+    straight = ret(aim=(0.7, 0.5))
+    deviation = lambda side: max(abs(a[0] - b[0]) for a, b in zip(track(ret(aim=(0.7, 0.5), side=side)), track(straight)))   # noqa: E731
+    assert deviation(0.3) >= 0.08                              # 0.1 m is about 25 px on the 1280 px screen
+    assert deviation(0.3) < deviation(0.6) < deviation(1.0) <= 0.55
+    assert deviation(-0.3) == pytest.approx(deviation(0.3), rel=0.05)                       # to the left as much as to the right
+
+
 def test_aim_cells_map_to_lateral_meters_symmetrically():
     left, mid, right = leg(aim=(0.15, 0.5)).x_end, leg(aim=(0.5, 0.5)).x_end, leg(aim=(0.85, 0.5)).x_end
     assert mid == pytest.approx(0.0)
@@ -104,6 +112,23 @@ def test_a_returned_ball_bounces_on_the_computers_half():
     _, by, bz = l.position(l.bounce_ns)
     assert by == pytest.approx(0.0, abs=1e-6)
     assert physics.NET_Z_M < bz < physics.TABLE_LEN_M
+
+
+def test_a_lofted_return_peaks_higher_but_arrives_at_the_same_time_and_place_and_still_clears_the_net():
+    flat, high = ret(aim=(0.7, 0.5)), ret(aim=(0.7, 0.5), loft=0.2)
+    assert high.apex1_m == pytest.approx(flat.apex1_m + 0.2)
+    peak = lambda l: max(y for _, y, _ in track(l, 400))                    # noqa: E731
+    assert peak(high) > peak(flat) + 0.15
+    assert high.flight_s == flat.flight_s and high.arrival_ns == flat.arrival_ns
+    assert high.position(high.arrival_ns) == pytest.approx(flat.position(flat.arrival_ns))
+    crossing = min(track(high, 800), key=lambda p: abs(p[2] - physics.NET_Z_M))
+    assert crossing[1] > physics.NET_H_M + physics.NET_CLEAR_M - 0.01
+
+
+def test_a_negative_loft_never_flattens_an_arc_below_what_clears_the_net_and_a_net_fault_ignores_loft():
+    assert ret(loft=-0.5).apex1_m == pytest.approx(ret().apex1_m)
+    assert ret(fault="net", loft=0.3).apex1_m == pytest.approx(ret(fault="net").apex1_m)
+    assert ret(fault="out", loft=0.3).apex1_m > ret(fault="out").apex1_m              # a long ball sails higher too
 
 
 def test_the_ball_rises_again_after_the_bounce():

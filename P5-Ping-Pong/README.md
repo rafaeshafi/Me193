@@ -184,6 +184,19 @@ times as much (a trained predictor can lead it again, see `./pp train_pose`); an
 early** by the motors' and the speakers' delays so they arrive when the picture shows the contact. The camera's own lag is the
 one delay measured on this hardware (`./pp bench_cam`).
 
+**Where the ball goes after your hit.** The swing's strength (the gyro) sets the ball's speed and where your hand is across
+the reach box sets where it lands, as before. What is new is that how your hand MOVED during the stroke and how the hub TURNED
+decide the rest (`pingpong/strokepath.py`). The camera sees the hand across and up, so: a stroke that goes sideways places the
+ball further that way (up to about a fifth of the table's width) and gives it sidespin, a stroke that lifts gives a higher arc
+and topspin, and a chop (the hand going down) gives a flat arc and backspin. The hub's twist is the rotation it made over the
+stroke about its handle ("doorknob") axis, beyond what your strokes usually do (the first six hits of a session decide that, so
+the way you normally swing counts as no twist): twist it more to the right and the ball curves right, more to the left and it
+curves left. Spin shows on the screen as TOPSPIN / BACKSPIN / SIDESPIN, bends the ball's path, and in Match a spinning ball is
+harder for the computer to return. Every gain is a number you can change while playing: `--set shot.k_top=0.6` (topspin per
+normal upward stroke), `shot.k_side_path`, `shot.k_side_twist`, `shot.k_aim`, `shot.k_loft_m`, `shot.ref_speed_sw_s` (the hand
+speed that counts as a normal stroke); all five gains at 0 give the old flat returns, and every hit records what it was made from
+(`stroke` in the session's hit events).
+
 **The six gates** (the x-ray shows each one with its reason): **J1** the contact inside the level's window around that moment ·
 **J2** your hand level with the ball *across the table* (its height does not matter) from 0.3 s before to 0.05 s after the
 impact and at the impact; the ball is where its flight puts it at the contact, the moment is when the ball is over the

@@ -4,6 +4,8 @@ Everything here is a pure function so a fault is explainable ("you swung too har
 and too sloppily") and testable -- the seeded RNG is only used for the CPU.
 """
 
+import math
+
 from pingpong.events import ShotParams
 
 PERFECT_Q = 0.9
@@ -74,10 +76,16 @@ def aim_from_a(a):
     return _clip((a - 0.5) * 2 * 0.8, -1.0, 1.0)
 
 
-def make(*, w_pk, omega_lo, omega_hi, d_min_sw, e_s, level, paddle_a, spin_probs=None):
+def make(*, w_pk, omega_lo, omega_hi, d_min_sw, e_s, level, paddle_a, spin_probs=None, stroke=None):
+    """stroke: a strokepath.ReturnShape (the path of the hand and the twist of the hub): it moves the landing point and
+    adds its spin to what a trained spin model hears (its loft is the physics', not part of the shot's parameters)."""
     s = swing_strength(w_pk, omega_lo, omega_hi)
     _, _, q_total = quality(d_min_sw, e_s, level)
     top, side, amp = spin_from_probs(spin_probs, s)
+    if stroke is not None:
+        top, side = _clip(top + stroke.topspin, -1.0, 1.0), _clip(side + stroke.sidespin, -1.0, 1.0)
+        amp = max(amp, min(1.0, math.hypot(top, side)))
+        paddle_a = _clip(paddle_a + stroke.aim_shift, 0.0, 1.0)
     return ShotParams(v_out=out_speed(s), T=top, S=side, A=amp, aim_a=aim_from_a(paddle_a),
                       q_total=q_total, fault=fault_for(s, q_total, level),
                       label=grade(q_total, e_s, level))

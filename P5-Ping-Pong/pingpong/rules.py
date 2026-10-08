@@ -13,7 +13,7 @@ publisher when the score changes.
 
 import dataclasses
 
-from pingpong import levels, physics
+from pingpong import levels, physics, strokepath
 from pingpong import shot as shotmod
 from pingpong.events import GameEvent
 from pingpong.judge import BallWindow, pose_at
@@ -26,8 +26,10 @@ BETWEEN_RALLIES = ("LOBBY", "POINT_OVER", "MATCH_OVER")
 class GameCore:
     def __init__(self, *, judge, tracker, policy, publisher=None, level=None, mode="survival",
                  target_points=7, omega_lo=300.0, omega_hi=1200.0, spin_probs_fn=None,
-                 countdown_s=3.0, point_pause_s=2.0):
+                 countdown_s=3.0, point_pause_s=2.0, shot_model=None, wrist_axis=None):
         self.judge, self.tracker, self.policy, self.publisher = judge, tracker, policy, publisher
+        self.wrist_axis = wrist_axis                  # the hub's axis a twist is measured about (None: the twist is ignored)
+        self.shot_model = shot_model or strokepath.ShotModel()
         self.level_overrides = {}                      # --set level.X=v: applied to whichever level is chosen
         if publisher is not None:
             publisher.on_resume = tracker.seed_record      # --resume: the retained best is where this run starts
@@ -45,6 +47,17 @@ class GameCore:
         self._record_before = tracker.record
         self._pause_reasons, self._paused_at = set(), None
         self.started_at_ns = None            # exactly when start() was last called (a replay needs it)
+
+    @property
+    def shot_model(self):
+        return self._shot_model
+
+    @shot_model.setter
+    def shot_model(self, model):
+        """How the path of the hand and the twist of the hub shape a return (`--set shot.k_top=...`); what the player's
+        strokes usually twist is learnt afresh with it."""
+        self._shot_model = model
+        self._twist = strokepath.TwistBaseline(model.twist_sd_deg, model.twist_warmup)
 
     # --- inputs ------------------------------------------------------------------------
     def set_level(self, level):
@@ -195,16 +208,24 @@ class GameCore:
         # spreads it back over the whole table (wide returns are how a point is won)
         aim_a = min(1.0, max(0.0, 0.5 + (paddle_a - 0.5) / self.level.reach))
         probs = self.spin_probs_fn(swing.feat) if self.spin_probs_fn else None
+        # where the ball goes and how it spins also come from how the hand moved and how the hub turned during the stroke
+        path = strokepath.hand_path(pose_samples, swing.t_ns)
+        twist = strokepath.twist_deg(swing.net_rot_deg, self.wrist_axis)
+        stroke = strokepath.shape_return(path, self._twist.z(twist), self.shot_model)
         sp = shotmod.make(w_pk=swing.w_pk, omega_lo=self.omega_lo, omega_hi=self.omega_hi,
                           d_min_sw=verdict.d_min_sw, e_s=verdict.e_s, level=self.level,
-                          paddle_a=aim_a, spin_probs=probs)
+                          paddle_a=aim_a, spin_probs=probs, stroke=stroke)
         self.s_prev = shotmod.swing_strength(swing.w_pk, self.omega_lo, self.omega_hi)
         self.player_a, self.incoming = paddle_a, None
         self.outgoing_leg = physics.plan_return(
-            contact_ns, sp.v_out, contact, (0.5 + sp.aim_a / 1.6, 0.5), topspin=sp.T, sidespin=sp.S, fault=sp.fault)
+            contact_ns, sp.v_out, contact, (0.5 + sp.aim_a / 1.6, 0.5), topspin=sp.T, sidespin=sp.S, fault=sp.fault,
+            loft_m=stroke.loft_m)
         data = {"label": sp.label, "v_out": sp.v_out, "kmh": shotmod.kmh(sp.v_out), "topspin": sp.T,
                 "sidespin": sp.S, "q_total": sp.q_total, "gates": verdict.gates, "e_s": verdict.e_s,
-                "contact_ns": contact_ns, "contact": contact}
+                "contact_ns": contact_ns, "contact": contact,
+                "stroke": {"vu": 0.0 if path is None else path.vu, "vv": 0.0 if path is None else path.vv,
+                           "twist_z": stroke.twist_z, "aim_shift": stroke.aim_shift, "loft_m": stroke.loft_m,
+                           "topspin": stroke.topspin, "sidespin": stroke.sidespin}}
         self._observe(1.0 if sp.fault else 0.5 * (1.0 - sp.q_total), bool(sp.fault))
         if sp.fault:
             events = [GameEvent("fault", now_ns, dict(data, fault=sp.fault))]

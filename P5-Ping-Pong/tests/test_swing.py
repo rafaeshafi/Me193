@@ -276,3 +276,30 @@ def test_a_forward_stroke_right_after_the_backswing_is_not_swallowed_by_the_cool
         samples[i] = ImuSample(t_ns=samples[i].t_ns, g=(0, 0, 0), a=(0, 0, 1000))
     hits = impacts(run(new(), samples))
     assert len(hits) == 2 and hits[1][1].dur_ms < 300.0
+
+
+def test_an_impact_carries_the_gyro_vector_at_its_peak_and_the_rotation_over_the_stroke():
+    # the stroke about x (800 dps) with a twist about y (200 dps) at the same time: the game turns the twist into spin
+    samples = []
+    for i in range(int(2.0 * HZ) + 1):
+        t = i / HZ
+        gx, gy = pulse(t, 0.6, 0.30, 800.0), pulse(t, 0.6, 0.30, 200.0)
+        samples.append(ImuSample(t_ns=T0 + int(t * 1e9), g=(round(gx * GPD), round(gy * GPD), 0), a=(0, 0, 1000)))
+    found = impacts(run(new(), samples))
+    assert len(found) == 1
+    ev = found[0][1]
+    assert ev.g_dps[0] == pytest.approx(800.0, rel=0.05) and ev.g_dps[1] == pytest.approx(200.0, rel=0.1) and abs(ev.g_dps[2]) < 5
+    assert ev.net_rot_deg[0] > 40.0 and ev.net_rot_deg[1] > 10.0                      # degrees turned during the forward phase
+    assert ev.net_rot_deg[1] / ev.net_rot_deg[0] == pytest.approx(0.25, rel=0.1)
+    norm = math.sqrt(sum(c * c for c in ev.g_dps))
+    assert ev.axis_unit == pytest.approx(tuple(c / norm for c in ev.g_dps), abs=1e-6)       # the same peak, as a direction
+    assert ev.g_dps[0] <= ev.w_pk * 1.05 + 1.0                                                # the forward rate is its projection
+
+
+def test_an_event_made_by_hand_has_no_rotation_to_report():
+    from pingpong.events import SwingEvent
+
+    e = SwingEvent(kind="IMPACT", t_ns=1, w_pk=500.0, dur_ms=150.0, n_reversals=0, axis_unit=(1, 0, 0),
+                   net_rot_unit=(1, 0, 0), a_lin_unit=(0, 0, 1), clipped=False, feat=(0.0,) * 12)
+    assert e.g_dps == (0.0, 0.0, 0.0) and e.net_rot_deg == (0.0, 0.0, 0.0)
+

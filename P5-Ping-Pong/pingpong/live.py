@@ -24,7 +24,7 @@ from collections import deque
 import cv2
 
 import config
-from pingpong import app, mqtt_link, posegyro
+from pingpong import app, mqtt_link, posegyro, strokepath
 from pingpong import latency as latency_mod
 from pingpong import posemodel
 from pingpong import overrides as overrides_mod
@@ -367,7 +367,9 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         client=mqtt_client if publishing else None, source=source, scope=scope or config.RECORD_SCOPE,
         no_publish=no_publish, seed=seed, box=calibration.box, omega_lo=calibration.swing.omega_lo,
         omega_hi=calibration.swing.omega_hi, t_pk=params.t_pk, spin_probs_fn=spin_probs_fn, learner=learner,
-        resume=resume, latency=latency, hand_model=pose_model.predictor, hold_start=hold_start)
+        resume=resume, latency=latency, hand_model=pose_model.predictor, hold_start=hold_start,
+        wrist_axis=None if camera else strokepath.wrist_axis(
+            calibration.swing.u_fwd, None if calibration.tilt is None else calibration.tilt.axis))
     if vision is None:
         vision = VisionWorker(capture, landmarker, clock=clock, hand=calibration.hand, lag_s=lag_s,
                               tag_detector=tag_detector, phase_fn=lambda: session.game.phase,

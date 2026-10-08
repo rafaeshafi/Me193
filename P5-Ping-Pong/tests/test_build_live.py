@@ -304,3 +304,13 @@ def test_holding_the_hand_in_the_top_right_of_the_reach_starts_a_game_through_th
     assert any(b is not None and b[0] > 0.5 for b in shown)                    # the bar filled on the way
     rig.close()
 
+
+def test_the_games_wrist_axis_comes_from_the_hub_calibrations_tilt_and_only_for_the_hub(tmp_path):
+    base = dict(swing=SwingCalibration((0.0, 1.0, 0.0), 280.0, 1100.0), box=ReachBox(-1.5, 1.5, -0.9, 0.7), shoulder_w=0.2)
+    profile.save("tilted", profile.Calibration(**base, tilt=TiltCalibration((1.0, 0.2, 0.0), (0.0, 0.0, 1.0), (0.0, 0.0, 0.0))),
+                 root=tmp_path)
+    profile.save("untilted", profile.Calibration(**base), root=tmp_path)
+    axis = live.build_live(live_args("--player", "tilted"), FakeEnv(), player_root=tmp_path).session.game.wrist_axis
+    assert axis == pytest.approx((1.0, 0.0, 0.0), abs=1e-9)                 # the doorknob axis made perpendicular to the stroke axis
+    assert live.build_live(live_args("--player", "untilted"), FakeEnv(), player_root=tmp_path).session.game.wrist_axis is None
+

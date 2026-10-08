@@ -11,7 +11,7 @@ EXPECTED_FIELDS = {
     "ImuSample": ["t_ns", "g", "a", "src"],
     "GestureEvent": ["t_ns", "gesture"],
     "SwingEvent": ["kind", "t_ns", "w_pk", "dur_ms", "n_reversals", "axis_unit",
-                   "net_rot_unit", "a_lin_unit", "clipped", "feat", "src"],
+                   "net_rot_unit", "a_lin_unit", "clipped", "feat", "src", "g_dps", "net_rot_deg"],
     "PaddlePose": ["t_scene_ns", "u", "v", "conf", "hand", "raw"],
     "TagEvent": ["role", "value", "t_ns"],
     "GateResult": ["name", "passed", "note"],

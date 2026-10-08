@@ -1,8 +1,10 @@
 """Per-shot speed, spin, aim, quality and the deterministic fault rule."""
 
+import math
+
 import pytest
 
-from pingpong import levels, shot
+from pingpong import levels, shot, strokepath
 
 CLUB = levels.LEVELS[2]
 
@@ -95,3 +97,34 @@ def test_make_assembles_a_shot_from_one_verdict():
     assert p.v_out == pytest.approx(shot.out_speed(shot.swing_strength(900.0, 300.0, 1200.0)))
     assert p.fault is None and p.label == "perfect"
     assert p.q_total == 1.0
+
+
+# --- the path of the hand and the twist of the hub shape the return -----------------------------------------------------------
+def made(stroke=None, paddle_a=0.5, probs=None):
+    return shot.make(w_pk=600.0, omega_lo=300.0, omega_hi=1200.0, d_min_sw=0.1, e_s=0.0, level=CLUB, paddle_a=paddle_a,
+                     spin_probs=probs, stroke=stroke)
+
+
+def test_a_stroke_gives_the_ball_its_spin_and_the_amplitude_is_the_size_of_it():
+    stroke = strokepath.ReturnShape(aim_shift=0.0, loft_m=0.1, topspin=0.3, sidespin=-0.2)
+    sp = made(stroke)
+    assert sp.T == pytest.approx(0.3) and sp.S == pytest.approx(-0.2) and sp.A == pytest.approx(math.hypot(0.3, 0.2))
+    flat = made()
+    assert (flat.T, flat.S, flat.A) == (0.0, 0.0, 0.0)
+
+
+def test_a_stroke_adds_to_the_spin_a_trained_model_hears_and_the_sum_stays_within_one():
+    stroke = strokepath.ReturnShape(aim_shift=0.0, loft_m=0.0, topspin=0.5, sidespin=0.0)
+    trained = made(probs={"flat": 0.05, "top": 0.9, "back": 0.05})
+    both = made(stroke, probs={"flat": 0.05, "top": 0.9, "back": 0.05})
+    assert both.T == pytest.approx(min(1.0, trained.T + 0.5)) and both.T > trained.T and both.A >= trained.A
+
+
+def test_a_stroke_moves_the_landing_point_across_the_table_and_it_stays_on_the_table():
+    moved = made(strokepath.ReturnShape(aim_shift=0.1, loft_m=0.0, topspin=0.0, sidespin=0.0))
+    assert moved.aim_a == pytest.approx(made().aim_a + 0.1 * 1.6)
+    far = made(strokepath.ReturnShape(aim_shift=0.3, loft_m=0.0, topspin=0.0, sidespin=0.0), paddle_a=0.95)
+    assert far.aim_a == pytest.approx(shot.aim_from_a(1.0))
+    left = made(strokepath.ReturnShape(aim_shift=-0.3, loft_m=0.0, topspin=0.0, sidespin=0.0), paddle_a=0.05)
+    assert left.aim_a == pytest.approx(shot.aim_from_a(0.0))
+

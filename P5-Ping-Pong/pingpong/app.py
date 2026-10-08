@@ -267,7 +267,7 @@ def _spin_text(top, side):
 def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=None, client=None,
                  source="live", scope="record_session", no_publish=False, seed=1, box=None,
                  omega_lo=300.0, omega_hi=1200.0, t_pk=250.0, spin_probs_fn=None, learner=None, resume=False,
-                 latency=None, hand_model=None, hold_start=False):
+                 latency=None, hand_model=None, hold_start=False, shot_model=None, wrist_axis=None):
     clock = clock or FakeClock(start_ns=1_000_000_000)
     latency = latency or latency_mod.Latency.from_config()
     box = box or DEFAULT_BOX
@@ -277,7 +277,8 @@ def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=Non
     game = GameCore(judge=HitJudge(box, t_pk=t_pk, contact_lag_s=latency.contact_lag_s), tracker=tracker,
                     policy=CpuPolicy(random.Random(seed), learner=learner),
                     publisher=publisher, level=levels.LEVELS[level], mode=mode, target_points=target,
-                    omega_lo=omega_lo, omega_hi=omega_hi, spin_probs_fn=spin_probs_fn)
+                    omega_lo=omega_lo, omega_hi=omega_hi, spin_probs_fn=spin_probs_fn, shot_model=shot_model,
+                    wrist_axis=wrist_axis)
     return Session(game, clock, actuator=actuator, latency=latency, hand_model=hand_model,
                    hold_start=holdstart.HoldStart() if hold_start else None,
                    mqtt_status=(lambda: "ok") if client is not None and not no_publish else None)
