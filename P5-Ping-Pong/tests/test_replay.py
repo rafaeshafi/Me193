@@ -52,7 +52,7 @@ def test_a_replay_reproduces_pauses_and_the_rally_that_carried_on(tmp_path):
 
 
 def test_a_wider_window_turns_a_late_miss_into_a_hit_on_the_same_recorded_swing(tmp_path):
-    rig = fakerig.FakeRig(record_dir=tmp_path / "late", timing_s=0.25)               # Rookie accepts +180 ms
+    rig = fakerig.FakeRig(record_dir=tmp_path / "late", timing_s=0.33)               # Rookie accepts +280 ms
     rig.run(until=lambda: rig.game.phase == "MATCH_OVER", max_s=60)
     rig.close()
     late = recorder.load(tmp_path / "late")

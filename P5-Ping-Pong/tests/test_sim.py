@@ -32,7 +32,7 @@ def test_a_higher_level_makes_the_computer_miss_less_at_every_swing_strength(tab
 def test_a_perfect_player_never_faults_and_rallies_shrink_as_the_computer_misses_more(table):
     assert all(r["fault_rate"] == 0.0 for r in table)
     soft, hard = cell(table, 1, "soft"), cell(table, 1, "hard")
-    assert soft["rally"] > 3 * hard["rally"]
+    assert soft["rally"] > 2.5 * hard["rally"]
 
 
 def test_a_sloppy_player_faults_on_hard_swings_where_the_threshold_is_low():

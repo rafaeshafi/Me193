@@ -35,10 +35,12 @@ class Level:
 
 LEVELS = {
     # (a hit that ended a game as a "fault" looked like a bug: Rookie and Club never fault, only Pro and Insane do)
-    1: Level("Rookie", 1, 2.5, 0.50, 0.22, 0.70, 0.40, 1.2, 0.10, 0.25, INF, 0.0, 5.0, 0.20, 3.0, 0.6),
-    2: Level("Club", 2, 5.0, 0.30, 0.16, 0.55, 0.28, 2.2, 0.06, 0.15, 1.0, 0.2, 7.0, 0.35, 2.0, 0.8),
-    3: Level("Pro", 3, 7.0, 0.22, 0.12, 0.42, 0.18, 3.5, 0.03, 0.08, 0.4, 0.4, 9.0, 0.50, 0.42),
-    4: Level("Insane", 4, 9.5, 0.15, 0.08, 0.30, 0.10, 5.0, 0.01, 0.04, 0.15, 0.7, 11.0, 0.65, 0.35),
+    # 10/8: every level eased after play (slower balls, a wider paddle, balls nearer the middle, a computer that is slower to reach them,
+    # misses more and wrong-foots less), keeping the order of the levels and the gaps between their speeds
+    1: Level("Rookie", 1, 2.0, 0.60, 0.28, 0.85, 0.45, 1.0, 0.16, 0.25, INF, 0.0, 4.0, 0.15, 3.0, 0.5),
+    2: Level("Club", 2, 3.8, 0.38, 0.21, 0.70, 0.34, 1.8, 0.10, 0.15, 1.4, 0.1, 6.0, 0.28, 2.0, 0.65),
+    3: Level("Pro", 3, 5.2, 0.28, 0.15, 0.55, 0.24, 2.8, 0.06, 0.08, 0.7, 0.25, 8.0, 0.40, 0.55, 0.8),
+    4: Level("Insane", 4, 7.0, 0.20, 0.10, 0.40, 0.15, 4.0, 0.03, 0.04, 0.3, 0.5, 10.0, 0.55, 0.45),
 }
 
 

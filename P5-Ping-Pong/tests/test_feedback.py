@@ -1,7 +1,7 @@
 from pingpong import feedback, haptics, levels
 from pingpong.events import GameEvent
 
-ROOKIE, CLUB, PRO = (levels.LEVELS[i] for i in (1, 2, 3))
+ROOKIE, CLUB, PRO, INSANE = (levels.LEVELS[i] for i in (1, 2, 3, 4))
 
 
 def ev(kind, **data):
@@ -24,11 +24,12 @@ def test_hit_labels_map_to_their_own_cues():
 
 
 def test_early_and_late_motor_cues_degrade_when_the_flight_is_too_short_to_feel_them():
-    # Pro flies in 0.43 s: no free time for two-tick cues, so they become beep + light only
-    assert feedback.pattern_for(ev("hit", label="early"), PRO) == "hit_good"
-    assert feedback.pattern_for(ev("hit", label="late"), PRO) == "hit_good"
-    assert feedback.pattern_for(ev("hit", label="early"), CLUB) == "hit_early"      # 0.60 s: fine
-    assert feedback.pattern_for(ev("hit", label="perfect"), PRO) == "hit_perfect"   # the thump always plays
+    # Insane flies in 0.43 s: no free time for two-tick cues, so they become beep + light only
+    assert feedback.pattern_for(ev("hit", label="early"), INSANE) == "hit_good"
+    assert feedback.pattern_for(ev("hit", label="late"), INSANE) == "hit_good"
+    assert feedback.pattern_for(ev("hit", label="early"), PRO) == "hit_early"       # 0.58 s: fine (before the levels were eased Pro was 0.43 s)
+    assert feedback.pattern_for(ev("hit", label="early"), CLUB) == "hit_early"      # 0.79 s: fine
+    assert feedback.pattern_for(ev("hit", label="perfect"), INSANE) == "hit_perfect"   # the thump always plays
 
 
 def test_misses_and_faults_buzz_and_records_celebrate():

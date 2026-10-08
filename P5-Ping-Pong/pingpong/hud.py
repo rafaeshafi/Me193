@@ -23,6 +23,10 @@ NAVY, SKY, CORAL, ORANGE, GOLD = rgb(24, 48, 96), rgb(54, 160, 255), rgb(255, 10
 MINT, PURPLE, SLATE = rgb(54, 190, 112), rgb(150, 100, 240), rgb(112, 126, 150)
 LOW_BATTERY = 20                 # percent: the hub's number goes amber below this
 PING_OK_MS = 400                 # a line slower than this (there and back) is shown as a worry in an online game
+# The words over the game sit in the margin between the two cards, above the highest the ball ever is (its racket, y 142 at 1280 x 720):
+# in front of the table they hid the ball coming at you.
+MESSAGE_Y, MESSAGE_SIZE, MESSAGE_W = 52, 44, 560
+GO_SIZE, GO_Y = 100, 62
 PIP_SIZE = (256, 144)            # the camera picture in the corner (px)
 CARD_W, CARD_H = 318, 100
 LABEL_COLOR = {"perfect": GOLD, "good": MINT, "early": ORANGE, "late": ORANGE}
@@ -174,8 +178,8 @@ def _status(frame, s, h):
 
 
 # --- what is happening ----------------------------------------------------------------------------------------------------------------
-def _banner(frame, w, cy, text, color, size=64):
-    size = fonts.fit_size(text, w - 220, max_size=size, min_size=26)
+def _banner(frame, w, cy, text, color, size=64, max_w=None, min_size=26):
+    size = fonts.fit_size(text, max_w or w - 220, max_size=size, min_size=min_size)
     tw, _ = fonts.measure(text, size)
     ui.panel(frame, w / 2 - tw / 2 - 48, cy - size * 0.75, tw + 96, size * 1.5, radius=int(size * 0.75),
              fill=(color, tuple(int(c * 0.78) for c in color)), opacity=1.0, border=WHITE, border_px=5)
@@ -278,9 +282,9 @@ def _hit_pop(frame, s, w, h):
 def _message(frame, s, w, h):
     if not s.message:
         return
-    if s.message == "GO!":                                                # the first ball: a big word in the middle
-        ui.glow(frame, w / 2, h / 2 + 30, 230, MINT, 0.5)
-        fonts.draw(frame, "GO!", w / 2, h / 2 + 30, 170, WHITE, outline=NAVY, outline_px=12, shadow=(0, 9, NAVY, 0.3))
+    if s.message == "GO!":                                                # the first ball: a big word over its far end, not in its way
+        ui.glow(frame, w / 2, GO_Y, 110, MINT, 0.5)
+        fonts.draw(frame, "GO!", w / 2, GO_Y, GO_SIZE, WHITE, outline=NAVY, outline_px=9, shadow=(0, 6, NAVY, 0.3))
         return
     color = PURPLE if "RECORD" in s.message else rgb(255, 160, 20)
     if s.phase == "LOBBY":                                                # a standing notice: below the start prompt
@@ -289,7 +293,7 @@ def _message(frame, s, w, h):
         for i, line in enumerate(lines):
             fonts.draw(frame, line, w / 2, 490 + 40 * i, 30, rgb(150, 90, 0), anchor="mm")
     else:
-        _banner(frame, w, 150, s.message, color, size=54)
+        _banner(frame, w, MESSAGE_Y, s.message, color, size=MESSAGE_SIZE, max_w=MESSAGE_W - 96, min_size=16)
 
 
 def _xray(frame, s, w):

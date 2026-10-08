@@ -1,5 +1,6 @@
 """CpuPolicy: serve selection (softmax over wrong-footing zones) and the Match miss model."""
 
+import dataclasses
 import random
 
 import pytest
@@ -31,10 +32,13 @@ def test_rookie_uses_a_uniform_softmax_over_all_nine_zones():
 def test_a_sharp_opponent_wrong_foots_the_player():
     # player's hand is far left; a low temperature should aim to the RIGHT most of the time
     p = pol(5)
-    aims = [p.serve(INSANE, 0.5, 0, player_a=0.1, survival=False).aim_ab[0] for _ in range(300)]
+    sharp = dataclasses.replace(INSANE, softmax_temp=0.15)         # (the eased Insane is 0.3: the mechanism is what this tests)
+    aims = [p.serve(sharp, 0.5, 0, player_a=0.1, survival=False).aim_ab[0] for _ in range(300)]
     right = sum(1 for a in aims if a > 0.5) / len(aims)
     left = sum(1 for a in aims if a < 0.5) / len(aims)
     assert right > 0.6 and left < 0.05        # by the plan's utility the far edge gets ~69%
+    mild = [p.serve(INSANE, 0.5, 0, player_a=0.1, survival=False).aim_ab[0] for _ in range(300)]
+    assert 0.5 < sum(1 for a in mild if a > 0.5) / len(mild) < right      # the eased hardest level still wrong-foots, less sharply
 
 
 def test_zone_utility_prefers_far_zones_and_penalises_the_edges_at_speed():
@@ -101,7 +105,7 @@ def test_match_decisions_follow_the_probability():
     p = pol(4)
     easy = sum(p.returns(ROOKIE, 4.0, 0.0, 0.0, survival=False) for _ in range(2000)) / 2000
     brutal = sum(p.returns(CLUB, 40.0, 1.0, 5.0, survival=False) for _ in range(2000)) / 2000
-    assert easy > 0.85 and brutal < 0.1
+    assert easy > 1.0 - ROOKIE.p0 - 0.05 and brutal < 0.1          # a slow plain ball is returned all but the level's base miss rate
 
 
 def test_same_seed_gives_the_same_serve_sequence():

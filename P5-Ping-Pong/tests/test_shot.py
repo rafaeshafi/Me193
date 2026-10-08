@@ -56,8 +56,9 @@ def test_a_perfect_hit_can_never_fault_at_any_level_or_strength():
 
 def test_a_sloppy_smash_faults_out_and_a_sloppy_medium_hit_faults_into_the_net_at_pro():
     pro = levels.LEVELS[3]
-    assert shot.fault_for(1.0, 0.4, pro) == "out"         # 1.0 * 0.6 = 0.6 > 0.42, s > 0.7
-    assert shot.fault_for(0.6, 0.1, pro) == "net"         # 0.6 * 0.9 = 0.54 > 0.42, s <= 0.7
+    assert shot.fault_for(1.0, 0.4, pro) == "out"         # 1.0 * 0.6 = 0.6 > 0.55, s > 0.7
+    assert shot.fault_for(0.65, 0.0, pro) == "net"        # 0.65 * 1.0 = 0.65 > 0.55, s <= 0.7
+    assert shot.fault_for(0.6, 0.1, pro) is None          # 0.6 * 0.9 = 0.54: a mildly sloppy hit does not fault since the levels were eased
     assert shot.fault_for(0.6, 0.9, pro) is None
 
 

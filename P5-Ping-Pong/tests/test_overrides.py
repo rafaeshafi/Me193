@@ -48,7 +48,7 @@ def test_a_level_setting_changes_every_level_and_survives_a_change_of_level():
 def test_the_arrival_window_can_be_tuned_live_with_set_level_reach():
     rig = fakerig.FakeRig(level=1)
     overrides.apply(rig.rig, {"level": {"reach": 0.4}})
-    assert rig.game.level.reach == 0.4 and levels.LEVELS[1].reach == 0.6
+    assert rig.game.level.reach == 0.4 and levels.LEVELS[1].reach == 0.5
     plans = [rig.game.policy.serve(rig.game.level, 0.5, 0, 0.5, False) for _ in range(50)]
     assert all(abs(a - 0.5) <= 0.35 * 0.4 + 1e-9 for a, _ in (p.aim_ab for p in plans))
 

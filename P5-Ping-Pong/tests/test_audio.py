@@ -248,3 +248,17 @@ def test_the_tunes_are_made_in_the_background_as_soon_as_the_sound_starts_so_no_
     silent = audio.Audio(backend=FakeSound(), music=False)
     silent.start()
     assert silent.prewarm is None
+
+
+def test_the_intro_is_ready_the_moment_the_sound_starts_so_its_big_hit_lands_with_the_camera():
+    # the intro's clock starts at the game's first frame, so the tune must not be made then (the frame would wait and the hit would be late)
+    from pingpong import music
+
+    music.render.cache_clear()
+    a = audio.Audio(backend=FakeSound())
+    a.start()
+    before = music.render.cache_info()
+    music.render("intro")
+    after = music.render.cache_info()
+    assert after.hits == before.hits + 1 and after.misses == before.misses                          # a hit: nothing was made just now
+    a.prewarm.join(timeout=10)

@@ -94,7 +94,7 @@ def test_the_policy_updates_the_learner_from_what_the_game_reports():
     q = qbandit.QBandit(alpha=1.0, gamma=0.0, rng=random.Random(0), epsilon=0.0, floor=0.0)
     p = policy.CpuPolicy(random.Random(1), learner=q)
     plan = p.serve(levels.LEVELS[3], 0.5, 0, 0.5, False)
-    zone = policy.ZONES.index(plan.aim_ab)
+    zone = next(i for i, z in enumerate(policy.ZONES) if policy.in_reach(z, levels.LEVELS[3].reach) == plan.aim_ab)
     p.observe(0.3, terminal=False)
     assert q.table.sum() == 0.0                                         # waits for the next serve to learn from it
     p.serve(levels.LEVELS[3], 0.5, 1, 0.5, False)

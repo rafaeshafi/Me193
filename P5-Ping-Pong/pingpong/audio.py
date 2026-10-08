@@ -196,7 +196,8 @@ class Audio:
                                                 latency="low", callback=self._callback, **options)
             self._stream.start()
             self.enabled = True
-            if self.music_on:                              # the tunes are numbers to make: do it now, off the game's thread
+            if self.music_on:                              # the tunes are numbers to make: the intro now (its clock starts at the game's
+                render("intro")                            # first frame, so a frame must never wait for it), the rest off the game's thread
                 self.prewarm = threading.Thread(target=lambda: [render(name) for name in music_module.TRACKS], daemon=True)
                 self.prewarm.start()
             self._apply_music()

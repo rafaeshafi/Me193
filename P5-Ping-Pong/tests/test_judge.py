@@ -99,7 +99,7 @@ def test_j2_hand_far_from_the_ball_is_rejected_and_explains_itself():
 def test_j2_touch_then_swing_elsewhere_is_rejected():
     # the hand WAS on the ball during the approach, but at the impact it is far away
     on_ball = poses(T_I)[:-1]
-    away = PaddlePose(t_scene_ns=T_I + int(0.02 * S), u=0.9, v=0.45, conf=0.9, hand="right")
+    away = PaddlePose(t_scene_ns=T_I + int(0.02 * S), u=1.6 * CLUB.radius_sw + 0.2, v=0.45, conf=0.9, hand="right")      # beyond 1.6 radii
     v = judge().judge(swing(), ball(), on_ball + [away], now_ns=T_C)
     assert v.kind == "REJECTED" and not gate(v, "J2").passed
 
@@ -122,7 +122,7 @@ def test_j2_looks_across_the_court_only_how_high_the_hand_is_does_not_matter():
 
 def test_j2_measures_against_where_the_ball_is_at_the_contact_when_it_has_a_flight():
     # the ball is still moving sideways: from x = +0.75 m towards the middle, it is not yet at its aim when you swing early
-    pro = levels.LEVELS[3]
+    pro = levels.LEVELS[4]                                      # (a fast ball, as Pro was before the levels were eased: it moves sideways quickly)
     leg = physics.plan_leg(T_C - round(3.0 / pro.v_tier * S), pro.v_tier, 0.75, (0.5, 0.5))
     early = T_I - round(0.18 * S)
     x_there = leg.position(early + round(LAG * S))[0]
@@ -197,7 +197,7 @@ def test_j6_shake_lock_blocks_everything_until_it_expires():
 
 def test_miss_deadline_includes_the_measured_detection_lag():
     j = judge(d95_s=0.12)
-    assert j.miss_deadline_ns(ball()) == T_C + int((CLUB.late_s + 0.12) * S)
+    assert j.miss_deadline_ns(ball()) == T_C + round((CLUB.late_s + 0.12) * S)
 
 
 def test_a_late_swing_detected_after_the_plane_still_counts():

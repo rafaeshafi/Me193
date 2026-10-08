@@ -18,7 +18,7 @@ def test_easier_levels_throw_the_ball_into_a_smaller_part_of_the_reach_box():
     # the first live game: a Rookie was served to the far corners of a box he had stretched to reach, and never got there
     reach = [levels.LEVELS[i].reach for i in (1, 2, 3, 4)]
     assert reach == sorted(reach) and reach[-1] == 1.0
-    assert levels.LEVELS[1].reach == 0.6 and levels.LEVELS[2].reach == 0.8
+    assert levels.LEVELS[1].reach == 0.5 and levels.LEVELS[2].reach == 0.65 and levels.LEVELS[3].reach == 0.8
 
 
 def test_names_and_tags_line_up_with_the_printed_cards():
@@ -34,8 +34,16 @@ def test_rookie_is_slow_enough_to_find_the_ring_and_bring_the_hand_to_it():
     assert levels.MODE_NAMES == {"survival": "RALLY", "match": "MATCH"}
 
 
-def test_flight_times_at_three_metres_match_the_plan_table():
-    assert [round(3.0 / levels.LEVELS[i].v_tier, 2) for i in (1, 2, 3, 4)] == [1.2, 0.60, 0.43, 0.32]
+def test_flight_times_at_three_metres_match_the_readmes_level_table():
+    assert [round(3.0 / levels.LEVELS[i].v_tier, 2) for i in (1, 2, 3, 4)] == [1.5, 0.79, 0.58, 0.43]
+
+
+def test_every_level_is_forgiving_enough_to_play_from_across_the_room():
+    # 10/8, after playing them: each level was too hard, so each is slower to react to, wider to hit and easier to beat in a match
+    assert [3.0 / levels.LEVELS[i].v_tier >= t for i, t in zip((1, 2, 3, 4), (1.4, 0.75, 0.55, 0.40))] == [True] * 4
+    assert [levels.LEVELS[i].radius_sw >= r for i, r in zip((1, 2, 3, 4), (0.80, 0.65, 0.50, 0.38))] == [True] * 4
+    assert [levels.LEVELS[i].p0 >= p for i, p in zip((1, 2, 3, 4), (0.15, 0.09, 0.05, 0.025))] == [True] * 4
+    assert levels.LEVELS[3].fault_th >= 0.5                                  # Pro still faults a hard sloppy hit, but not a mildly sloppy one
 
 
 @pytest.mark.parametrize("easier, harder", [(1, 2), (2, 3), (3, 4)])

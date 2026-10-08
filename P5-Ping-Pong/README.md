@@ -138,7 +138,10 @@ like to say; after a **face-off** with the two of you and a big VS comes the 3-2
 (or the new record), the numbers (hits, longest rally, top speed, time) and the leaderboard, with **PLAY AGAIN** and **CHANGE
 OPPONENT**. Your avatar is made from your name (the same one every time), the people on the terrace cheer, and the opponent
 at the far end cheers or sulks with the score. All the pictures and music are drawn and synthesised by the game itself
-(`pingpong/resort*.py`, `characters.py`, `screens*.py`, `intro.py`, `music.py`); they are original, nothing is loaded from disk.
+(`pingpong/resort*.py`, `characters.py`, `screens*.py`, `intro.py`, `music.py`); they are original, nothing is loaded from disk. The
+music is a 128-beats-a-minute dance loop for the menus (a kick on every beat, claps on two and four, hats, a bass and chord stabs that
+pump with the kick, an arpeggio and a marimba hook) and an intro that builds up through a riser and a snare roll, takes a breath, and
+drops its biggest hit on the frame the camera lands.
 
 **Pointing.** Your hand is the cursor over the whole screen: its place in your calibrated reach box is where the little paddle
 stands, so reaching to the top right of your reach is reaching the top right of the screen. Hold it on a button until the fill
@@ -170,9 +173,13 @@ Rally/Match.
 
 | Level | ball speed | flight (3 m) | hit window early / late | reach across the table | faults | balls arrive in |
 |---|---|---|---|---|---|---|
-| Rookie | 2.5 m/s | 1.2 s | 0.50 / 0.22 s | 0.70 shoulder widths | never | the middle 60% of your reach box |
-| Club | 5.0 m/s | 0.60 s | 0.30 / 0.16 s | 0.55 | never | the middle 80% |
-| Pro | 7.0 m/s | 0.43 s | 0.22 / 0.12 s | 0.42 | hard and sloppy | the whole box |
+| Rookie | 2.0 m/s | 1.5 s | 0.60 / 0.28 s | 0.85 shoulder widths | never | the middle 50% of your reach box |
+| Club | 3.8 m/s | 0.79 s | 0.38 / 0.21 s | 0.70 | never | the middle 65% |
+| Pro | 5.2 m/s | 0.58 s | 0.28 / 0.15 s | 0.55 | very hard and sloppy | the middle 80% |
+
+(Eased on 10/8: every level was slower to react to, wider to hit and easier to beat in a Match than the first version, whose
+numbers were 2.5 / 5.0 / 7.0 m/s and a reach of 0.70 / 0.55 / 0.42. Every number is in `pingpong/levels.py`, and `--set level.radius_sw=0.9`,
+`level.v_tier=3` and the rest tune one for a run.)
 
 **What the screen shows.** A blue table in perspective on a sunny terrace, seen from behind your end (the camera that draws it
 is 1.4 m up and 1.8 m behind your edge, pitched down 28 degrees; `pingpong/court3d.py`). The **red paddle is yours**: it stands

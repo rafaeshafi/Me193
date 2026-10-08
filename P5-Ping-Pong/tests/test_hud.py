@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from pingpong import canvas, fonts, holdstart, hud, ui
+from pingpong import canvas, court3d, fonts, holdstart, hud, levels, physics, scene, ui
 from pingpong.events import GateResult
 
 W, H = 1280, 720
@@ -335,13 +335,54 @@ def test_a_fist_round_the_handle_can_be_any_skin():
     assert tuple(frame[round(gy), round(gx)]) == (10, 200, 30)
 
 
-def test_go_is_a_big_word_in_the_middle_of_the_screen_not_a_banner(monkeypatch):
+def test_go_is_a_big_word_over_the_far_end_where_the_ball_comes_from_not_a_banner_in_its_way(monkeypatch):
     sizes = {}
     real = fonts.draw
     monkeypatch.setattr(fonts, "draw", lambda frame, text, x, y, size, *a, **kw: (sizes.setdefault(text, (x, y, size)), real(frame, text, x, y, size, *a, **kw))[1])
     hud.render(state(phase="RALLY", message="GO!"), size=(W, H))
     x, y, size = sizes["GO!"]
-    assert size >= 120 and abs(x - W / 2) < 5 and H * 0.4 < y < H * 0.7
+    assert size >= 90 and abs(x - W / 2) < 5 and y < H * 0.15
+
+
+# --- nothing drawn over the game hides the ball on its way to you ---------------------------------------------------------------------------------
+def ball_discs(step_s=0.04):
+    """Where the ball is on the screen (centre, radius with its rim) all the way along the computer's serves at the three levels you can
+    choose: from its racket to your paddle and on past you, from the left, the middle and the right, to the left, the middle and the right."""
+    cam = court3d.Camera.for_frame(W, H)
+    discs = []
+    for tag in (1, 2, 3):
+        for x_start in (-0.4, 0.0, 0.4):
+            for aim in (0.15, 0.5, 0.85):
+                leg = physics.plan_leg(0, levels.LEVELS[tag].v_tier, x_start, (aim, 0.5))
+                t = leg.t0_ns
+                while t <= leg.arrival_ns + int(0.15 * 1e9):
+                    px, py, scale = cam.project(*leg.position(t))
+                    discs.append((px, py, max(4, round(scene.BALL_R_M * scale)) + 2))
+                    t += int(step_s * 1e9)
+    return discs
+
+
+IN_GAME_WORDS = ("NEW RECORD", "MISSED", "FAULT: OUT", "PAUSED: hub, pose lost", "WAITING FOR MAXIMILIANA-LOUISE...", "GO!")
+
+
+@pytest.mark.parametrize("message", IN_GAME_WORDS)
+def test_the_words_over_the_game_never_hide_the_ball_on_its_way_to_you(message):
+    plain = hud.render(state(phase="RALLY", mode="match", opponent_name="MAYA"), size=(W, H))
+    noted = hud.render(state(phase="RALLY", mode="match", opponent_name="MAYA", message=message), size=(W, H))
+    changed = np.abs(noted.astype(np.int32) - plain.astype(np.int32)).sum(axis=2) > 60            # (a soft glow's faint tint is not covering)
+    assert changed.sum() > 500                                                                    # (the words are there)
+    for px, py, r in ball_discs():
+        y0, y1, x0, x1 = max(0, int(py - r - 2)), min(H, int(py + r + 3)), max(0, int(px - r - 2)), min(W, int(px + r + 3))
+        assert not changed[y0:y1, x0:x1].any(), (message, round(px), round(py))
+
+
+def test_the_words_over_the_game_stay_clear_of_the_two_cards_and_inside_the_frame():
+    plain = hud.render(state(phase="RALLY", mode="match", opponent_name="MAYA"), size=(W, H))
+    for message in IN_GAME_WORDS[:5]:
+        noted = hud.render(state(phase="RALLY", mode="match", opponent_name="MAYA", message=message), size=(W, H))
+        rows, cols = np.where(np.abs(noted.astype(np.int32) - plain.astype(np.int32)).sum(axis=2) > 60)
+        assert cols.min() > 20 + hud.CARD_W and cols.max() < W - 20 - hud.CARD_W, message          # between the cards
+        assert rows.min() >= 0 and rows.max() < 130, message
 
 
 # --- a friend online ------------------------------------------------------------------------------------------------------------------------------
