@@ -152,3 +152,17 @@ def test_no_j4_numbers_means_no_camera_line():
 def test_an_offset_close_to_zero_says_the_lag_constant_is_fine():
     text = sessionreport.format_report(sessionreport.summarize(_session_with_j4([-8, 5, 0, 12, -3])))
     assert "keep CAMERA_LAG_S" in text
+
+
+def test_the_report_counts_the_spin_the_player_made_and_says_when_hits_were_by_hand_contact(tmp_path):
+    rig = record(tmp_path)
+    rig.close()
+    s = summarise(tmp_path)
+    assert s["hit_mode"] == "swing" and s["spin"] == {"top": 0, "back": 0, "right": 0, "left": 0, "flat": 5}
+    assert "Hit timing vs the ball" in sessionreport.format_report(s)
+    s["hit_mode"] = "contact"
+    s["spin"] = {"top": 6, "back": 1, "right": 2, "left": 0, "flat": 9}
+    text = sessionreport.format_report(s)
+    assert "by hand contact" in text and "Hit timing vs the ball" not in text            # contact hits are on time by definition
+    assert "6 topspin, 1 backspin, 2 sidespin right, 0 sidespin left, 9 flat" in text
+

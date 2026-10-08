@@ -105,7 +105,17 @@ def spin_from_flick(dev, frame, model):
     return top, side
 
 
+def read_flick_detail(samples, contact_ns, imu_delay_ns, model, frame, baseline):
+    """What the wrist did around contact_ns: the mean turn (dps) the samples show, how far it is beyond the player's usual,
+    and the spin that makes (rate and dev are None when the hub told nothing)."""
+    lo, hi = window_ns(contact_ns, imu_delay_ns, model)
+    rate = mean_rate(samples, lo, hi)
+    dev = baseline.deviation(rate)
+    top, side = spin_from_flick(dev, frame, model)
+    return {"rate": rate, "dev": None if rate is None else dev, "topspin": top, "sidespin": side}
+
+
 def read_flick(samples, contact_ns, imu_delay_ns, model, frame, baseline):
     """(topspin, sidespin) of the stroke whose paddle met the ball at contact_ns, from the gyro samples around it."""
-    lo, hi = window_ns(contact_ns, imu_delay_ns, model)
-    return spin_from_flick(baseline.deviation(mean_rate(samples, lo, hi)), frame, model)
+    detail = read_flick_detail(samples, contact_ns, imu_delay_ns, model, frame, baseline)
+    return detail["topspin"], detail["sidespin"]

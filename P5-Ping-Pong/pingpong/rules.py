@@ -272,7 +272,8 @@ class GameCore:
         verdict = Verdict("HIT", shotmod.quality(met.d_sw, 0.0, ball.level)[0], 0.0, met.d_sw, gates, met.t_ns)
         paddle_a = self.judge.box.to_ab(met.u, met.v)[0]
         aim_a = min(1.0, max(0.0, 0.5 + (paddle_a - 0.5) / self.level.reach))
-        launch_ns = max(now_ns, met.t_ns + round(model.hold_s * S))
+        hold_s = max(model.hold_s, model.flick_after_s + self.imu_delay_s + 0.01)     # never shorter than the flick's window needs
+        launch_ns = max(now_ns, met.t_ns + round(hold_s * S))
         # the ball sits on the paddle until it is let go; this return only holds it there (the real one is planned then)
         self.outgoing_leg = physics.plan_return(launch_ns, shotmod.out_speed(strength), met.ball, (aim_a, 0.5))
         self.held = (met.t_ns, met.ball)
@@ -289,12 +290,12 @@ class GameCore:
                             flick_at=p["met_ns"], met_ns=p["met_ns"])
 
     def _read_flick(self, met_ns):
-        """(topspin, sidespin) from how the hub turned around the moment the paddle met the ball."""
+        """How the hub turned around the moment the paddle met the ball: flick.read_flick_detail's dict."""
         if self.gyro_window is None or self.wrist_frame is None:
-            return 0.0, 0.0
+            return {"rate": None, "dev": None, "topspin": 0.0, "sidespin": 0.0}
         delay = round(self.imu_delay_s * S)
         lo, hi = flick.window_ns(met_ns, delay, self.shot_model)
-        return flick.read_flick(self.gyro_window(lo, hi), met_ns, delay, self.shot_model, self.wrist_frame, self._flick)
+        return flick.read_flick_detail(self.gyro_window(lo, hi), met_ns, delay, self.shot_model, self.wrist_frame, self._flick)
 
     # --- the ball leaves the paddle --------------------------------------------------------------------------------------------------
     def _launch(self, *, ball, contact_ns, contact, verdict, strength, path, paddle_a, probs, now_ns, flick_at=None, met_ns=None):
@@ -303,8 +304,9 @@ class GameCore:
         # the balls come in a level's share of the box, so the hand's lateral range is that share too: the aim spreads it
         # back over the whole table (wide returns are how a point is won)
         aim_a = min(1.0, max(0.0, 0.5 + (paddle_a - 0.5) / self.level.reach))
-        top, side = (0.0, 0.0) if flick_at is None else self._read_flick(flick_at)
-        stroke = strokepath.shape_return(path, top, side, self.shot_model)
+        wrist = self._read_flick(flick_at) if flick_at is not None else {"rate": None, "dev": None, "topspin": 0.0,
+                                                                         "sidespin": 0.0}
+        stroke = strokepath.shape_return(path, wrist["topspin"], wrist["sidespin"], self.shot_model)
         sp = shotmod.make(w_pk=0.0, omega_lo=self.omega_lo, omega_hi=self.omega_hi, d_min_sw=verdict.d_min_sw,
                           e_s=verdict.e_s, level=self.level, paddle_a=aim_a, spin_probs=probs, stroke=stroke,
                           strength=strength)
@@ -318,7 +320,8 @@ class GameCore:
                 "contact_ns": contact_ns, "contact": contact, "mode": self.hit_mode,
                 "stroke": {"vu": 0.0 if path is None else path.vu, "vv": 0.0 if path is None else path.vv,
                            "aim_shift": stroke.aim_shift, "loft_m": stroke.loft_m, "topspin": stroke.topspin,
-                           "sidespin": stroke.sidespin}}
+                           "sidespin": stroke.sidespin},
+                "flick": {"rate": wrist["rate"], "dev": wrist["dev"]}}
         if met_ns is not None:
             data["met_ns"] = met_ns                                   # when the ball met the paddle; contact_ns is when it left it
         self._observe(1.0 if sp.fault else 0.5 * (1.0 - sp.q_total), bool(sp.fault))

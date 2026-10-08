@@ -203,3 +203,29 @@ def test_a_session_started_in_swing_mode_still_hits_with_a_swing_only():
     game, _ = make()
     start_rally(game)
     assert game.hit_mode == "swing"
+
+
+def test_the_hold_always_covers_the_flicks_window_even_when_that_is_stretched():
+    game = contact_game()
+    game.shot_model = dataclasses.replace(M, flick_after_s=0.25)
+    start = rally(game)
+    events, poses, t = drive(game, ball_hand(game), start, 0.0)
+    while game.held is None and t < start + 3 * S:
+        events, poses, t = drive(game, ball_hand(game), t, POSE_DT, poses, events)
+    assert game.held is not None
+    assert game.outgoing_leg.t0_ns - game.held[0] >= round((0.25 + game.imu_delay_s) * S)
+
+
+def test_a_hit_reports_what_the_wrist_did_so_the_spin_can_be_tuned_from_a_recording():
+    game = contact_game()
+    game.shot_model = dataclasses.replace(M, flick_warmup=1)
+    game.gyro_window = lambda lo, hi: flick_samples((40.0, 350.0, 0.0), around_ns=(lo + hi) // 2)
+    start = rally(game)
+    events, _, _ = drive(game, ball_hand(game), start, 1.7, stop_on="hit")
+    seen = next(e for e in events if e.kind == "hit").data["flick"]
+    assert seen["rate"] == pytest.approx((40.0, 350.0, 0.0)) and seen["dev"] == (0.0, 0.0, 0.0)       # the first hit learns the usual
+    blind = contact_game()
+    start = rally(blind)
+    events, _, _ = drive(blind, ball_hand(blind), start, 1.7, stop_on="hit")
+    assert next(e for e in events if e.kind == "hit").data["flick"] == {"rate": None, "dev": None}
+

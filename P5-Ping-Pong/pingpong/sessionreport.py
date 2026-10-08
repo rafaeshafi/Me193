@@ -94,11 +94,23 @@ def summarize(loaded):
         "swing_source": (meta.get("calibration") or {}).get("swing", {}).get("source", "imu"),
         "overrides": meta.get("overrides") or {},
         "pose": {"n": len(pose_t), "fps": (len(pose_t) - 1) / pose_span if pose_span > 0 else 0.0},
+        "hit_mode": meta.get("hit_mode", "swing"), "spin": _spin_counts(hits),
         "pose_lock": {"locked_out": vision.get("locked_out", 0), "frames": vision.get("frames", len(pose_t))},
         "pose_tracking": None if vision.get("lock") is None else {**vision["lock"], "frames": vision.get("frames", len(pose_t))},
         "pauses": _pauses(events, t0, end), "hub_trouble": sum(1 for e in events if e["k"] == "hub" and e["d"]["status"] != "ok"),
         "loop_p95_ms": summary["loop"]["p95_ms"] if summary else None,
     }
+
+
+def _spin_counts(hits, visible=0.15):
+    """How many hits had a topspin, a backspin, a sidespin to the right or left (more than `visible`: what the screen
+    labels), and how many were flat."""
+    top = sum(1 for h in hits if h.get("topspin", 0.0) > visible)
+    back = sum(1 for h in hits if h.get("topspin", 0.0) < -visible)
+    right = sum(1 for h in hits if h.get("sidespin", 0.0) > visible)
+    left = sum(1 for h in hits if h.get("sidespin", 0.0) < -visible)
+    flat = sum(1 for h in hits if abs(h.get("topspin", 0.0)) <= visible and abs(h.get("sidespin", 0.0)) <= visible)
+    return {"top": top, "back": back, "right": right, "left": left, "flat": flat}
 
 
 def _level_name(meta, events):
@@ -116,7 +128,12 @@ def format_report(s):
         lines.append("Settings changed from the defaults: " + overrides.format_settings(s["overrides"]))
     lines.append(f"Balls {s['balls']} | swings {s['swings']} | hits {s['hits']} | misses {s['misses']} | faults "
                  f"{s['faults']} | rejected {s['rejected']} | ignored {s['ignored']} | best streak {s['best_streak']}")
-    if t["n"]:
+    if s["hit_mode"] == "contact":
+        sp = s["spin"]
+        lines.append("Hits by hand contact (the hand moved into the ball); the wrist's spin: "
+                     f"{sp['top']} topspin, {sp['back']} backspin, {sp['right']} sidespin right, "
+                     f"{sp['left']} sidespin left, {sp['flat']} flat")
+    elif t["n"]:
         lines.append(f"Hit timing vs the ball (ms, negative = early): mean {t['mean']:+.0f}, p10 {t['p10']:+.0f}, "
                      f"p90 {t['p90']:+.0f} (n {t['n']})")
     if w["n"]:
