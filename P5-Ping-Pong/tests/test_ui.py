@@ -172,3 +172,21 @@ def test_confetti_before_it_starts_is_nothing():
     frame = blank()
     ui.confetti(frame, 0.0, seed=1)
     assert np.array_equal(frame, blank())
+
+
+def test_a_trophy_is_a_cup_on_a_foot_in_its_colour():
+    frame = blank()
+    ui.trophy(frame, 320, 180, 40, ORANGE)
+    assert px(frame, 320, 160) == ORANGE and px(frame, 320, 180 + 25) == ORANGE         # the cup, the stem or foot
+    assert px(frame, 320 + 80, 180) == (60, 60, 60)
+    assert changed(frame, blank()).sum() > 1500
+
+
+def test_things_still_growing_from_nothing_draw_nothing_and_do_not_fail():
+    frame = blank()
+    for scale in (0.0, 0.004, 0.02):
+        ui.pill(frame, 320, 180, 240, 76, "GO", fill=ORANGE, scale=scale, progress=0.5, fill_progress=(40, 200, 60))
+    ui.panel(frame, 100, 100, 0, 50)
+    ui.panel(frame, 100, 100, 1, 1)
+    assert np.array_equal(frame, blank())
+    assert ui.rounded_mask(0, 10, 3).shape == (10, 0) and ui.rounded_mask(10, 0, 3).shape == (0, 10)

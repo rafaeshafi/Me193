@@ -9,10 +9,11 @@ import math
 import random
 from collections import deque
 
-from pingpong import feedback, holdstart, levels
+from pingpong import feedback, holdstart, levels, uistate
 from pingpong import latency as latency_mod
 from pingpong.clock import FakeClock
 from pingpong.events import PaddlePose, SwingEvent
+from pingpong.flow import Flow
 from pingpong.hud import HudState
 from pingpong.judge import HitJudge
 from pingpong.mqtt_pub import ScorePublisher
@@ -30,10 +31,14 @@ FLASH = {"perfect": ((255, 255, 255), 0.25), "good": ((0, 200, 0), 0.18), "early
 
 class Session:
     def __init__(self, game, clock, actuator=None, mqtt_status=None, hub_status=None, latency=None, hand_model=None,
-                 hold_start=None):
+                 hold_start=None, flow=None):
         self.game, self.clock, self.actuator = game, clock, actuator
         self.hold_start = hold_start             # a holdstart.HoldStart: the game also starts when the hub is held on the START button
+        self.flow = flow                         # a flow.Flow: the intro, the title and the choices of game and opponent, and the results
         self._hand_ab = None                     # where the hand points in the reach box, for that button
+        self._t0_ns = clock.now_ns()             # the faces' animation clock starts here
+        self._last_summary, self._record_game = None, False       # how the last game went, for the results screen
+        self._cpu_mood, self._mood_until, self._point_for = "happy", 0, ""
         self._mqtt_status = mqtt_status or (lambda: "off")
         self._hub_status = hub_status or (lambda: "ok")
         self.latency = latency or latency_mod.Latency.from_config()
@@ -93,6 +98,11 @@ class Session:
         return self.game.start(self.clock.now_ns())
 
     def on_tag(self, tag):
+        if self.flow is not None:
+            actions = self.flow.on_tag(tag.role, tag.value, self.clock.now_ns())
+            if actions is not None:
+                self.apply(actions)
+                return
         if tag.role == "START":
             self.on_start()
         elif tag.role == "LEVEL":
@@ -120,11 +130,36 @@ class Session:
         self._flush_sounds(now)
         self._last_tick_ns = now
         self._hold_to_start(now)
+        self._flow_tick(now)
         return events
+
+    def _flow_tick(self, now):
+        """The screens round the game: the hand is their pointer, and what they decide is carried out here."""
+        if self.flow is None:
+            return
+        self._hand_ab = holdstart.hand_ab(self.game.judge.box, self.poses, now)
+        self.apply(self.flow.update(now, self._hand_ab, self.game.phase))
+
+    def apply(self, actions):
+        """Carry out what the flow asked for: start a game, make a sound, buzz the hub, change the music."""
+        for kind, value in actions or ():
+            if kind == "start":
+                self._start_game(*value)
+            elif kind == "sound" and self.audio is not None:
+                self.audio.play(value)
+            elif kind == "haptic" and self.actuator is not None:
+                self.actuator.submit(value)
+            elif kind == "music" and self.audio is not None:
+                self.audio.play_music(value)
+
+    def _start_game(self, level_tag, mode):
+        self.game.set_level(levels.LEVELS[level_tag])
+        self.game.set_mode(mode)
+        self.apply(self.flow.started(self.on_start()))
 
     def _hold_to_start(self, now):
         """The hub held on the START button for long enough starts the game, like the key and the card."""
-        if self.hold_start is None:
+        if self.hold_start is None or self.flow is not None:
             return
         self._hand_ab = holdstart.hand_ab(self.game.judge.box, self.poses, now)
         if self.hold_start.update(now, self._hand_ab, self.game.phase in holdstart.PHASES):
@@ -148,6 +183,7 @@ class Session:
         if self._stats_key != self.game.started_at_ns:
             self._stats_key = self.game.started_at_ns
             self._stats = {"hits": 0, "misses": 0, "faults": 0, "max_kmh": 0.0, "best_streak": 0}
+            self._last_summary, self._record_game, self._cpu_mood, self._mood_until = None, False, "happy", 0
         return self._stats
 
     def game_stats(self):
@@ -206,8 +242,11 @@ class Session:
                 st["misses"] += 1
             elif e.kind == "fault":
                 st["faults"] += 1
-            elif e.kind in ("game_over", "match_over") and self.on_game_over is not None:
-                self.on_game_over(self._summary(e))
+            elif e.kind in ("game_over", "match_over"):
+                self._last_summary = self._summary(e)
+                self._set_mood("sad" if e.data.get("winner") == "player" else "cheer", now, 600)
+                if self.on_game_over is not None:
+                    self.on_game_over(self._last_summary)
             if e.kind == "serve":
                 self.view.cpu_swing_ns = e.t_ns              # the computer hits the ball: its paddle swings
             if e.kind == "verdict":
@@ -216,7 +255,13 @@ class Session:
                 self._last_kmh, self._last_label = e.data["kmh"], e.data["label"]
                 self._spin = _spin_text(e.data["topspin"], e.data["sidespin"])
                 self._set_flash(FLASH.get(e.data["label"]), now)
+                if e.data["label"] == "perfect":
+                    self._set_mood("surprised", now, 1.2)
+            elif e.kind == "point":
+                self._point_for = e.data["scorer"]
+                self._set_mood("sad" if self._point_for == "player" else "cheer", now, 2.5)
             elif e.kind == "record":
+                self._record_game = True
                 self._set_message("NEW RECORD", now, 1.5)
             elif e.kind == "fault":
                 self._last_kmh, self._last_label = e.data["kmh"], "fault " + e.data["fault"]
@@ -225,6 +270,9 @@ class Session:
             elif e.kind == "miss":
                 self._set_message("MISSED", now, 1.5)
                 self._set_flash(FLASH["fault"], now)
+
+    def _set_mood(self, mood, now, seconds):
+        self._cpu_mood, self._mood_until = mood, now + round(seconds * S)
 
     def _set_message(self, text, now, seconds):
         self._message, self._message_until = text, now + round(seconds * S)
@@ -243,12 +291,19 @@ class Session:
         view = v.view_ns(now)
         paddle, rest = v.paddle(now, view)
         button = cursor = None
-        if self.hold_start is not None and g.phase in holdstart.PHASES:
+        if self.hold_start is not None and self.flow is None and g.phase in holdstart.PHASES:
             button, cursor = (self.hold_start.progress(), self.hold_start.inside), self._hand_ab
+        screen, ui_state, results = "GAME", None, None
+        if self.flow is not None and self.flow.active:
+            screen, ui_state = self.flow.screen, self.flow.ui_state(now, self._hand_ab)
+            if screen == "RESULTS" and self._last_summary is not None:
+                results = uistate.results_from_summary(self._last_summary, self._record_game)
+        digit = None if remaining is None else max(1, math.ceil(remaining))
         return HudState(
             phase=g.phase, mode=g.mode, level_name=g.level.name, streak=g.tracker.streak,
             record=g.tracker.record, player_points=g.player_points, cpu_points=g.cpu_points,
-            target=g.target_points, countdown=None if remaining is None else max(1, math.ceil(remaining)),
+            target=g.target_points, countdown=digit,
+            countdown_t=0.0 if digit is None else min(1.0, max(0.0, 1.0 - (remaining - (digit - 1)))),
             ball=v.ball(view), paddle=paddle, rest=rest, paddle_angle=v.paddle_angle, reach_m=v.reach_m(),
             zone=v.zone(now), cpu_x_m=v.cpu_x(view), cpu_swing=v.cpu_swing(view),
             last_kmh=self._last_kmh, last_label=self._last_label, spin_text=self._spin,
@@ -257,7 +312,9 @@ class Session:
                      or ((self._notice or self._soft_notice) if g.phase == "LOBBY" else "")),
             gates=self._gates, show_xray=self.xray,
             flash=self._flash if now < self._flash_until else None, leaderboard=tuple(leaderboard),
-            player_name=self.player, start_button=button, cursor=cursor)
+            player_name=self.player, start_button=button, cursor=cursor,
+            cpu_mood=self._cpu_mood if now < self._mood_until else "happy", anim_t=(now - self._t0_ns) / S,
+            point_for=self._point_for if g.phase == "POINT_OVER" else "", screen=screen, ui=ui_state, results=results)
 
     def _paused_text(self):
         if not self.game.paused:
@@ -278,7 +335,7 @@ def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=Non
                  source="live", scope="record_session", no_publish=False, seed=1, box=None,
                  omega_lo=300.0, omega_hi=1200.0, t_pk=250.0, spin_probs_fn=None, learner=None, resume=False,
                  latency=None, hand_model=None, hold_start=False, shot_model=None, hit_mode="swing", wrist_frame=None,
-                 gyro_window=None):
+                 gyro_window=None, flow=None):
     clock = clock or FakeClock(start_ns=1_000_000_000)
     latency = latency or latency_mod.Latency.from_config()
     box = box or DEFAULT_BOX
@@ -290,8 +347,10 @@ def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=Non
                     publisher=publisher, level=levels.LEVELS[level], mode=mode, target_points=target,
                     omega_lo=omega_lo, omega_hi=omega_hi, spin_probs_fn=spin_probs_fn, shot_model=shot_model,
                     hit_mode=hit_mode, wrist_frame=wrist_frame, gyro_window=gyro_window, imu_delay_s=latency.imu_s)
+    if flow is True:
+        flow = Flow(intro=True, level_tag=level, mode=mode)
     return Session(game, clock, actuator=actuator, latency=latency, hand_model=hand_model,
-                   hold_start=holdstart.HoldStart() if hold_start else None,
+                   hold_start=holdstart.HoldStart() if hold_start else None, flow=flow or None,
                    mqtt_status=(lambda: "ok") if client is not None and not no_publish else None)
 
 

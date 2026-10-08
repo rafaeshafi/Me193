@@ -21,6 +21,8 @@ CONFETTI = ((60, 90, 255), (60, 200, 255), (110, 220, 90), (255, 170, 60), (255,
 @lru_cache(maxsize=512)
 def rounded_mask(w, h, radius):
     """A w x h rectangle with rounded corners as an anti-aliased 0..255 mask (shared: do not write to it)."""
+    if w < 1 or h < 1:
+        return np.zeros((max(h, 0), max(w, 0)), dtype=np.uint8)
     ss = SUPERSAMPLE
     r = max(0, min(int(radius), w // 2, h // 2))
     big = np.zeros((h * ss, w * ss), dtype=np.uint8)
@@ -86,6 +88,8 @@ def pill(frame, cx, cy, w, h, label="", *, fill, text=WHITE, size=None, scale=1.
     """A button as long as it is round, centred on (cx, cy); `scale` pops it bigger; `progress` (0..1) sweeps
     `fill_progress` across it from the left, the dwell filling it up."""
     bw, bh = round(w * scale), round(h * scale)
+    if bw < 4 or bh < 4:                                                  # still growing from nothing
+        return
     x0, y0 = round(cx - bw / 2), round(cy - bh / 2)
     panel(frame, x0, y0, bw, bh, radius=bh // 2, fill=fill, opacity=opacity, border=outline, border_px=max(2, bh // 18),
           shadow=shadow)
@@ -176,3 +180,15 @@ def confetti(frame, t_s, *, seed, n=70):
         corners = [(cx + c * px - s * py, cy + s * px + c * py) for px, py in ((-size, -size / 2), (size, -size / 2),
                                                                                   (size, size / 2), (-size, size / 2))]
         cv2.fillConvexPoly(frame, np.array(corners, dtype=np.int32), color, cv2.LINE_AA)
+
+
+def trophy(frame, cx, cy, r, color):
+    """A cup with two handles on a foot: r is about half its height."""
+    color = tuple(color)
+    cv2.fillPoly(frame, [np.array([(cx - 0.62 * r, cy - 0.7 * r), (cx + 0.62 * r, cy - 0.7 * r), (cx + 0.4 * r, cy + 0.1 * r),
+                                   (cx - 0.4 * r, cy + 0.1 * r)], dtype=np.int32)], color, cv2.LINE_AA)
+    for side in (-1, 1):
+        cv2.ellipse(frame, (round(cx + side * 0.72 * r), round(cy - 0.38 * r)), (round(0.3 * r), round(0.32 * r)), 0, 0, 360, color,
+                    max(2, round(0.12 * r)), cv2.LINE_AA)
+    cv2.rectangle(frame, (round(cx - 0.09 * r), round(cy + 0.1 * r)), (round(cx + 0.09 * r), round(cy + 0.5 * r)), color, -1, cv2.LINE_AA)
+    cv2.rectangle(frame, (round(cx - 0.42 * r), round(cy + 0.5 * r)), (round(cx + 0.42 * r), round(cy + 0.72 * r)), color, -1, cv2.LINE_AA)

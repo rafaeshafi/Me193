@@ -42,6 +42,15 @@ def request_720p(capture):
         setter(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
 
+def _flow(args):
+    """The intro, title and menus in front of the game, with the level and game from the command line (None: --classic)."""
+    from pingpong.flow import Flow
+
+    if getattr(args, "classic", False):
+        return None
+    return Flow(intro=not getattr(args, "no_intro", False), level_tag=args.level, mode=args.mode)
+
+
 def add_swing_source_args(parser):
     """--swing-source and --no-hub, shared by play and the calibration tool so they always agree."""
     parser.add_argument("--swing-source", choices=("auto", "imu", "pose"), default="auto",
@@ -154,7 +163,7 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
             to_image=getattr(env, "to_image", None), record_dir=record_dir, player=args.player,
             spin_probs_fn=None if model is None else model.probs, learner=learner,
             pose_gyro=posegyro.PoseGyro() if camera else None, resume=bool(getattr(args, "resume", False)), overrides=settings,
-            pose_model=pose_model, hold_start=True, hit_mode=getattr(args, "hit_mode", "contact"), log=log)
+            pose_model=pose_model, hold_start=True, hit_mode=getattr(args, "hit_mode", "contact"), flow=_flow(args), log=log)
     except BaseException:
         if capture is not None:
             capture.release()
@@ -168,6 +177,7 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
         rig.closers.append(("learner", lambda: qbandit.save_for(args.player, learner, root=player_root)))
     if not args.no_audio:
         rig.audio = rig.session.audio = env.make_audio()
+        rig.audio.music_on = not getattr(args, "no_music", False)
         rig.audio.start()
     if not args.no_store:
         try:

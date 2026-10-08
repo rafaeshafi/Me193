@@ -322,7 +322,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
              threaded=False, lag_s=None, gyro_per_dps=None, accel_per_g=None, fs_raw=None, stale_ms=None,
              to_image=None, record_dir=None, player="rafae", vision=None, recorder=None, spin_probs_fn=None,
              learner=None, pose_gyro=None, resume=False, overrides=None, latency=None, pose_model=None, hold_start=False,
-             hit_mode="swing", log=print):
+             hit_mode="swing", flow=None, log=print):
     """Wire every piece into one LiveRig.  The real play.py and the fake rig both come through here,
     so the wiring that matters on hardware (haptic blank windows, phase-gated tag search, the pose
     lock, status lights) is exactly the wiring the tests run.
@@ -332,7 +332,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
     passes none, because the recorded pose-derived samples arrive through the replay hub like hub samples.
 
     hold_start: the game also starts when the hub is held on the START button (live play; a replay starts its games
-    where the recording says).
+    where the recording says).  flow: the intro, title and menus in front of the game (live play; None: the plain lobby).
     hit_mode: "swing" (a swing the IMU sees meets the ball) or "contact" (the hand moving into the ball does, and the
     hub's flick is the spin); a replay passes the recorded one."""
     camera = calibration.swing.source == "pose"
@@ -370,7 +370,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         client=mqtt_client if publishing else None, source=source, scope=scope or config.RECORD_SCOPE,
         no_publish=no_publish, seed=seed, box=calibration.box, omega_lo=calibration.swing.omega_lo,
         omega_hi=calibration.swing.omega_hi, t_pk=params.t_pk, spin_probs_fn=spin_probs_fn, learner=learner,
-        resume=resume, latency=latency, hand_model=pose_model.predictor, hold_start=hold_start, hit_mode=hit_mode,
+        resume=resume, latency=latency, hand_model=pose_model.predictor, hold_start=hold_start, hit_mode=hit_mode, flow=flow,
         wrist_frame=None if camera or calibration.tilt is None else flick.wrist_frame(calibration.tilt.neutral,
                                                                                       calibration.tilt.axis),
         gyro_window=None if camera else imu.gyro_window)

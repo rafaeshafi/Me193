@@ -82,3 +82,73 @@ def test_an_ellipse_on_the_table_is_as_long_along_the_table_as_asked_and_symmetr
     near_y, far_y = cam.project(0.0, 0.0, 0.2)[1], cam.project(0.0, 0.0, 1.8)[1]
     assert max(ys) == pytest.approx(near_y, abs=1.0) and min(ys) == pytest.approx(far_y, abs=1.0)
     assert (max(xs) + min(xs)) / 2 == pytest.approx(W / 2, abs=1.0)
+
+
+# --- a camera that can turn and fly (the intro) ------------------------------------------------------------------------------
+def test_a_camera_with_no_yaw_projects_exactly_as_before(cam):
+    turned = court3d.Camera(cx=cam.cx, cy=cam.cy, focal=cam.focal, pos=cam.pos, pitch_deg=cam.pitch_deg, yaw_deg=0.0)
+    assert turned.project(0.3, 0.2, 1.1) == cam.project(0.3, 0.2, 1.1)
+
+
+def test_turning_the_camera_to_the_right_moves_what_is_ahead_to_the_left(cam):
+    import dataclasses
+
+    ahead = cam.project(0.0, 0.0, 5.0)[0]
+    right = dataclasses.replace(cam, yaw_deg=20.0).project(0.0, 0.0, 5.0)[0]
+    left = dataclasses.replace(cam, yaw_deg=-20.0).project(0.0, 0.0, 5.0)[0]
+    assert right < ahead < left
+
+
+def test_the_point_straight_along_the_view_direction_is_in_the_middle_of_the_picture():
+    import dataclasses, math
+
+    cam = dataclasses.replace(court3d.Camera.for_frame(W, H), pos=(1.0, 3.0, 2.0), pitch_deg=15.0, yaw_deg=40.0)
+    yaw, pitch = math.radians(40.0), math.radians(15.0)
+    ahead = (1.0 + 10 * math.cos(pitch) * math.sin(yaw), 3.0 - 10 * math.sin(pitch), 2.0 + 10 * math.cos(pitch) * math.cos(yaw))
+    px, py, _ = cam.project(*ahead)
+    assert px == pytest.approx(cam.cx, abs=0.5) and py == pytest.approx(cam.cy, abs=0.5)
+
+
+def test_depth_is_how_far_in_front_of_the_camera_a_point_is(cam):
+    assert cam.depth_of(0.0, 1.4, 10.0) > cam.depth_of(0.0, 1.4, 5.0) > 0
+    assert cam.depth_of(0.0, 1.4, -10.0) < 0                         # behind the camera
+
+
+def test_a_polygon_wholly_behind_the_camera_has_no_picture(cam):
+    assert len(cam.project_poly([(-1, 0, -10), (1, 0, -10), (1, 0, -12), (-1, 0, -12)])) == 0
+
+
+def test_a_polygon_wholly_in_front_projects_to_the_same_points_as_project(cam):
+    quad = [(-0.5, 0, 1.0), (0.5, 0, 1.0), (0.5, 0, 2.0), (-0.5, 0, 2.0)]
+    pts = cam.project_poly(quad)
+    assert len(pts) == 4
+    for (px, py), point in zip(pts, quad):
+        assert (px, py) == pytest.approx(cam.project(*point)[:2])
+
+
+def test_a_floor_running_out_behind_the_camera_is_cut_at_the_near_plane_not_thrown_across_the_picture(cam):
+    floor = [(-50, -0.76, -60), (50, -0.76, -60), (50, -0.76, 60), (-50, -0.76, 60)]
+    pts = cam.project_poly(floor)
+    assert len(pts) >= 4
+    assert all(abs(px) < 5e5 and abs(py) < 5e5 for px, py in pts)       # nothing flung off to infinity
+    ys = [py for _, py in pts]
+    assert max(ys) > H                                                  # the floor fills the bottom of the picture
+    assert min(ys) < 0.4 * H                                            # and runs back up towards the horizon
+
+
+def test_a_line_is_cut_at_the_near_plane_and_one_behind_the_camera_has_no_picture(cam):
+    assert cam.project_segment((0, 0, -10), (1, 0, -12)) is None
+    cut = cam.project_segment((0, -0.76, -5), (0, -0.76, 8))
+    assert cut is not None and all(abs(v) < 5e5 for point in cut for v in point)
+
+
+def test_many_points_at_once_give_the_same_view_as_one_at_a_time():
+    import dataclasses
+
+    import numpy as np
+
+    cam = dataclasses.replace(court3d.Camera.for_frame(W, H), pos=(2.0, 5.0, -7.0), pitch_deg=12.0, yaw_deg=-33.0)
+    pts = [(0.0, 0.0, 1.0), (3.5, -2.0, 20.0), (-4.0, 1.0, -30.0), (10.0, 30.0, 100.0)]
+    right, up, depth = cam.view_many(*(np.array(c, dtype=float) for c in zip(*pts)))
+    for k, point in enumerate(pts):
+        assert (right[k], up[k], depth[k]) == pytest.approx(cam.view(*point))

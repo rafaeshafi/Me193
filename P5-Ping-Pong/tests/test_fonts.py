@@ -118,3 +118,52 @@ def test_text_that_fits_shrinks_until_it_is_no_wider_than_the_space(both):
     assert 14 <= size < 60 and fonts.measure("A rather long notice for a narrow space", size)[0] <= 300
     assert fonts.fit_size("OK", 300, max_size=60, min_size=14) == 60
     assert fonts.fit_size("x" * 200, 100, max_size=60, min_size=14) == 14          # as small as it goes
+
+
+# --- characters the typeface has no picture for ---------------------------------------------------------------------------------------
+def test_a_middle_dot_is_drawn_as_a_bullet_because_the_typeface_has_no_middle_dot():
+    if not fonts.available():
+        pytest.skip("no rounded typeface on this machine")
+    assert fonts.measure("a·b", 40) == fonts.measure("a•b", 40)
+    a, b = blank(), blank()
+    fonts.draw(a, "a·b", 320, 180, 60, GREEN)
+    fonts.draw(b, "a•b", 320, 180, 60, GREEN)
+    assert np.array_equal(a, b)
+
+
+def test_a_character_it_cannot_draw_at_all_shows_as_a_question_mark_not_an_empty_box(both):
+    a, b = blank(), blank()
+    fonts.draw(a, "ok ✓", 320, 180, 60, GREEN)
+    fonts.draw(b, "ok ?", 320, 180, 60, GREEN)
+    assert np.array_equal(a, b)
+
+
+# --- text broken into lines ----------------------------------------------------------------------------------------------------------------
+def test_text_wraps_into_lines_no_wider_than_the_space_and_loses_no_words(both):
+    text = "UNCALIBRATED: run ./pp calibrate_swing --player rafae --swing-source pose --no-hub"
+    lines = fonts.wrap_lines(text, 420, 28, max_lines=6)
+    assert len(lines) >= 2 and " ".join(lines) == text
+    assert all(fonts.measure(line, 28)[0] <= 420 for line in lines)
+
+
+def test_text_that_needs_more_lines_than_allowed_is_cut_with_dots_and_one_endless_word_is_trimmed(both):
+    lines = fonts.wrap_lines("word " * 100, 300, 28, max_lines=2)
+    assert len(lines) == 2 and lines[-1].endswith("...") and all(fonts.measure(line, 28)[0] <= 300 for line in lines)
+    one = fonts.wrap_lines("x" * 400, 300, 28)
+    assert len(one) == 1 and fonts.measure(one[0], 28)[0] <= 300
+
+
+def test_a_short_text_is_one_line(both):
+    assert fonts.wrap_lines("MISSED", 600, 40) == ["MISSED"]
+
+
+def test_text_that_is_not_yet_a_pixel_tall_is_simply_not_drawn(both):
+    frame = blank()
+    fonts.draw(frame, "growing", 320, 180, 0, GREEN)
+    fonts.draw(frame, "growing", 320, 180, 0.4, GREEN)
+    assert np.array_equal(frame, blank())
+
+
+def test_text_not_yet_a_pixel_tall_measures_as_nothing_and_wraps_to_nothing_much(both):
+    assert fonts.measure("growing", 0) == (0, 0) and fonts.measure("growing", 0.4) == (0, 0)
+    assert fonts.wrap_lines("a few words that are growing", 100, 0) and fonts.fit_size("x", 100, max_size=30, min_size=12) == 30

@@ -21,6 +21,12 @@ def handle_key(session, key, *, fake):
     game = session.game
     if key in (ESC, ord("q")):
         return "quit", []
+    flow = getattr(session, "flow", None)
+    if flow is not None:                                       # the screens round the game take their own keys
+        actions = flow.on_key(key, session.clock.now_ns())
+        if actions is not None:
+            session.apply(actions)
+            return None, []
     if key == SPACE and game.phase in ("LOBBY", "MATCH_OVER"):
         session.on_start()
         return None, []

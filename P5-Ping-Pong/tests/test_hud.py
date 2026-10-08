@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from pingpong import canvas, holdstart, hud
+from pingpong import canvas, fonts, holdstart, hud, ui
 from pingpong.events import GateResult
 
 W, H = 1280, 720
@@ -56,8 +56,9 @@ def test_the_camera_is_a_small_picture_in_the_corner_and_nothing_else_moves():
     assert diff(plain, with_cam) > 100_000
     assert tuple(with_cam[y0 + ph // 2, x0 + pw // 2]) == (0, 200, 0)
     mask = np.ones((H, W), dtype=bool)
-    mask[y0 - 2:y0 + ph + 3, x0 - 2:x0 + pw + 3] = False
+    mask[y0 - 30:y0 + ph + 36, x0 - 30:x0 + pw + 30] = False                # (its white frame and soft shadow are round it)
     assert diff(plain[mask], with_cam[mask]) == 0                         # outside the corner: the same picture
+    assert tuple(with_cam[y0 + 1, x0 + 1]) != (0, 200, 0)                  # the window has rounded corners
 
 
 def test_a_ring_marks_your_hand_in_the_camera_picture():
@@ -69,13 +70,13 @@ def test_a_ring_marks_your_hand_in_the_camera_picture():
     assert diff(unmarked, hud.render(state(), size=(W, H))) == 0           # no picture, no ring
 
 
-def test_the_score_panels_sit_beside_the_table_and_name_what_they_show(monkeypatch):
+def test_a_card_in_each_top_corner_names_what_it_shows(monkeypatch):
     seen = drawn_text(monkeypatch)
-    hud.render(state(mode="survival", streak=7, record=12), size=(W, H))
-    assert {"STREAK", "BEST", "7", "12"} <= set(seen)
+    hud.render(state(mode="survival", streak=7, record=12, player_name="rafae"), size=(W, H))
+    assert {"STREAK", "BEST", "7", "12", "RAFAE"} <= set(seen)
     seen.clear()
-    hud.render(state(mode="match", player_points=3, cpu_points=5), size=(W, H))
-    assert {"YOU", "CPU", "3", "5"} <= set(seen)
+    hud.render(state(mode="match", player_points=3, cpu_points=5, player_name="rafae", level_name="Club"), size=(W, H))
+    assert {"POINTS", "3", "5", "RAFAE", "COCO"} <= set(seen)                    # you and the opponent of that level, by name
 
 
 @pytest.mark.parametrize("phase", ["LOBBY", "COUNTDOWN", "RALLY", "POINT_OVER", "MATCH_OVER"])
@@ -184,14 +185,21 @@ def test_a_long_lobby_notice_is_drawn_inside_the_frame_and_clear_of_the_start_pr
 # --- what the x-ray panel and the leaderboard panel must not do ---------------------------------------------------------
 def drawn_text(monkeypatch):
     seen = []
-    real = canvas.draw_text
+    real = fonts.draw
 
-    def spy(frame, text, org, *a, **kw):
+    def spy(frame, text, *a, **kw):
         seen.append(text)
-        return real(frame, text, org, *a, **kw)
+        return real(frame, text, *a, **kw)
 
-    monkeypatch.setattr(canvas, "draw_text", spy)
+    monkeypatch.setattr(fonts, "draw", spy)
     return seen
+
+
+def panels(monkeypatch):
+    boxes = []
+    real = ui.panel
+    monkeypatch.setattr(ui, "panel", lambda frame, x, y, w, h, *a, **kw: (boxes.append((x, y, w, h)), real(frame, x, y, w, h, *a, **kw))[1])
+    return boxes
 
 
 def test_the_xray_never_cuts_a_gate_note_in_the_middle_of_its_numbers(monkeypatch):
@@ -200,31 +208,29 @@ def test_the_xray_never_cuts_a_gate_note_in_the_middle_of_its_numbers(monkeypatc
     hud.render(state(phase="RALLY", show_xray=True, gates=(GateResult("J2", False, note),
                                                           GateResult("J6", False, "paddle locked after shaking"))),
                size=(W, H))
-    assert note in " ".join(seen) or any(note in line for line in seen)
-    assert "paddle locked after shaking" in " ".join(seen)
+    assert any(note in line for line in seen)
+    assert any("paddle locked after shaking" in line for line in seen)
 
 
-def test_the_leaderboard_panel_stays_clear_of_the_score_line_at_the_top(monkeypatch):
-    boxes = []
-    real = canvas.dim_rect
-    monkeypatch.setattr(canvas, "dim_rect", lambda frame, x, y, w, h, *a, **kw: (boxes.append((x, y, w, h)),
-                                                                                  real(frame, x, y, w, h, *a, **kw)))
+def test_the_leaderboard_panel_stays_clear_of_the_score_cards_at_the_top(monkeypatch):
+    boxes = panels(monkeypatch)
     hud.render(state(phase="MATCH_OVER", mode="match", leaderboard=(("rafae", 3), ("guest", 1))), size=(W, H))
-    assert boxes and all(y >= 140 for _, y, _, _ in boxes)
-    assert all(x + w <= 364 for x, _, w, _ in boxes)                   # and left of the centred GAME OVER / MATCH OVER
+    board = [b for b in boxes if b[2] == 340]
+    assert board and all(y >= 140 for _, y, _, _ in board)
+    assert all(x + w <= 364 for x, _, w, _ in board)                   # and left of the centred GAME OVER / MATCH OVER
 
 
-def test_the_xray_panel_stays_clear_of_the_centred_best_line(monkeypatch):
-    boxes = []
-    real = canvas.dim_rect
-    monkeypatch.setattr(canvas, "dim_rect", lambda frame, x, y, w, h, *a, **kw: (boxes.append((x, y, w, h)),
-                                                                                  real(frame, x, y, w, h, *a, **kw)))
+def test_the_xray_panel_stays_clear_of_the_cards_and_inside_the_frame(monkeypatch):
+    boxes = panels(monkeypatch)
+    hud.render(state(phase="RALLY"), size=(W, H))
+    without = len(boxes)
     hud.render(state(phase="RALLY", show_xray=True, gates=(GateResult("J1", True, "timing +10 ms"),)), size=(W, H))
-    assert boxes and all(x >= 715 for x, _, _, _ in boxes) and all(x + w <= W - 10 for x, _, w, _ in boxes)
+    xray = boxes[without:][-1]
+    assert xray[0] >= 715 and xray[0] + xray[2] <= W - 10 and xray[1] >= 120          # under the right card, not over it
 
 
 # --- the hub's battery ----------------------------------------------------------------------------------------------------
-def test_the_top_bar_shows_the_hubs_battery_and_goes_amber_when_it_is_low(monkeypatch):
+def test_the_status_chip_shows_the_hubs_battery_and_goes_amber_when_it_is_low(monkeypatch):
     seen = drawn_text(monkeypatch)
     hud.render(state(hub_status="ok", hub_battery=83), size=(W, H))
     assert any("HUB OK 83%" in text for text in seen)
@@ -233,8 +239,8 @@ def test_the_top_bar_shows_the_hubs_battery_and_goes_amber_when_it_is_low(monkey
     assert any(text.endswith("HUB OK") for text in seen)                  # unknown (not yet reported): no number
     low = hud.render(state(hub_status="ok", hub_battery=12, mqtt_status="ok"), size=(W, H))
     fine = hud.render(state(hub_status="ok", hub_battery=80, mqtt_status="ok"), size=(W, H))
-    top = (slice(20, 60), slice(W - 700, W - 20))
-    assert diff(low[top], fine[top]) > 1000                                # the colour differs: amber vs green
+    corner = (slice(H - 56, H - 14), slice(20, 360))
+    assert diff(low[corner], fine[corner]) > 1000                          # the colour differs: amber vs green
 
 
 def test_the_survival_mode_is_called_rally_on_screen(monkeypatch):
@@ -247,63 +253,83 @@ def test_the_survival_mode_is_called_rally_on_screen(monkeypatch):
 
 
 # --- the START button (hold the hub on it) ----------------------------------------------------------------------------------
-GREEN = hud.GREEN
+FILL = hud.rgb(255, 214, 70)                      # what the hold fills the button with
 
 
 def button_rect(w=W, h=H):
     return tuple(round(f * v) for f, v in zip(holdstart.BUTTON, (w, h, w, h)))
 
 
-def green_pixels(frame, rect):
+def filled(frame, rect):
     x, y, bw, bh = rect
     patch = frame[y:y + bh, x:x + bw].reshape(-1, 3)
-    return int((patch == GREEN).all(axis=1).sum())
+    return int((patch == FILL).all(axis=1).sum())
 
 
-def test_the_start_button_takes_the_right_panel_and_fills_while_the_hub_is_held_on_it():
+def test_the_start_button_sits_in_the_top_right_and_fills_while_the_hub_is_held_on_it():
     off = hud.render(state(phase="LOBBY"), size=(W, H))
     idle = hud.render(state(phase="LOBBY", start_button=(0.0, False)), size=(W, H))
     half = hud.render(state(phase="LOBBY", start_button=(0.5, True)), size=(W, H))
     full = hud.render(state(phase="LOBBY", start_button=(1.0, True)), size=(W, H))
     rect = button_rect()
-    assert diff(off[rect[1]:rect[1] + rect[3], rect[0]:rect[0] + rect[2]], idle[rect[1]:rect[1] + rect[3], rect[0]:rect[0] + rect[2]]) > 5_000
-    assert green_pixels(idle, rect) == 0 < green_pixels(half, rect) < green_pixels(full, rect)
+    area = (slice(rect[1], rect[1] + rect[3]), slice(rect[0], rect[0] + rect[2]))
+    assert diff(off[area], idle[area]) > 5_000
+    assert filled(idle, rect) == 0 < filled(half, rect) < filled(full, rect)
 
 
-def test_the_cursor_ring_follows_the_hand_over_the_whole_screen():
+def test_the_pointer_follows_the_hand_over_the_whole_screen():
     base = hud.render(state(phase="LOBBY", start_button=(0.0, False)), size=(W, H))
     left = hud.render(state(phase="LOBBY", start_button=(0.0, False), cursor=(0.2, 0.3)), size=(W, H))
     cx, cy = round(0.2 * (W - 1)), round(0.7 * (H - 1))
-    spot = (slice(cy - 30, cy + 31), slice(cx - 30, cx + 31))
+    spot = (slice(cy - 72, cy + 73), slice(cx - 72, cx + 73))
     assert diff(base[spot], left[spot]) > 2_000
     mask = np.ones((H, W), dtype=bool)
     mask[spot] = False
     assert diff(base[mask], left[mask]) == 0                                   # and nothing else moved
-    on = hud.render(state(phase="LOBBY", start_button=(0.3, True), cursor=(0.2, 0.3)), size=(W, H))
-    assert green_pixels(on, (cx - 30, cy - 30, 61, 61)) > 50                    # the ring turns green over the button
+    held = hud.render(state(phase="LOBBY", start_button=(0.6, True), cursor=(0.2, 0.3)), size=(W, H))
+    assert diff(left[spot], held[spot]) > 300                                   # the ring round it fills as the hold goes on
 
 
-def test_the_cursor_is_clamped_to_the_screen():
-    frame = hud.render(state(phase="LOBBY", start_button=(0.0, True), cursor=(1.6, 1.4)), size=(W, H))
-    assert frame.shape == (H, W, 3) and green_pixels(frame, (W - 60, 0, 60, 60)) > 20
+def test_the_pointer_is_clamped_to_the_screen():
+    plain = hud.render(state(phase="LOBBY", start_button=(0.0, True)), size=(W, H))
+    far = hud.render(state(phase="LOBBY", start_button=(0.0, True), cursor=(1.6, 1.4)), size=(W, H))
+    assert far.shape == (H, W, 3) and diff(plain[:80, W - 80:], far[:80, W - 80:]) > 500
 
 
 def test_the_prompts_say_to_hold_the_hub_on_start_when_the_button_is_there():
     lobby_off = hud.render(state(phase="LOBBY"), size=(W, H))
     lobby_on = hud.render(state(phase="LOBBY", start_button=(0.0, False)), size=(W, H))
     centre = (slice(H // 2 - 80, H // 2 + 70), slice(160, W - 160))
-    assert diff(lobby_off[centre], lobby_on[centre]) > 20_000
+    assert diff(lobby_off[centre], lobby_on[centre]) > 15_000
     over_off = hud.render(state(phase="MATCH_OVER"), size=(W, H))
     over_on = hud.render(state(phase="MATCH_OVER", start_button=(0.0, False)), size=(W, H))
-    bottom = (slice(H - 160, H - 90), slice(160, W - 160))
-    assert diff(over_off[bottom], over_on[bottom]) > 10_000
+    prompt = (slice(H // 2 + 40, H // 2 + 100), slice(200, W - 200))
+    assert diff(over_off[prompt], over_on[prompt]) > 8_000
 
 
-def test_the_button_stays_inside_the_frame_and_below_the_top_bar_whatever_the_size():
+def test_the_button_stays_inside_the_frame_below_the_cards_whatever_the_size():
     for size in ((1280, 720), (960, 540), (1920, 1080)):
         w, h = size
         x, y, bw, bh = button_rect(w, h)
         assert x + bw <= w - 10 and y >= round(0.116 * h) and y + bh < h // 2
         frame = hud.render(state(phase="LOBBY", start_button=(1.0, True), cursor=(0.9, 0.8)), size=size)
-        assert green_pixels(frame, (x, y, bw, bh)) > 100
+        assert filled(frame, (x, y, bw, bh)) > 100
 
+
+# --- the paddle's grip (where a hand holds it) ----------------------------------------------------------------------------------------
+def test_the_grip_is_below_the_face_for_you_and_above_it_for_the_far_player_and_turns_with_the_paddle():
+    below = canvas.paddle_grip(100, 100, 20, 0.0, handle_up=False)
+    above = canvas.paddle_grip(100, 100, 20, 0.0, handle_up=True)
+    assert below[0] == pytest.approx(100) and below[1] > 100 + 2.0 * 20
+    assert above[0] == pytest.approx(100) and above[1] < 100 - 2.0 * 20
+    turned = canvas.paddle_grip(100, 100, 20, 90.0, handle_up=False)
+    assert turned[0] < 100 - 2.0 * 20 and turned[1] == pytest.approx(100, abs=1e-6)       # clockwise: the handle swings to the left
+
+
+def test_a_fist_round_the_handle_can_be_any_skin():
+    import numpy as np
+
+    frame = np.full((200, 200, 3), 50, dtype=np.uint8)
+    canvas.draw_paddle(frame, 100, 100, 20, hand=True, skin=(10, 200, 30))
+    gx, gy = canvas.paddle_grip(100, 100, 20, 0.0, handle_up=False)
+    assert tuple(frame[round(gy), round(gx)]) == (10, 200, 30)

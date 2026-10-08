@@ -10,7 +10,7 @@ import math
 import cv2
 import numpy as np
 
-from pingpong import anim
+from pingpong import anim, fonts, ui
 
 MOODS = ("happy", "grin", "cheer", "sad", "surprised", "smug", "neutral")
 BOB_PERIOD_S, BOB_UNITS = 1.6, 1.4
@@ -19,7 +19,7 @@ EYE, WHITE, MOUTH, TONGUE, CHEEK, FRAME = (40, 30, 40), (255, 255, 255), (50, 40
 SHIFT, ONE = 3, 8                                           # sub-pixel drawing: coordinates are multiplied by 2 ** SHIFT
 
 HEAD_Y_UNITS = -10.0
-OPP_BUST_M, OPP_CENTER_Y_M, OPP_FOLLOW = 0.70, 0.42, 0.5     # the opponent: bust height, where its centre is above the table, how far it follows the paddle
+OPP_BUST_M, OPP_CENTER_Y_M, OPP_FOLLOW = 0.66, 0.45, 0.5     # the opponent: bust height, where its centre is above the table, how far it follows the paddle
 SHOULDER = (0.34, 0.30)                                      # across and down from the bust centre, in bust heights
 
 
@@ -175,7 +175,7 @@ def _accessory(p, look):
     elif kind == "headband":
         pts = _arc_points(0, -27, 32, 7, 170, 10, 12)
         for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
-            p.line(x0, y0 + 7, x1, y1 + 7, look.trim, 5.5)
+            p.line(x0, y0 + 4, x1, y1 + 4, look.trim, 5.0)
     elif kind == "glasses":
         for side in (-1, 1):
             p.arc(side * 11, -9, 9.5, 8.5, 0, 360, FRAME, 2.0)
@@ -207,7 +207,11 @@ def draw_bust(frame, cx, cy, size, look, *, mood="happy", t=0.0, bob=True):
     _accessory(head, look)
 
 
-# --- the opponent behind the table -----------------------------------------------------------------------------------------
+# --- the opponent behind the table, and the crowd ------------------------------------------------------------------------------
+FLOOR_Y_M = -0.76                                            # the deck the figures stand on
+SPEC_BUST_M, SPEC_CENTER_Y_M = 0.62, 0.37                     # a spectator: bust height, and where its centre is above the table top
+
+
 def head_px(cam, x_m, z_m):
     """-> (x, y, pixels per metre): where the opponent's portrait is centred when its paddle is at x_m (it follows a little)."""
     px, py, scale = cam.project(OPP_FOLLOW * x_m, OPP_CENTER_Y_M, z_m)
@@ -221,34 +225,80 @@ def shoulder_px(cam, x_m, z_m):
     return cx - SHOULDER[0] * size, cy + SHOULDER[1] * size
 
 
+def _p(x, y):
+    return round(x * ONE), round(y * ONE)
+
+
+def _body_block(view, cx, cy, size, bottom_row, look, half):
+    """The body under a portrait: a block of shirt down to bottom_row (clipped to the view)."""
+    rows = min(view.shape[0], max(0, round(bottom_row)))
+    top = cy + 0.5 * size - 2
+    if rows <= top:
+        return
+    block = np.array([(cx - half, top), (cx + half, top), (cx + half, rows), (cx - half, rows)])
+    cv2.fillPoly(view, [(block * ONE).astype(np.int32)], tuple(look.shirt), cv2.LINE_AA, SHIFT)
+    for x in (cx - half, cx + half):
+        cv2.line(view, _p(x, cy + 0.5 * size), _p(x, rows), _dark(look.shirt), 2, cv2.LINE_AA, SHIFT)
+
+
+def _limb(frame, a, b, look, size, bare=0.38):
+    """An arm from a shoulder to a hand: a sleeve, and the last part of it bare, with a hand at the end."""
+    mid = (a[0] + (1 - bare) * (b[0] - a[0]), a[1] + (1 - bare) * (b[1] - a[1]))
+    for p0, p1, color, width in ((a, mid, look.shirt, 0.17 * size), (mid, b, look.skin, 0.12 * size)):
+        cv2.line(frame, _p(*p0), _p(*p1), _dark(color), max(1, round(width)) + 3, cv2.LINE_AA, SHIFT)
+        cv2.line(frame, _p(*p0), _p(*p1), tuple(color), max(1, round(width)), cv2.LINE_AA, SHIFT)
+
+
+def _raised_hand(frame, hand, look, size):
+    cv2.circle(frame, _p(*hand), round(0.075 * size * ONE), _dark(look.skin), -1, cv2.LINE_AA, SHIFT)
+    cv2.circle(frame, _p(*hand), round(0.065 * size * ONE), tuple(look.skin), -1, cv2.LINE_AA, SHIFT)
+
+
 def draw_opponent(frame, cam, look, *, x_m, z_m, grip_px, mood="happy", t=0.0, body_rows=None):
     """The opponent: a block of body up to the table's far edge (the first `body_rows` rows of the frame, or all of a view
     that ends there), the portrait on it, its racket arm reaching the paddle's grip and, cheering, the other arm up."""
     cx, cy, scale = head_px(cam, x_m, z_m)
     size = OPP_BUST_M * scale
     view = frame if body_rows is None else frame[:body_rows]
-    rows = view.shape[0]
-    half = 0.46 * size
-    block = np.array([(cx - half, cy + 0.5 * size - 2), (cx + half, cy + 0.5 * size - 2), (cx + half, rows), (cx - half, rows)])
-    cv2.fillPoly(view, [(block * ONE).astype(np.int32)], tuple(look.shirt), cv2.LINE_AA, SHIFT)
-    for x in (cx - half, cx + half):
-        cv2.line(view, (round(x * ONE), round((cy + 0.5 * size) * ONE)), (round(x * ONE), rows * ONE),
-                 _dark(look.shirt), 2, cv2.LINE_AA, SHIFT)
+    _body_block(view, cx, cy, size, min(view.shape[0], cam.project(OPP_FOLLOW * x_m, FLOOR_Y_M, z_m)[1]), look, 0.46 * size)
     draw_bust(view, cx, cy, size, look, mood=mood, t=t)
     sx, sy = shoulder_px(cam, x_m, z_m)
-    elbow = (sx + 0.62 * (grip_px[0] - sx), sy + 0.62 * (grip_px[1] - sy))
-    for a, b, color, width in (((sx, sy), elbow, look.shirt, 0.17 * size), (elbow, grip_px, look.skin, 0.12 * size)):
-        cv2.line(frame, (round(a[0] * ONE), round(a[1] * ONE)), (round(b[0] * ONE), round(b[1] * ONE)), _dark(color),
-                 round(width) + 3, cv2.LINE_AA, SHIFT)
-        cv2.line(frame, (round(a[0] * ONE), round(a[1] * ONE)), (round(b[0] * ONE), round(b[1] * ONE)), tuple(color),
-                 round(width), cv2.LINE_AA, SHIFT)
+    _limb(frame, (sx, sy), grip_px, look, size, bare=0.38)
     if mood == "cheer":                                                  # the other arm goes up
-        lx, ly = cx + SHOULDER[0] * size, cy + SHOULDER[1] * size
-        hand = (cx + 0.66 * size, cy - 0.38 * size)
-        for color, width in ((_dark(look.shirt), 0.17 * size + 3), (look.shirt, 0.17 * size)):
-            cv2.line(frame, (round(lx * ONE), round(ly * ONE)), (round(hand[0] * ONE), round(hand[1] * ONE)), tuple(color),
-                     round(width), cv2.LINE_AA, SHIFT)
-        cv2.circle(frame, (round(hand[0] * ONE), round(hand[1] * ONE)), round(0.075 * size * ONE), _dark(look.skin), -1,
-                   cv2.LINE_AA, SHIFT)
-        cv2.circle(frame, (round(hand[0] * ONE), round(hand[1] * ONE)), round(0.065 * size * ONE), tuple(look.skin), -1,
-                   cv2.LINE_AA, SHIFT)
+        hand = (cx + 0.75 * size, cy - 0.55 * size)
+        _limb(frame, (cx + SHOULDER[0] * size, cy + SHOULDER[1] * size), hand, look, size, bare=0.2)
+        _raised_hand(frame, hand, look, size)
+
+
+def draw_spectator(frame, cam, look, *, x_m, z_m, mood="happy", t=0.0):
+    """A person watching from the deck beside the court: standing on the floor, cheering with both arms up or calm with them down."""
+    cx, cy, scale = cam.project(x_m, SPEC_CENTER_Y_M, z_m)
+    size = SPEC_BUST_M * scale
+    if size < 8 or cam.depth_of(x_m, SPEC_CENTER_Y_M, z_m) < 0.5:                     # too small to see, or behind the camera
+        return
+    _body_block(frame, cx, cy, size, cam.project(x_m, FLOOR_Y_M, z_m)[1], look, 0.36 * size)
+    draw_bust(frame, cx, cy, size, look, mood=mood, t=t)
+    for side in (-1, 1):
+        shoulder = (cx + side * SHOULDER[0] * size, cy + SHOULDER[1] * size)
+        up = mood == "cheer"
+        hand = (cx + side * (0.78 if up else 0.52) * size, cy + (-0.62 if up else 0.62) * size)
+        _limb(frame, shoulder, hand, look, size, bare=0.25)
+        if up:
+            _raised_hand(frame, hand, look, size)
+
+
+def portrait(frame, cx, cy, diameter, look, *, mood="happy", t=0.0, bg=((255, 220, 160), (255, 245, 210))):
+    """A round picture of someone on a soft background, with a white rim and a little shadow: the face on a card."""
+    d = round(diameter)
+    if d < 8:                                                  # still growing from nothing
+        return
+    picture = np.empty((d, d, 3), dtype=np.uint8)
+    picture[:] = ui.gradient(d, d, tuple(bg[0]), tuple(bg[1]))
+    draw_bust(picture, d / 2, d * 0.56, d * 0.98, look, mood=mood, t=t)
+    x0, y0 = round(cx - d / 2), round(cy - d / 2)
+    mask = ui.rounded_mask(d, d, d // 2)
+    shadow, pad = ui._shadow(d, d, d // 2)
+    fonts.blit(frame, (0, 0, 0), shadow, x0 - pad, y0 - pad + ui.SHADOW_DY, ui.SHADOW_OPACITY)
+    fonts.blit(frame, picture, mask, x0, y0)
+    rim = max(3, d // 24)
+    ui.ring(frame, cx, cy, d / 2 - rim / 2, 1.0, (255, 255, 255), rim)

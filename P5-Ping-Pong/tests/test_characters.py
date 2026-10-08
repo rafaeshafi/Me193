@@ -165,3 +165,57 @@ def test_drawing_into_a_view_of_the_top_of_the_frame_clips_the_body_at_its_last_
     frame = court()
     characters.draw_opponent(frame[:210], cam, cast.PIP, x_m=0.0, z_m=3.1, grip_px=(600, 150), body_rows=None)
     assert changed(frame[210:], court()[210:]).sum() == 0
+
+
+# --- the crowd beside the court ---------------------------------------------------------------------------------------------------
+def test_a_spectator_stands_on_the_deck_with_the_head_above_the_floor_and_gets_smaller_further_away(cam):
+    near, far = court(), court()
+    characters.draw_spectator(near, cam, cast.player_look("kai"), x_m=-2.3, z_m=2.5, mood="happy")
+    characters.draw_spectator(far, cam, cast.player_look("kai"), x_m=-2.3, z_m=4.8, mood="happy")
+    assert changed(near, court()).sum() > 1.5 * changed(far, court()).sum()
+    x0, y0, x1, y1 = bounds(changed(near, court()))
+    floor_row = cam.project(-2.3, -0.76, 2.5)[1]
+    assert abs(y1 - floor_row) < 6                                         # the body reaches the floor it stands on
+    assert y0 < cam.project(-2.3, 0.2, 2.5)[1]                            # and the head is well above the table top
+
+
+def test_a_cheering_spectator_has_both_arms_up_and_a_quiet_one_has_them_down(cam):
+    cheer, calm = court(), court()
+    look = cast.player_look("dee")
+    characters.draw_spectator(cheer, cam, look, x_m=2.3, z_m=2.6, mood="cheer")
+    characters.draw_spectator(calm, cam, look, x_m=2.3, z_m=2.6, mood="happy")
+    assert bounds(changed(cheer, court()))[1] < bounds(changed(calm, court()))[1] - 8          # the hands are above the head
+    assert changed(cheer, calm).sum() > 800
+
+
+def test_every_spectator_look_draws_something_and_two_of_them_differ(cam):
+    a, b = court(), court()
+    characters.draw_spectator(a, cam, cast.player_look("ana"), x_m=-2.4, z_m=3.0)
+    characters.draw_spectator(b, cam, cast.player_look("zed"), x_m=-2.4, z_m=3.0)
+    assert changed(a, court()).sum() > 3000 and changed(a, b).sum() > 800
+
+
+# --- a round portrait for a card -------------------------------------------------------------------------------------------------------
+def test_a_round_portrait_is_a_circle_with_the_face_inside_and_a_white_rim():
+    frame = blank()
+    characters.portrait(frame, W // 2, H // 2, 120, cast.PIP, mood="happy", t=0.0, bg=((255, 220, 160), (255, 245, 210)))
+    white = (frame == np.array((255, 255, 255), dtype=np.uint8)).all(axis=2)
+    x0, y0, x1, y1 = bounds(white)
+    assert abs((x1 - x0) - 120) <= 6 and abs((y1 - y0) - 120) <= 6                    # the rim is as wide as the diameter asked for
+    assert count(frame, cast.PIP.skin) > 200 and white.sum() > 200                     # the face, and the white rim
+    assert tuple(frame[H // 2 - 58, W // 2 - 58]) == BG                                # the corner of the square is not drawn
+
+
+def test_the_portrait_has_a_different_look_for_a_different_person_and_mood():
+    a, b, c = blank(), blank(), blank()
+    characters.portrait(a, 200, 200, 120, cast.PIP)
+    characters.portrait(b, 200, 200, 120, cast.COCO)
+    characters.portrait(c, 200, 200, 120, cast.PIP, mood="sad")
+    assert changed(a, b).sum() > 1500 and changed(a, c).sum() > 40
+
+
+def test_a_portrait_still_growing_from_nothing_is_not_drawn_and_is_not_an_error():
+    frame = blank()
+    for d in (0, 0.4, 1, 3):
+        characters.portrait(frame, 200, 200, d, cast.PIP)
+    assert np.array_equal(frame, blank())

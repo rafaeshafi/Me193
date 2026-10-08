@@ -22,6 +22,7 @@ except ImportError:                                           # no Pillow: the p
 FILES = ("/System/Library/Fonts/Supplemental/Arial Rounded Bold.ttf", "/Library/Fonts/Arial Rounded Bold.ttf",
          "/System/Library/Fonts/SFNSRounded.ttf", "/System/Library/Fonts/Supplemental/Verdana Bold.ttf")
 PLAIN = cv2.FONT_HERSHEY_SIMPLEX
+SUBSTITUTES = {"\u00b7": "\u2022"}                  # the typeface has no middle dot: a bullet is its neighbour
 
 
 @lru_cache(maxsize=1)
@@ -44,8 +45,30 @@ def available():
     return _load(20) is not None
 
 
+@lru_cache(maxsize=1024)
+def _lacks(ch):
+    """The typeface has no picture for this character (it would be drawn as an empty box)."""
+    font = _load(20)
+    return font is not None and font.getmask(ch).getbbox() == font.getmask("\uffff").getbbox()
+
+
+def _clean(text):
+    """The text with every character that cannot be drawn replaced: by a close one if there is one, else a question mark."""
+    if text.isascii():
+        return text
+    drawable = _load(20) is not None
+    out = []
+    for ch in text:
+        ch = SUBSTITUTES.get(ch, ch) if drawable else ch
+        out.append("?" if not ch.isascii() and (not drawable or _lacks(ch)) else ch)
+    return "".join(out)
+
+
 def measure(text, size):
     """(width, height) in pixels of one line of text."""
+    if round(size) < 1:
+        return 0, 0
+    text = _clean(text)
     font = _load(round(size))
     if font is None:
         scale, thick = _plain_scale(size)
@@ -53,6 +76,27 @@ def measure(text, size):
         return w, h + base
     ascent, descent = font.getmetrics()
     return round(font.getlength(text)), ascent + descent
+
+
+def wrap_lines(text, max_w, size, max_lines=3):
+    """The text broken at spaces into lines no wider than max_w (cut with dots if it needs more than max_lines)."""
+    lines, line = [], ""
+    for word in text.split():
+        candidate = f"{line} {word}".strip()
+        if line and measure(candidate, size)[0] > max_w:
+            lines.append(line)
+            line = word
+        else:
+            line = candidate
+    lines.append(line)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        lines[-1] = lines[-1][:max(1, len(lines[-1]) - 3)] + "..."
+    for i, line in enumerate(lines):
+        while len(line) > 1 and measure(line, size)[0] > max_w:
+            line = line[:-1]
+        lines[i] = line
+    return lines
 
 
 def fit_size(text, max_w, *, max_size, min_size):
@@ -102,6 +146,9 @@ def draw(frame, text, x, y, size, color, *, anchor="mm", outline=None, outline_p
     outline: a colour and a width in pixels round the letters; shadow: (dx, dy, colour, opacity) behind them;
     opacity: the whole text's, 0..1."""
     size = round(size)
+    if size < 1:                                              # a thing still growing from nothing has no text yet
+        return
+    text = _clean(text)
     if _load(size) is None:
         return _draw_plain(frame, text, x, y, size, color, anchor, outline, outline_px, shadow, opacity)
     bgr, alpha, (ax, ay) = _sprite(text, size, tuple(color), tuple(outline) if outline and outline_px else None,

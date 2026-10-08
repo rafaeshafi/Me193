@@ -1,9 +1,10 @@
-"""The scene: the table in perspective with shadows, the net, two paddles and the ball, drawn like an arcade game.
+"""The scene: the table in perspective on a seaside terrace, with shadows, the net, two paddles, the opponent and the ball.
 
 Everything is placed in the world of physics.py (metres) and drawn through a court3d.Camera, so depth reads the way it
 does in the arcade original: things shrink and climb the picture towards the far end, the ball's shadow on the table
 shows how high it is, and your paddle is an object standing in the scene (it gets smaller and higher as it reaches
-forward) rather than a sticker on the screen.  Flat bright colours, no textures.
+forward) rather than a sticker on the screen.  Flat bright colours, no textures.  The terrace around the table, the sea
+and the crowd are resort.py; the opponent is characters.py.
 """
 
 import math
@@ -12,15 +13,14 @@ from functools import lru_cache
 import cv2
 import numpy as np
 
-from pingpong import canvas, physics
+from pingpong import canvas, cast, characters, physics, resort
+from pingpong.cast import rgb
 
 # BGR palette
-FLOOR, BANNER = (92, 118, 205), (70, 40, 30)
-STANDS, STANDS_ROW = (200, 112, 50), (225, 150, 90)
-TABLE, TABLE_FRONT, LINE = (70, 170, 55), (40, 105, 30), (240, 240, 240)
-LEG, SHADOW = (66, 124, 180), (0, 0, 0)
-NET, TAPE = (50, 50, 50), (250, 250, 250)
-BALL, BALL_RIM = (70, 225, 255), (20, 90, 150)
+TABLE, TABLE_FRONT, LINE = rgb(34, 100, 190), rgb(20, 62, 132), (248, 248, 248)
+LEG, SHADOW = rgb(120, 138, 160), (0, 0, 0)
+NET, TAPE = rgb(34, 44, 74), (250, 250, 250)
+BALL, BALL_RIM = rgb(255, 176, 32), rgb(176, 84, 8)
 REACH = (40, 170, 255)                  # the ring on the table: how far from your paddle a ball can still be hit
 
 PADDLE_FACE_M = 0.12                    # the face of your paddle (the ring around it is the real reach)
@@ -28,9 +28,9 @@ CPU_FACE_M = 0.11
 BALL_R_M = 0.05
 CPU_Y_M = physics.STRIKE_Y_M
 CPU_Z_M = physics.CPU_Z_M + 0.05
-LEG_H_M = 0.30
+OPPONENT_Z_M = 3.7                      # the opponent stands behind its end of the table, clear of its own paddle
+LEG_H_M = -resort.DECK_Y                # the table stands on the deck
 NET_OVERHANG_M = 0.10
-SKIN = (130, 175, 235)
 HW, L = physics.HALF_WIDTH_M, physics.TABLE_LEN_M
 
 
@@ -54,10 +54,10 @@ def _blend_poly(frame, pts, color, alpha):
 
 @lru_cache(maxsize=4)
 def _still_life(cam, w, h):
-    """The room and the table: they never change, so they are drawn once and copied into every frame."""
+    """The terrace and the table: they never change, so they are drawn once and copied into every frame."""
     layer = np.empty((h, w, 3), dtype=np.uint8)
-    _backdrop(layer, cam)
-    _table(layer, cam)
+    resort.draw_backdrop(layer, cam, 0.0)
+    draw_table(layer, cam)
     return layer
 
 
@@ -77,34 +77,15 @@ def draw_scene(frame, cam, s):
         if kind == "cpu":
             _cpu_paddle(frame, cam, s)
         elif kind == "net":
-            _net(frame, cam)
+            draw_net(frame, cam)
         elif kind == "ball":
             _ball(frame, cam, s.ball)
         else:
             _player_paddle(frame, cam, s)
 
 
-# --- the room and the table --------------------------------------------------------------------------------------------
-def _backdrop(frame, cam):
-    h, w = frame.shape[:2]
-    frame[:] = FLOOR
-    far_l, far_r = cam.project(-HW, 0, L)[:2], cam.project(HW, 0, L)[:2]
-    near_l, near_r = cam.project(-HW, 0, 0)[:2], cam.project(HW, 0, 0)[:2]
-    top, bottom = round(0.115 * h), round(near_l[1] + 0.03 * h)
-    left = np.array([(0, top), (far_l[0] - 0.07 * w, top), (near_l[0] - 0.12 * w, bottom), (0, bottom)], dtype=np.int32)
-    right = np.array([(w, top), (far_r[0] + 0.07 * w, top), (near_r[0] + 0.12 * w, bottom), (w, bottom)], dtype=np.int32)
-    for edge, poly in ((0, left), (w, right)):
-        cv2.fillPoly(frame, [poly], STANDS, cv2.LINE_AA)
-        for k in range(1, 9):                                  # the rows of the crowd
-            y = round(top + (bottom - top) * k / 9)
-            x_in = round(poly[1][0] + (poly[2][0] - poly[1][0]) * (y - top) / (bottom - top))
-            cv2.line(frame, (edge, y), (x_in, y), STANDS_ROW, 2, cv2.LINE_AA)
-    cv2.rectangle(frame, (0, 0), (w, top), BANNER, -1)
-    shadow = _pts(cam, (-HW, -LEG_H_M, 0), (HW, -LEG_H_M, 0), (HW, -LEG_H_M, L), (-HW, -LEG_H_M, L))
-    _blend_poly(frame, shadow, SHADOW, 0.30)
-
-
-def _table(frame, cam):
+# --- the table ----------------------------------------------------------------------------------------------------------------
+def draw_table(frame, cam):
     for x in (-HW + 0.12, HW - 0.12):
         for z in (0.14, L - 0.14):
             (x0, y0, sc), (x1, y1, _) = cam.project(x, -0.06, z), cam.project(x, -LEG_H_M, z)
@@ -117,7 +98,7 @@ def _table(frame, cam):
     cv2.line(frame, tuple(int(v) for v in mid[0]), tuple(int(v) for v in mid[1]), LINE, 2, cv2.LINE_AA)
 
 
-def _net(frame, cam):
+def draw_net(frame, cam):
     w = HW + NET_OVERHANG_M
     quad = _pts(cam, (-w, 0, physics.NET_Z_M), (w, 0, physics.NET_Z_M), (w, physics.NET_H_M, physics.NET_Z_M),
                 (-w, physics.NET_H_M, physics.NET_Z_M))
@@ -174,12 +155,36 @@ def _ball(frame, cam, ball):
 def _player_paddle(frame, cam, s):
     px, py, sc = cam.project(*s.paddle)
     r = max(6, round(PADDLE_FACE_M * sc))
-    canvas.draw_paddle(frame, round(px), round(py), r, angle_deg=s.paddle_angle, hand=True)
+    skin = cast.player_look(s.player_name).skin if s.player_name else canvas.SKIN             # your own hand, once you have a name
+    canvas.draw_paddle(frame, round(px), round(py), r, angle_deg=s.paddle_angle, hand=True, skin=skin)
+
+
+def _cpu_pose(cam, s):
+    """Where the computer's paddle is on the picture: (x, y, face radius, angle), and the opponent that holds it."""
+    px, py, sc = cam.project(s.cpu_x_m, CPU_Y_M, CPU_Z_M)
+    r = max(5, round(CPU_FACE_M * sc))
+    angle = 0.0 if s.cpu_swing is None else 55.0 * math.sin(math.pi * s.cpu_swing)
+    return px, py, r, angle, cast.opponent_by_name(s.level_name)
+
+
+def draw_opponent(frame, cam, s, *, clip_rows=None):
+    """The opponent behind the far end of the table: its body (to the first `clip_rows` rows of the picture, when the table's
+    far edge is where it ends), its face, and its racket arm reaching the paddle's grip."""
+    px, py, r, angle, look = _cpu_pose(cam, s)
+    if cam.depth_of(s.cpu_x_m, CPU_Y_M, OPPONENT_Z_M) < 1.0:
+        return
+    characters.draw_opponent(frame, cam, look, x_m=s.cpu_x_m, z_m=OPPONENT_Z_M,
+                             grip_px=canvas.paddle_grip(px, py, r, angle, handle_up=True), mood=s.cpu_mood, t=s.anim_t, body_rows=clip_rows)
+
+
+def draw_cpu_paddle(frame, cam, s):
+    px, py, r, angle, look = _cpu_pose(cam, s)
+    canvas.draw_paddle(frame, round(px), round(py), r, rubber=canvas.RUBBER_BLACK, angle_deg=angle, handle_up=True, hand=True,
+                       skin=look.skin)
 
 
 def _cpu_paddle(frame, cam, s):
-    """The computer's paddle at the far end: it waits where it hit, chases your shot, and flicks when it hits."""
-    px, py, sc = cam.project(s.cpu_x_m, CPU_Y_M, CPU_Z_M)
-    angle = 0.0 if s.cpu_swing is None else 55.0 * math.sin(math.pi * s.cpu_swing)
-    canvas.draw_paddle(frame, round(px), round(py), max(5, round(CPU_FACE_M * sc)), rubber=canvas.RUBBER_BLUE,
-                       angle_deg=angle, handle_up=True)
+    """The opponent and its paddle, where the computer has it: it waits where it hit, chases your shot, and flicks when it hits;
+    its face shows how it feels about the score.  Its body ends at the table's far edge."""
+    draw_opponent(frame, cam, s, clip_rows=round(cam.project(0.0, 0.0, L)[1]))
+    draw_cpu_paddle(frame, cam, s)

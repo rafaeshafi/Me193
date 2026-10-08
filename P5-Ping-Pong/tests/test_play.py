@@ -159,12 +159,12 @@ def test_control_c_is_never_swallowed_by_the_frame_guard():
         play.run_loop(Impatient(lambda n: False), show=lambda f: None, wait_key=lambda ms: 255, log=lambda *_: None)
 
 
-def test_the_fake_game_starts_from_the_mouse_held_in_the_top_right_too():
+def test_the_classic_fake_game_starts_from_the_mouse_held_in_the_top_right_too():
     from pingpong.clock import FakeClock
 
     clock = FakeClock(start_ns=1_000_000_000)
-    session = play.make_fake_session(play.parse_args(["--fake", "--no-audio"]), clock=clock)
-    assert session.hold_start is not None
+    session = play.make_fake_session(play.parse_args(["--fake", "--no-audio", "--classic"]), clock=clock)
+    assert session.hold_start is not None and session.flow is None
     calls = {"n": 0}
 
     def mouse_xy():
@@ -175,6 +175,39 @@ def test_the_fake_game_starts_from_the_mouse_held_in_the_top_right_too():
     keys = iter([255] * 100 + [ord("q")])
     play.fake_loop(session, show=lambda frame: None, wait_key=lambda ms: next(keys), mouse_xy=mouse_xy)
     assert session.game.phase in ("COUNTDOWN", "RALLY")
+
+
+def test_the_fake_game_opens_with_the_intro_and_goes_through_the_menus_with_the_mouse_alone(monkeypatch):
+    from pingpong import hud
+    from pingpong.clock import FakeClock
+
+    monkeypatch.setattr(hud, "render", lambda *a, **kw: None)                  # the logic is under test here, not the pictures
+    clock = FakeClock(start_ns=1_000_000_000)
+    session = play.make_fake_session(play.parse_args(["--fake", "--no-audio", "--no-intro", "--mode", "match"]), clock=clock)
+    assert session.hud_state().screen == "TITLE" and session.flow.mode == "match"
+    assert play.make_fake_session(play.parse_args(["--fake", "--no-audio"])).hud_state().screen == "INTRO"
+    spots = [(0.5, 0.12), (0.95, 0.1), (0.5, 0.12), (0.72, 0.55), (0.5, 0.12), (0.5, 0.6), (0.5, 0.12)]     # (mouse x, y as fractions of the window)
+    when = [0.0, 0.4, 2.3, 2.7, 4.3, 4.7, 6.3]
+    seen, state = [], {"n": 0}
+
+    def mouse_xy():
+        state["n"] += 1
+        clock.advance_s(1 / 30)
+        t = state["n"] / 30
+        x, y = spots[max(k for k, start in enumerate(when) if t >= start)]
+        seen.append(session.hud_state().screen)
+        return play.W * x, play.H * y
+
+    keys = iter([255] * 330 + [ord("q")])
+    play.fake_loop(session, show=lambda frame: None, wait_key=lambda ms: next(keys), mouse_xy=mouse_xy)
+    assert session.game.phase in ("COUNTDOWN", "RALLY") and session.game.mode == "match" and "VS" in seen
+
+
+def test_the_new_way_in_can_be_left_out_or_quietened_from_the_command_line():
+    args = play.parse_args(["--fake"])
+    assert not args.no_intro and not args.no_music and not args.classic
+    args = play.parse_args(["--fake", "--no-intro", "--no-music", "--classic"])
+    assert args.no_intro and args.no_music and args.classic
 
 
 def test_live_play_hits_by_hand_contact_unless_asked_for_swings():

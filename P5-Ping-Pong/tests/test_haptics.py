@@ -303,3 +303,22 @@ def test_disarm_does_not_hold_the_scheduler_lock_while_it_writes_to_the_hub():
     t0 = time.monotonic()
     core.submit("hit_good")
     assert time.monotonic() - t0 < 0.05
+
+
+def test_the_menus_have_a_tick_for_pointing_at_a_button_and_a_buzz_and_beep_for_pressing_one():
+    tick, select = haptics.PATTERNS["menu_tick"], haptics.PATTERNS["menu_select"]
+    (pulse,) = [s for s in tick.steps if s.kind == "motors"]
+    assert pulse.ms <= 30 and not any(s.kind == "beep" for s in tick.steps)          # a tick you can barely hear
+    assert any(s.kind == "motors" for s in select.steps) and any(s.kind == "beep" for s in select.steps)
+    assert tick.priority == select.priority == 1                                      # any cue in a game outranks them
+
+
+def test_a_menu_tick_and_a_press_play_on_the_real_actuator_core():
+    core, dev, clock, _ = make()
+    core.submit("menu_tick")
+    drain(core, clock)
+    assert dev.writes and not [c for c in dev.calls if c[0] == "beep"]
+    clock.advance_s(0.3)                                                             # (one pattern per 100 ms)
+    core.submit("menu_select")
+    drain(core, clock)
+    assert [c for c in dev.calls if c[0] == "beep"]

@@ -8,13 +8,16 @@ Usage:
     ./pp play --player rafae --level 2 --mode match
     ./pp play --player guest          # no saved calibration, never publishes to the score topic
     ./pp play --no-publish --no-motor # rehearse without the broker / without motor pulses
+    ./pp play --no-intro --no-music   # straight to the title, quietly (the intro flies in from the sky and lasts ten seconds)
+    ./pp play --classic               # the plain lobby with its hold-the-hub-on-START button, no menus, no intro
     ./pp play --hit-mode swing        # the old game: only a swing the hub's IMU sees meets the ball (default: contact)
     ./pp play --swing-source pose     # the camera's hand speed detects swings (auto when the hub measured < 25 Hz)
     ./pp play --no-hub                # camera only: no hub, no haptics (bring-up, or a flat battery)
     ./pp play --board                 # the leaderboard (best streaks, match wins) and nothing else
 
-Keys:  SPACE start (and swing in --fake)  1-3 level  M mode  X x-ray  D motors  S sound  R reconnect hub  Q/ESC quit
-       --fake only:  J soft swing   K hard swing
+No keyboard needed: point with the hub (it is the cursor over the whole screen) and hold on a button to press it.
+Keys:  SPACE start now (and swing in --fake)  ENTER next  , . or arrows move  DELETE back  1-3 opponent  M game  X x-ray  D motors  S sound
+       R reconnect hub  Q/ESC quit       --fake only:  J soft swing   K hard swing
 Run camera/Bluetooth modes from Terminal.app, not from the Claude app.
 """
 
@@ -45,6 +48,10 @@ def make_parser():
     ap.add_argument("--no-motor", action="store_true", help="mute the hub motors (beep + light stay)")
     ap.add_argument("--no-record", action="store_true", help="do not write recordings/<session>/ (IMU, pose, events)")
     ap.add_argument("--no-audio", action="store_true", help="no game sounds (the S key mutes while playing)")
+    ap.add_argument("--no-music", action="store_true", help="the sounds but no music in the intro and the menus")
+    ap.add_argument("--no-intro", action="store_true", help="start at the title: skip the flight in from the sky")
+    ap.add_argument("--classic", action="store_true",
+                    help="the plain lobby (hold the hub on START, or SPACE) instead of the intro, title and menus")
     ap.add_argument("--no-spin", action="store_true", help="ignore the trained spin model: every ball is flat")
     ap.add_argument("--hit-mode", choices=("contact", "swing"), default="contact",
                     help="contact: the hand moving into the ball hits it and a flick of the wrist spins it; "
@@ -124,13 +131,20 @@ def fake_loop(session, *, show, wait_key, mouse_xy):
             return
 
 
+def make_flow(args):
+    """The way into a game (intro, title, the choice of game and of opponent, the results), or None for --classic."""
+    from pingpong.flow import Flow
+
+    return None if args.classic else Flow(intro=not args.no_intro, level_tag=args.level, mode=args.mode)
+
+
 def make_fake_session(args, clock=None):
-    """The --fake game: the mouse is the hand, so holding it in the top right of the window starts a game as the hub does."""
+    """The --fake game: the mouse is the hand, so pointing it at the screen and holding works as with the hub."""
     from pingpong import app
     from pingpong.clock import Clock
 
     return app.make_session(level=args.level, mode=args.mode, target=args.target, clock=clock or Clock(), client=None,
-                            source="fake", seed=args.seed, hold_start=True)
+                            source="fake", seed=args.seed, hold_start=True, flow=make_flow(args))
 
 
 def run_fake(args):
@@ -140,7 +154,7 @@ def run_fake(args):
     if not args.no_audio:
         from pingpong.audio import Audio
 
-        session.audio = Audio()
+        session.audio = Audio(music=not args.no_music)
         session.audio.start()
     mouse = {"xy": (W // 2, int(H * 0.7))}
     cv2.namedWindow(TITLE)
@@ -217,7 +231,7 @@ def run_live(args):
         sensor = "camera" if rig.swing_source == "pose" else "hub gyro"
         hub = "no hub" if rig.hub_status() == "off" else "hub ready"
         print(f"live: player {rig.player!r}, swings from the {sensor}, {hub}, camera on. "
-              "SPACE or the START card begins; Q quits.")
+              "Point the hub at the screen and hold on a button, or SPACE / the START card to begin; Q quits.")
         run_loop(rig, show=lambda frame: cv2.imshow(TITLE, frame), wait_key=cv2.waitKey)
     except KeyboardInterrupt:
         pass

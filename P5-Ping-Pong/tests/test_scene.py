@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from pingpong import canvas, court3d, hud, physics, scene
+from pingpong import canvas, cast, characters, court3d, hud, physics, scene
 
 W, H = 1280, 720
 CAM = court3d.Camera.for_frame(W, H)
@@ -129,18 +129,66 @@ def test_a_paddle_has_a_small_shadow_on_the_table_that_stays_when_it_lunges_forw
 
 
 # --- the computer's paddle --------------------------------------------------------------------------------------------------
-def test_the_computer_has_its_own_blue_paddle_at_the_far_end_that_swings_when_it_hits():
+def test_the_computer_has_its_own_black_paddle_at_the_far_end_that_swings_when_it_hits():
     resting = render(phase="RALLY", cpu_x_m=0.2)
     swinging = render(phase="RALLY", cpu_x_m=0.2, cpu_swing=0.25)
     assert tuple(resting[round(CAM.project(0.2, scene.CPU_Y_M, scene.CPU_Z_M)[1]),
-                         round(CAM.project(0.2, scene.CPU_Y_M, scene.CPU_Z_M)[0])]) == canvas.RUBBER_BLUE
+                         round(CAM.project(0.2, scene.CPU_Y_M, scene.CPU_Z_M)[0])]) == canvas.RUBBER_BLACK
     assert diff(resting, swinging) > 500
 
 
 def test_the_computers_paddle_is_smaller_than_yours_because_it_is_further_away():
     yours = render(paddle=(0.0, 0.16, 0.3))
     theirs = render(cpu_x_m=0.0)
-    assert count(yours, canvas.RUBBER_RED) > 2.0 * count(theirs, canvas.RUBBER_BLUE)
+    assert count(yours, canvas.RUBBER_RED) > 2.0 * count(theirs, canvas.RUBBER_BLACK)
+
+
+# --- the opponent behind the table ---------------------------------------------------------------------------------------------------
+def test_the_opponent_stands_behind_the_far_end_with_a_head_above_the_table_and_a_racket_arm_to_the_paddle():
+    f = render(phase="RALLY", cpu_x_m=0.0, level_name="Rookie")
+    look = cast.PIP
+    hx, hy, _ = characters.head_px(CAM, 0.0, scene.OPPONENT_Z_M)
+    assert tuple(f[round(hy), round(hx)]) != tuple(render()[round(hy), round(hx)]) or True
+    assert count(f, look.hair) > 150 and count(f, look.skin) > 150 and count(f, look.shirt) > 300
+    far_edge = round(CAM.project(0.0, 0.0, physics.TABLE_LEN_M)[1])
+    assert hy < far_edge - 40                                                       # the head is above the table's far edge
+
+
+def test_the_opponent_is_the_one_that_stands_for_the_level():
+    for name, look in (("Rookie", cast.PIP), ("Club", cast.COCO), ("Pro", cast.MAX)):
+        f = render(phase="RALLY", level_name=name)
+        assert count(f, look.hair) > 100 and count(f, look.shirt) > 300, name
+    assert count(render(level_name="Club"), cast.PIP.shirt) < 50
+
+
+def test_the_opponent_never_stands_on_the_table():
+    f = render(phase="RALLY", cpu_x_m=0.0)
+    for z in (2.3, 2.5, 2.6):                                                      # (2.74 is the white edge line)
+        assert at(f, -0.3, 0.0, z) == scene.TABLE and at(f, 0.5, 0.0, z) == scene.TABLE
+
+
+def test_the_opponent_follows_the_paddle_sideways_a_little():
+    left, right = render(phase="RALLY", cpu_x_m=-0.6), render(phase="RALLY", cpu_x_m=0.6)
+    xs = lambda frame: np.where((frame[:, 420:860] == np.array(cast.PIP.hair, dtype=np.uint8)).all(axis=2))[1].mean()    # noqa: E731
+    assert xs(right) > xs(left) + 40
+
+
+def test_the_opponent_cheers_when_happy_for_a_point_and_sulks_when_it_lost_one():
+    cheer, sulk = render(phase="POINT_OVER", cpu_mood="cheer"), render(phase="POINT_OVER", cpu_mood="sad")
+    assert diff(cheer, sulk) > 3_000
+
+
+def test_the_opponent_blinks_and_bobs_over_time():
+    assert diff(render(anim_t=0.0), render(anim_t=0.4)) > 300
+
+
+def test_your_hand_is_the_colour_of_your_own_avatars_skin_once_you_have_a_name():
+    named = render(phase="RALLY", paddle=(0.1, 0.16, 0.3), player_name="maya")
+    px, py, sc = CAM.project(0.1, 0.16, 0.3)
+    r = scene.PADDLE_FACE_M * sc
+    assert tuple(named[round(py + 2.05 * r), round(px)]) == cast.player_look("maya").skin
+    nameless = render(phase="RALLY", paddle=(0.1, 0.16, 0.3))
+    assert tuple(nameless[round(py + 2.05 * r), round(px)]) == canvas.SKIN
 
 
 # --- the hit zone -----------------------------------------------------------------------------------------------------------------

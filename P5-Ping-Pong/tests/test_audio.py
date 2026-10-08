@@ -159,3 +159,79 @@ def test_a_backend_that_cannot_list_devices_still_plays_on_the_default():
     a = audio.Audio(backend=sound)
     a.start()
     assert a.enabled and sound.options.get("device") is None
+
+
+# --- the music channel ------------------------------------------------------------------------------------------------------------------
+def test_music_fades_in_loops_and_fades_out_through_the_mixer():
+    mixer = audio.Mixer()
+    tune = np.full(1000, 0.5, dtype=np.float32)
+    mixer.set_music(tune, fade_s=0.01)                                    # 441 frames of fade
+    first = mixer.read(200)
+    assert first[0] < 0.05 < first[-1] < 0.5                              # rising
+    mixer.read(400)
+    steady = mixer.read(300)
+    assert np.allclose(steady, 0.5 * audio.MUSIC_GAIN) and mixer.music_active
+    for _ in range(10):
+        looped = mixer.read(500)                                          # far past the end of the clip: it goes round
+    assert np.allclose(looped, 0.5 * audio.MUSIC_GAIN)
+    mixer.stop_music(fade_s=0.01)
+    mixer.read(600)
+    assert np.allclose(mixer.read(100), 0.0) and not mixer.music_active
+
+
+def test_a_new_tune_waits_for_the_old_one_to_fade_and_then_comes_in():
+    mixer = audio.Mixer()
+    mixer.set_music(np.full(5000, 0.5, dtype=np.float32), fade_s=0.005)
+    mixer.read(1000)
+    mixer.set_music(np.full(5000, -0.5, dtype=np.float32), fade_s=0.005)
+    mixer.read(600)
+    later = mixer.read(1000)
+    assert later[-1] < 0 and mixer.music_active
+
+
+def test_the_music_is_mixed_under_the_effects_and_the_sum_still_never_clips():
+    mixer = audio.Mixer()
+    mixer.set_music(np.full(5000, 0.9, dtype=np.float32), fade_s=0.001)
+    for _ in range(6):
+        mixer.add(np.full(2000, 0.9, dtype=np.float32))
+    mixer.read(300)
+    assert float(np.abs(mixer.read(300)).max()) <= 1.0
+
+
+def test_audio_plays_and_stops_music_by_name_and_mutes_it_with_everything_else():
+    sound = FakeSound()
+    a = audio.Audio(backend=sound)
+    a.start()
+    a.play_music("menu")
+    out = np.zeros((4096, 1), dtype=np.float32)
+    for _ in range(6):
+        sound.stream.callback(out, 4096, None, None)
+    assert a.mixer.music_active and float(np.abs(out).max()) > 0.01 and a.music_playing == "menu"
+    a.muted = True
+    assert a.music_playing is None                                       # the S key silences the music as well
+    a.muted = False
+    assert a.music_playing == "menu"                                     # and it comes back to the tune the screens want
+    a.play_music(None)
+    assert a.music_playing is None
+    a.muted = True
+    a.play_music("intro")
+    assert a.music_playing is None
+    a.muted = False
+    assert a.music_playing == "intro"
+
+
+def test_music_can_be_left_off_and_a_name_nobody_knows_is_ignored():
+    a = audio.Audio(backend=FakeSound(), music=False)
+    a.start()
+    a.play_music("menu")
+    assert a.music_playing is None
+    b = audio.Audio(backend=FakeSound())
+    b.start()
+    b.play_music("no such tune")
+    assert b.music_playing is None
+
+
+def test_a_machine_with_no_sound_just_has_no_music():
+    a = audio.Audio(backend=None)
+    a.play_music("menu")
+    assert a.music_playing is None and not a.enabled

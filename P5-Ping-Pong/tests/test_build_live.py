@@ -278,14 +278,31 @@ def test_a_pose_model_with_an_unreadable_file_is_the_default_one_not_a_crash(tmp
     assert asked == ["lite"]
 
 
-def test_a_live_session_can_be_started_by_holding_the_hub_on_the_button_with_no_keyboard(tmp_path):
+def test_a_live_session_opens_with_the_intro_and_the_flow_carries_the_choices_from_the_command_line(tmp_path):
+    rig = live.build_live(live_args("--player", "rafae", "--level", "3", "--mode", "match"), FakeEnv(), player_root=tmp_path)
+    flow = rig.session.flow
+    assert flow is not None and rig.session.hud_state().screen == "INTRO"
+    assert (flow.level_tag, flow.mode) == (3, "match")
+    rig.close()
+
+
+def test_the_intro_can_be_skipped_and_the_music_left_off_from_the_command_line(tmp_path):
+    rig = live.build_live(live_args("--player", "rafae", "--no-intro", "--no-music"), FakeEnv(), player_root=tmp_path)
+    assert rig.session.hud_state().screen == "TITLE" and rig.audio.music_on is False
+    rig.close()
     rig = live.build_live(live_args("--player", "rafae"), FakeEnv(), player_root=tmp_path)
-    assert rig.session.hold_start is not None
+    assert rig.audio.music_on is True
+    rig.close()
+
+
+def test_the_classic_lobby_is_still_there_for_the_asking_with_its_hold_to_start_button(tmp_path):
+    rig = live.build_live(live_args("--player", "rafae", "--classic"), FakeEnv(), player_root=tmp_path)
+    assert rig.session.flow is None and rig.session.hold_start is not None
     assert rig.session.hud_state().start_button == (0.0, False)          # the screen shows the button from the first frame
     rig.close()
 
 
-def test_holding_the_hand_in_the_top_right_of_the_reach_starts_a_game_through_the_whole_live_pipeline(tmp_path):
+def test_holding_the_hand_in_the_top_right_of_the_reach_starts_a_game_in_the_classic_lobby_through_the_whole_live_pipeline(tmp_path):
     """Fake camera -> pose landmarks -> body tracker -> poses -> session: the same chain the real camera feeds."""
     env = FakeEnv()
     t0 = env.clock.now_ns()
@@ -293,7 +310,7 @@ def test_holding_the_hand_in_the_top_right_of_the_reach_starts_a_game_through_th
     middle, corner = box.to_uv(0.5, 0.5), box.to_uv(0.95, 0.9)
     env.make_landmarker = lambda model="lite": FakeLandmarker(
         lambda t_ns: middle if (t_ns - t0) / 1e9 < 0.5 else corner, env.clock)
-    rig = live.build_live(live_args("--player", "newbie"), env, player_root=tmp_path)
+    rig = live.build_live(live_args("--player", "newbie", "--classic"), env, player_root=tmp_path)
     shown = []
     for _ in range(60 * 4):                                                    # four seconds at 60 Hz
         env.sleep(1 / 60)
@@ -302,6 +319,33 @@ def test_holding_the_hand_in_the_top_right_of_the_reach_starts_a_game_through_th
         shown.append(rig.session.hud_state().start_button)
     assert rig.session.game.phase in ("COUNTDOWN", "RALLY")
     assert any(b is not None and b[0] > 0.5 for b in shown)                    # the bar filled on the way
+    rig.close()
+
+
+def test_the_hand_alone_carries_a_player_through_the_title_and_the_menus_into_a_game_through_the_whole_live_pipeline(tmp_path):
+    """Nothing but the pointing hand: START on the title, a match, the Club opponent, the face-off, and the game is on."""
+    env = FakeEnv()
+    t0 = env.clock.now_ns()
+    box = profile.Calibration.default().box
+    spots = [(0.5, 0.9), (0.95, 0.9), (0.5, 0.9), (0.72, 0.45), (0.5, 0.9), (0.5, 0.4), (0.5, 0.9)]
+    # (seconds from the start at which the hand moves to each place): away, START, away, MATCH, away, the Club card, away
+    when = [0.0, 0.4, 2.3, 2.7, 4.3, 4.7, 6.3]
+
+    def hand(t_ns):
+        t = (t_ns - t0) / 1e9
+        return box.to_uv(*spots[max(k for k, start in enumerate(when) if t >= start)])
+
+    env.make_landmarker = lambda model="lite": FakeLandmarker(hand, env.clock)
+    rig = live.build_live(live_args("--player", "newbie", "--no-intro"), env, player_root=tmp_path)
+    screens = []
+    for _ in range(60 * 11):
+        env.sleep(1 / 60)
+        rig.vision.step()
+        rig.pump()
+        screens.append(rig.session.hud_state().screen)
+    assert [s for k, s in enumerate(screens) if k == 0 or s != screens[k - 1]][:5] == ["TITLE", "MODE", "OPPONENT", "VS", "GAME"]
+    assert rig.session.game.mode == "match" and rig.session.game.level.name == "Club"
+    assert rig.session.game.phase in ("COUNTDOWN", "RALLY")
     rig.close()
 
 

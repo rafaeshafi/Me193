@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
-RUBBER_RED, RUBBER_BLUE = (35, 35, 200), (190, 85, 30)           # BGR: a table-tennis paddle is red on one side, blue/black on the other
+RUBBER_RED, RUBBER_BLACK = (35, 35, 200), (44, 40, 38)          # BGR: a table-tennis paddle is red on one side, black on the other
 WOOD, WOOD_DARK, RIM = (100, 165, 220), (45, 85, 140), (25, 25, 25)
 SKIN, SKIN_DARK = (130, 175, 235), (70, 105, 165)
 
@@ -82,9 +82,19 @@ def draw_fitted(frame, text, center_x, top_y, max_w, *, max_scale=1.7, min_scale
     return len(lines)
 
 
-def draw_paddle(frame, cx, cy, radius, *, rubber=RUBBER_RED, angle_deg=0.0, handle_up=False, hand=False):
+GRIP_RADII = 2.05                                                     # the grip is this many face radii from the face's centre
+
+
+def paddle_grip(cx, cy, radius, angle_deg, *, handle_up=False):
+    """Where a hand holds a paddle whose face is centred on (cx, cy): on the handle, below the face (above it for the
+    player at the far end), turned with the paddle (a positive angle is clockwise as the player sees it)."""
+    a, sign = math.radians(angle_deg), (-1.0 if handle_up else 1.0)
+    return cx - sign * math.sin(a) * GRIP_RADII * radius, cy + sign * math.cos(a) * GRIP_RADII * radius
+
+
+def draw_paddle(frame, cx, cy, radius, *, rubber=RUBBER_RED, angle_deg=0.0, handle_up=False, hand=False, skin=None):
     """A table-tennis paddle: a rubber face inside a black rim, on a short wooden handle (and, if asked, the fist
-    holding it).
+    holding it, in `skin`).
 
     (cx, cy) is the centre of the FACE, which is the surface that hits the ball; the handle hangs below it (above it
     for the player at the far end) and swings about the face's centre by angle_deg."""
@@ -98,10 +108,11 @@ def draw_paddle(frame, cx, cy, radius, *, rubber=RUBBER_RED, angle_deg=0.0, hand
                        (near[0] - n[0] * 0.22 * radius, near[1] - n[1] * 0.22 * radius)], dtype=np.int32)
     cv2.fillConvexPoly(frame, handle, WOOD, cv2.LINE_AA)
     cv2.polylines(frame, [handle], True, WOOD_DARK, 2, cv2.LINE_AA)
-    if hand:                                                            # the fist round the handle, below the face
-        fist = (round(cx + d[0] * 2.05 * radius), round(cy + d[1] * 2.05 * radius))
-        cv2.circle(frame, fist, max(3, round(0.5 * radius)), SKIN_DARK, -1, cv2.LINE_AA)
-        cv2.circle(frame, fist, max(2, round(0.42 * radius)), SKIN, -1, cv2.LINE_AA)
+    if hand:                                                            # the fist round the handle
+        fist = tuple(round(v) for v in paddle_grip(cx, cy, radius, angle_deg, handle_up=handle_up))
+        colour = SKIN if skin is None else tuple(skin)
+        cv2.circle(frame, fist, max(3, round(0.5 * radius)), tuple(int(c * 0.6) for c in colour), -1, cv2.LINE_AA)
+        cv2.circle(frame, fist, max(2, round(0.42 * radius)), colour, -1, cv2.LINE_AA)
     cv2.circle(frame, (cx, cy), radius, RIM, -1, cv2.LINE_AA)
     cv2.circle(frame, (cx, cy), round(0.9 * radius), rubber, -1, cv2.LINE_AA)
     shine = tuple(min(255, c + 80) for c in rubber)                     # a glossy arc on the upper left of the rubber

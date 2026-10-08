@@ -121,23 +121,47 @@ before and after the filter, so more games make the next training better. `./pp 
 ./pp play --player rafae --swing-source pose   # the camera's hand speed detects swings (auto if the hub is < 25 Hz)
 ./pp play --no-hub                       # camera only: no hub, no haptics (bring-up, or a flat battery)
 ./pp play --board                        # the leaderboard and nothing else
+./pp play --no-intro --no-music          # straight to the title, quietly
+./pp play --classic                      # the plain lobby (hold the hub on START, or SPACE): no intro, no menus
+./pp showcase                            # the intro as a video and a picture of every screen, in data/showcase/
 ```
 
-Show the **START card** (or press SPACE), or, with no keyboard at all, **hold the hub on the START button** in the top
-right of the screen for 1.5 s: your hand is a cursor over the whole screen (its place in your calibrated reach box is where
-the ring stands), so reach to the top right of your reach; the bar fills while you hold, a flicker of the reading shorter
-than 0.3 s does not undo it, and on the game-over screen the same hold plays again (leave the corner once first, so a hand
-that ended the game up there does not restart it). Then 3-2-1, and the computer serves. Show **card 1, 2 or 3**
-between rallies to change the level; **M** switches Rally/Match; **1–3** also set the level.
+**The way in.** The game opens like a console sports game, and none of it needs the keyboard. An **intro** flies in out of a flash
+of sunlight over the clouds, across a little island with its palms, along the pier and down onto the sunny terrace where the
+table stands, and lands exactly on the camera the game is played from (ten seconds; hold the hub in the top right to skip it).
+The **title** has the name of the game, who is playing and whether the hub and the broker are up, and a **START** button. Then
+you choose a **game** (a *Rally*: keep it going as long as you can; or a *Match* to 7) and an **opponent**: *Pip* (Rookie),
+*Coco* (Club) or *Max* (Pro), each with a portrait, stars for how fast, how well covered and how spinny they are, and a line they
+like to say; after a **face-off** with the two of you and a big VS comes the 3-2-1. When it is over the **results** show who won
+(or the new record), the numbers (hits, longest rally, top speed, time) and the leaderboard, with **PLAY AGAIN** and **CHANGE
+OPPONENT**. Your avatar is made from your name (the same one every time), the people on the terrace cheer, and the opponent
+at the far end cheers or sulks with the score. All the pictures and music are drawn and synthesised by the game itself
+(`pingpong/resort*.py`, `characters.py`, `screens*.py`, `intro.py`, `music.py`); they are original, nothing is loaded from disk.
+
+**Pointing.** Your hand is the cursor over the whole screen: its place in your calibrated reach box is where the little paddle
+stands, so reaching to the top right of your reach is reaching the top right of the screen. Hold it on a button until the fill
+runs across (START and PLAY AGAIN take 1.5 s, the cards and BACK about a second; the hub ticks when you come onto one and buzzes
+and beeps when it is pressed). A flicker of the reading shorter than 0.3 s does not undo a hold, and a hand that was already on
+a button when its screen came up has to leave once first, so one hold is one press. The keys do the same (below), and so do the
+cards: **card 0** starts a game at once with the choices so far (the assignment's own way in), **card 1, 2 or 3** picks the
+opponent.
+
+On a plain lobby (`--classic`) show the **START card** (or press SPACE), or **hold the hub on the START button** in the top
+right of the screen for 1.5 s (the same pointing, the bar fills while you hold, and on the game-over screen the same hold plays
+again). Then 3-2-1, and the computer serves. Show **card 1, 2 or 3** between rallies to change the level; **M** switches
+Rally/Match.
 
 | Key | |
 |---|---|
-| SPACE | start (and swing, in `--fake`) |
-| 1 2 3 | level: Rookie, Club, Pro |
+| SPACE | start a game now with the choices so far (and swing, in `--fake`) |
+| Enter | the next screen / take the choice in focus |
+| , and . (or the arrow keys) | move along the choices |
+| Delete | back one screen |
+| 1 2 3 | opponent: Rookie, Club, Pro |
 | M | Rally / Match |
 | X | x-ray: why each swing did or did not count |
 | D | disarm the motors (beep and light stay) |
-| S | mute / unmute the sounds |
+| S | mute / unmute the sounds and the music |
 | R | ask a lost hub to reconnect |
 | Q / Esc | quit (stops the motors, saves, lets the hub go) |
 | J / K | soft / hard swing (`--fake` only) |
@@ -148,17 +172,19 @@ between rallies to change the level; **M** switches Rally/Match; **1–3** also 
 | Club | 5.0 m/s | 0.60 s | 0.30 / 0.16 s | 0.55 | never | the middle 80% |
 | Pro | 7.0 m/s | 0.43 s | 0.22 / 0.12 s | 0.42 | hard and sloppy | the whole box |
 
-**What the screen shows.** A table in perspective, seen from behind your end (the camera that draws it is 1.4 m up and
-1.8 m behind your edge, pitched down 28 degrees; `pingpong/court3d.py`). The **red paddle is yours**: it stands on the table
-where your hand puts it, **across** the table as you move left and right and **up the table** as you raise your hand, gets
-smaller and higher on the screen as it reaches forward, **turns when you turn the hub** in your fist, and has a fist
-round its handle. The **blue paddle is the computer**: it waits where it hit, moves to where your shot will land, and
-flicks when it hits the ball back. The ball is a yellow disc with a **shadow on the table**, so how high it is and how far
-off it is can be read, and it **bounces once** on each side. The **amber oval on the table** is your paddle's reach: it is
-as wide as the level allows across and as long as the level's timing window is along the table; a ball whose shadow is
-inside it can be hit, and over the amber line across the paddle it is exactly on time. The two boxes at the sides are
-the streak and the best (Rally) or the points (Match); the camera picture is in the bottom corner. `--set level.radius_sw=0.9`
-widens the oval, `--set level.early_s=0.6` lengthens it.
+**What the screen shows.** A blue table in perspective on a sunny terrace, seen from behind your end (the camera that draws it
+is 1.4 m up and 1.8 m behind your edge, pitched down 28 degrees; `pingpong/court3d.py`). The **red paddle is yours**: it stands
+on the table where your hand puts it, **across** the table as you move left and right and **up the table** as you raise your
+hand, gets smaller and higher on the screen as it reaches forward, **turns when you turn the hub** in your fist, and has a fist
+round its handle (in the colour of your own avatar's skin). The **black paddle is the opponent's**, held by the person standing
+behind the far end: it waits where it hit, moves to where your shot will land, and flicks when it hits the ball back. The ball
+is an orange disc with a **shadow on the table**, so how high it is and how far off it is can be read, and it **bounces once** on
+each side. The **amber oval on the table** is your paddle's reach: it is as wide as the level allows across and as long as the
+level's timing window is along the table; a ball whose shadow is inside it can be hit, and over the amber line across the paddle
+it is exactly on time. A card in each top corner shows the two sides (your portrait and the streak or points; in a Rally the
+other card is the best streak), the game and level are in a tag under yours, the speed and quality of each hit are in a bar at
+the bottom, and the camera picture, in a rounded window, is in the bottom corner. `--set level.radius_sw=0.9` widens the oval,
+`--set level.early_s=0.6` lengthens it.
 
 **One shot.** The computer's ball bounces on your half and passes your paddle at a known instant. You swing; the swing
 detector reports the gyro's peak (back-dated to when it really peaked), the judge dates the **contact** a stroke later

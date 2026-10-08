@@ -81,6 +81,8 @@ PATTERNS = {p.name: p for p in (
                          _light(le.LEGO_COLOR_RED, le.LIGHT_PATTERN_LONG_BLINK))),
     Pattern("point_won", 3, (_motors(0, 25, 50), _motors(125, 25, 50), _motors(250, 200, 50),
                              _beep(880, 2, le.SOUND_PATTERN_BEEP_DOUBLE), _light(le.LEGO_COLOR_GREEN))),
+    Pattern("menu_tick", 1, (_motors(0, 20, 35),)),                                  # the hand comes onto a button in a menu
+    Pattern("menu_select", 1, (_motors(0, 45, 70), _beep(1320))),                    # ... and holds on it until it is pressed
     Pattern("record", 4, tuple(_motors(160 * i, 40, 80) for i in range(5)) + (
         _beep(2000, 3, le.SOUND_PATTERN_BEEP_TRIPLE), _light(le.LEGO_COLOR_PURPLE))),
 )}

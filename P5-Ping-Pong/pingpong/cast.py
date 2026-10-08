@@ -47,6 +47,11 @@ SHIRTS = tuple(rgb(*c) for c in ((255, 120, 90), (255, 200, 40), (80, 170, 255),
 TRIMS = tuple(rgb(*c) for c in ((255, 255, 255), (255, 232, 120), (40, 60, 130), (255, 120, 90)))
 
 
+def opponent_by_name(level_name):
+    """The opponent for the level's name as the HUD carries it (Rookie, Club, Pro, Insane)."""
+    return {"Rookie": PIP, "Club": COCO, "Pro": MAX, "Insane": MAX}.get(level_name, PIP)
+
+
 def opponent_for(level):
     """The opponent that stands for a level (the Insane row, which has no card, borrows the hardest one)."""
     return OPPONENTS.get(level.tag, MAX)
