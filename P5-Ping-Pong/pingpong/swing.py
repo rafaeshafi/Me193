@@ -257,5 +257,4 @@ class SwingDetector:
     def _event(self, kind, t_ns, w_pk, dur_ms, reversals, g, net, a_lin, clipped, feat=None):
         return SwingEvent(kind=kind, t_ns=t_ns, w_pk=float(w_pk), dur_ms=float(dur_ms), n_reversals=reversals,
                           axis_unit=_unit(g), net_rot_unit=_unit(net), a_lin_unit=_unit(a_lin),
-                          clipped=clipped, feat=tuple(feat) if feat is not None else (0.0,) * 12, src=self._src,
-                          g_dps=tuple(float(c) for c in g), net_rot_deg=tuple(float(c) for c in net))
+                          clipped=clipped, feat=tuple(feat) if feat is not None else (0.0,) * 12, src=self._src)

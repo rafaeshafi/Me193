@@ -1,8 +1,5 @@
-"""How the ball leaves the paddle: the path of the hand and the twist of the hub decide aim, loft and spin.
-
-The hand's velocity over the stroke comes from the pose track; the hub's twist is the rotation it made about the doorknob
-direction (the tilt calibration's axis, made perpendicular to the stroke axis) during the stroke, compared with what this
-player's strokes usually do about it."""
+"""How the ball leaves the paddle: the path of the hand decides where it goes, how high and (when the hand into the ball is
+the hit) how hard.  The spin is the wrist flick's (tests/test_flick.py)."""
 
 import math
 
@@ -51,83 +48,65 @@ def test_too_few_readings_or_too_short_a_stretch_give_no_path_instead_of_a_wild_
     assert strokepath.hand_path([], PEAK) is None
 
 
-# --- the twist of the hub ----------------------------------------------------------------------------------------------------
-def test_the_wrist_axis_is_the_doorknob_axis_made_perpendicular_to_the_stroke():
-    u_fwd, tilt = (1.0, 0.0, 0.0), (0.6, 0.8, 0.0)
-    axis = strokepath.wrist_axis(u_fwd, tilt)
-    assert axis == pytest.approx((0.0, 1.0, 0.0), abs=1e-9)
-    assert sum(a * b for a, b in zip(axis, u_fwd)) == pytest.approx(0.0, abs=1e-9)
-    assert strokepath.wrist_axis(u_fwd, (-0.6, -0.8, 0.0)) == pytest.approx((0.0, -1.0, 0.0), abs=1e-9)    # the sign (right = +) is kept
+def test_the_window_can_end_at_the_moment_the_paddle_met_the_ball():
+    moving_then_still = track(3.0, 0.0, start=-0.30, stop=0.0) + track(0.0, 0.0, start=0.001, stop=0.5, u0=0.2 + 3.0 * 0.0)
+    path = strokepath.hand_path(moving_then_still, PEAK, window_s=(-0.25, 0.0))
+    assert path.vu == pytest.approx(3.0, rel=0.1)
 
 
-def test_without_a_tilt_calibration_or_with_the_doorknob_along_the_stroke_there_is_no_wrist_axis():
-    assert strokepath.wrist_axis((1.0, 0.0, 0.0), None) is None
-    assert strokepath.wrist_axis((1.0, 0.0, 0.0), (0.999, 0.01, 0.0)) is None
-
-
-def test_the_twist_is_the_rotation_about_the_wrist_axis_in_degrees():
-    assert strokepath.twist_deg((75.0, -20.0, 5.0), (0.0, 1.0, 0.0)) == pytest.approx(-20.0)
-    assert strokepath.twist_deg((75.0, -20.0, 5.0), None) is None
-    assert strokepath.twist_deg((0.0, 0.0, 0.0), (0.0, 1.0, 0.0)) == 0.0
-
-
-def test_a_twist_is_measured_against_what_the_players_strokes_usually_do_once_enough_hits_are_known():
-    base = strokepath.TwistBaseline(sd_deg=30.0, warmup=4)
-    assert [base.z(t) for t in (-20.0, -25.0, -18.0, -22.0)] == [0.0, 0.0, 0.0, 0.0]         # still learning what is usual
-    assert base.z(-21.0) == pytest.approx(0.0, abs=0.1)                                        # the usual: no sidespin
-    assert base.z(9.0) == pytest.approx(1.0, abs=0.1)                                          # 30 degrees more to the right
-    assert base.z(-51.0) == pytest.approx(-1.0, abs=0.1)
-    assert base.z(9.0) == pytest.approx(1.0, abs=0.1)                                          # the usual does not drift with it
-    assert base.z(None) == 0.0
-
-
-# --- the shape of the return -----------------------------------------------------------------------------------------------------
+# --- how hard ------------------------------------------------------------------------------------------------------------------
 M = strokepath.ShotModel()
 
 
-def shape(vu, vv, z=0.0, model=M):
-    return strokepath.shape_return(strokepath.HandPath(vu, vv, 10), z, model)
+def test_a_hand_that_barely_moves_is_a_block_and_a_fast_one_a_full_hit_in_between_it_is_proportional():
+    assert strokepath.hand_strength(strokepath.HandPath(0.2, 0.1, 9), M) == 0.0
+    assert strokepath.hand_strength(strokepath.HandPath(0.0, M.hand_hi_sw_s, 9), M) == 1.0
+    assert strokepath.hand_strength(strokepath.HandPath(9.0, 9.0, 9), M) == 1.0
+    mid = strokepath.hand_strength(strokepath.HandPath(3.0 * 0.6, 3.0 * 0.8, 9), M)                     # 3.0 shoulder widths a second
+    assert mid == pytest.approx((3.0 - M.hand_lo_sw_s) / (M.hand_hi_sw_s - M.hand_lo_sw_s))
+    assert strokepath.hand_strength(None, M) == 0.0                                                     # a hand nobody saw moving
+
+
+# --- the shape of the return -----------------------------------------------------------------------------------------------------
+def shape(vu, vv, top=0.0, side=0.0, model=M):
+    return strokepath.shape_return(strokepath.HandPath(vu, vv, 10), top, side, model)
 
 
 def test_a_hand_at_rest_or_unseen_changes_nothing():
-    flat = strokepath.shape_return(None, 0.0, M)
+    flat = strokepath.shape_return(None, 0.0, 0.0, M)
     assert (flat.aim_shift, flat.loft_m, flat.topspin, flat.sidespin) == (0.0, 0.0, 0.0, 0.0)
-    assert shape(0.0, 0.0).topspin == 0.0
+    assert shape(0.0, 0.0).loft_m == 0.0
 
 
-def test_a_stroke_that_lifts_gives_loft_and_topspin_and_a_stroke_that_chops_gives_backspin_and_no_loft():
+def test_a_stroke_that_lifts_gives_a_higher_arc_and_one_that_chops_does_not_flatten_below_the_net_clearing_arc():
     up, down = shape(0.0, 2.5), shape(0.0, -2.5)
-    assert up.loft_m == pytest.approx(M.k_loft_m) and up.topspin == pytest.approx(M.k_top) and up.sidespin == 0.0
-    assert down.loft_m == 0.0 and down.topspin == pytest.approx(-M.k_top)
-    assert shape(0.0, 1.0).topspin < up.topspin
+    assert up.loft_m == pytest.approx(M.k_loft_m) and down.loft_m == 0.0
+    assert up.topspin == 0.0 and down.topspin == 0.0                       # the path no longer makes spin: the flick does
 
 
-def test_a_stroke_that_goes_sideways_places_the_ball_that_way_and_puts_sidespin_on_it_mirror_image():
+def test_a_stroke_that_goes_sideways_places_the_ball_that_way_mirror_image_and_makes_no_spin():
     right, left = shape(2.5, 0.0), shape(-2.5, 0.0)
-    assert right.aim_shift == pytest.approx(M.k_aim) and right.sidespin == pytest.approx(M.k_side_path)
-    assert left.aim_shift == pytest.approx(-right.aim_shift) and left.sidespin == pytest.approx(-right.sidespin)
-    assert right.topspin == 0.0 and right.loft_m == 0.0
+    assert right.aim_shift == pytest.approx(M.k_aim) and left.aim_shift == pytest.approx(-M.k_aim)
+    assert right.sidespin == 0.0 and left.sidespin == 0.0
 
 
-def test_a_twist_of_the_hub_adds_sidespin_on_its_own_and_with_the_path():
-    twisted = shape(0.0, 0.0, z=1.0)
-    assert twisted.sidespin == pytest.approx(M.k_side_twist) and twisted.aim_shift == 0.0
-    assert shape(2.5, 0.0, z=1.0).sidespin == pytest.approx(M.k_side_path + M.k_side_twist)
-    assert strokepath.shape_return(None, 1.0, M).sidespin == pytest.approx(M.k_side_twist)          # with no path, the twist still counts
+def test_the_flicks_spin_passes_through_clipped_to_minus_one_to_one():
+    s = shape(0.0, 0.0, top=0.4, side=-0.3)
+    assert (s.topspin, s.sidespin) == (0.4, -0.3)
+    wild = shape(0.0, 0.0, top=7.0, side=-7.0)
+    assert (wild.topspin, wild.sidespin) == (1.0, -1.0)
 
 
-def test_a_hand_speed_counts_only_up_to_a_cap_and_spin_never_leaves_minus_one_to_one():
-    wild = shape(40.0, 40.0, z=9.0)
-    assert wild.aim_shift == pytest.approx(M.k_aim * M.speed_cap) and wild.topspin == pytest.approx(M.k_top * M.speed_cap)
-    assert -1.0 <= wild.sidespin <= 1.0
-    assert abs(shape(0.0, 0.0, z=100.0).sidespin) <= 1.0
+def test_a_hand_speed_counts_only_up_to_a_cap():
+    wild = shape(40.0, 40.0)
+    assert wild.aim_shift == pytest.approx(M.k_aim * M.speed_cap) and wild.loft_m == pytest.approx(M.k_loft_m * M.speed_cap)
 
 
 def test_the_amplitude_of_the_spin_is_its_size():
-    s = shape(2.5, 2.5)
-    assert s.amplitude == pytest.approx(math.hypot(s.topspin, s.sidespin))
+    s = shape(0.0, 0.0, top=0.6, side=0.3)
+    assert s.amplitude == pytest.approx(math.hypot(0.6, 0.3))
 
 
 def test_the_model_can_be_retuned_by_field():
-    soft = strokepath.ShotModel(k_top=0.1, k_aim=0.0)
-    assert shape(2.5, 2.5, model=soft).topspin == pytest.approx(0.1) and shape(2.5, 2.5, model=soft).aim_shift == 0.0
+    soft = strokepath.ShotModel(k_aim=0.0, k_loft_m=0.5)
+    assert shape(2.5, 2.5, model=soft).aim_shift == 0.0 and shape(2.5, 2.5, model=soft).loft_m == pytest.approx(0.5)

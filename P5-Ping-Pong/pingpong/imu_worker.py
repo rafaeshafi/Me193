@@ -8,18 +8,23 @@ actuator thread, new calibration parameters from the main thread.
 
 import queue
 import threading
+from collections import deque
 
 from pingpong.swing import SwingDetector
 
+GYRO_HISTORY = 512       # samples kept for the flick: about eight seconds at the hub's 64 Hz
+
 
 class ImuWorker:
-    def __init__(self, samples, detector, shake=None, recorder=None, log=print, tilt=None):
+    def __init__(self, samples, detector, shake=None, recorder=None, log=print, tilt=None, gyro_per_dps=None):
         self.samples = samples                       # queue.SimpleQueue of ImuSample (HubLink.imu)
         self.detector = detector
         self.shake = shake                           # optional ShakeMonitor (judge gate J6)
         self.tilt = tilt                             # optional TiltEstimator: how far the hub is turned, for the paddle
         self.recorder = recorder                     # optional Recorder: gets every raw sample
         self.log = log
+        self.gyro_per_dps = gyro_per_dps             # raw counts per deg/s: with it the worker can say how the hub turned
+        self._gyro = deque(maxlen=GYRO_HISTORY)
         self._events = queue.SimpleQueue()
         self._locks = queue.SimpleQueue()
         self._lock = threading.RLock()
@@ -40,6 +45,13 @@ class ImuWorker:
     def trace(self, seconds):
         with self._lock:
             return self.detector.trace(seconds)
+
+    def gyro_window(self, lo_ns, hi_ns):
+        """[(arrival ns, (gx, gy, gz) in dps)] for the samples that arrived in [lo, hi] (empty without the unit)."""
+        if not self.gyro_per_dps:
+            return []
+        with self._lock:
+            return [(t, g) for t, g in self._gyro if lo_ns <= t <= hi_ns]
 
     def tilt_deg(self):
         """How far the hub is turned side to side, in degrees (0.0 without a tilt calibration)."""
@@ -64,6 +76,8 @@ class ImuWorker:
         if self.recorder is not None:
             self.recorder.imu(sample)                # raw truth, including blanked samples
         with self._lock:
+            if self.gyro_per_dps:
+                self._gyro.append((sample.t_ns, tuple(v / self.gyro_per_dps for v in sample.g)))
             if self.tilt is not None:
                 self.tilt.feed(sample)
             for event in self.detector.feed(sample):

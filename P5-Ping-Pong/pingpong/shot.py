@@ -76,10 +76,11 @@ def aim_from_a(a):
     return _clip((a - 0.5) * 2 * 0.8, -1.0, 1.0)
 
 
-def make(*, w_pk, omega_lo, omega_hi, d_min_sw, e_s, level, paddle_a, spin_probs=None, stroke=None):
-    """stroke: a strokepath.ReturnShape (the path of the hand and the twist of the hub): it moves the landing point and
-    adds its spin to what a trained spin model hears (its loft is the physics', not part of the shot's parameters)."""
-    s = swing_strength(w_pk, omega_lo, omega_hi)
+def make(*, w_pk, omega_lo, omega_hi, d_min_sw, e_s, level, paddle_a, spin_probs=None, stroke=None, strength=None):
+    """stroke: a strokepath.ReturnShape (the path of the hand and the flick of the wrist): it moves the landing point and
+    adds its spin to what a trained spin model hears (its loft is the physics', not part of the shot's parameters).
+    strength: 0..1 given outright (a hand that met the ball); otherwise the swing's own from w_pk."""
+    s = swing_strength(w_pk, omega_lo, omega_hi) if strength is None else strength
     _, _, q_total = quality(d_min_sw, e_s, level)
     top, side, amp = spin_from_probs(spin_probs, s)
     if stroke is not None:

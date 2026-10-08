@@ -168,7 +168,8 @@ def replay(loaded, *, overrides=None, record_dir=None):
         gyro_per_dps=units["gyro_per_dps"], accel_per_g=units["accel_per_g"], fs_raw=units["fs_raw"],
         stale_ms=meta["stale_ms"], threaded=False, log=lambda *_: None,
         spin_probs_fn=(lambda feat: probs_by_feat.get(tuple(feat))) if probs_by_feat else None, overrides=overrides,
-        latency=latency_mod.Latency(**meta["latency"]) if meta.get("latency") else None)
+        latency=latency_mod.Latency(**meta["latency"]) if meta.get("latency") else None,
+        hit_mode=meta.get("hit_mode", "swing"))
     poses = sorted(loaded.poses, key=lambda p: p.t_scene_ns)
     starts, seen = [], set()
     for e in loaded.events:

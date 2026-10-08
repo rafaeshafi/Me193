@@ -24,7 +24,7 @@ from collections import deque
 import cv2
 
 import config
-from pingpong import app, mqtt_link, posegyro, strokepath
+from pingpong import app, flick, mqtt_link, posegyro
 from pingpong import latency as latency_mod
 from pingpong import posemodel
 from pingpong import overrides as overrides_mod
@@ -205,7 +205,7 @@ class LiveRig:
     def _feed_poses(self):
         for pose in self.vision.snapshot():
             if self._last_pose_ns is None or pose.t_scene_ns > self._last_pose_ns:
-                self.session.on_pose(pose)
+                self._game_events(self.session.on_pose(pose))             # in contact mode a hand into the ball is a hit
                 if self.recorder is not None:
                     self.recorder.pose(pose)
                 self._last_pose_ns = pose.t_scene_ns
@@ -322,7 +322,7 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
              threaded=False, lag_s=None, gyro_per_dps=None, accel_per_g=None, fs_raw=None, stale_ms=None,
              to_image=None, record_dir=None, player="rafae", vision=None, recorder=None, spin_probs_fn=None,
              learner=None, pose_gyro=None, resume=False, overrides=None, latency=None, pose_model=None, hold_start=False,
-             log=print):
+             hit_mode="swing", log=print):
     """Wire every piece into one LiveRig.  The real play.py and the fake rig both come through here,
     so the wiring that matters on hardware (haptic blank windows, phase-gated tag search, the pose
     lock, status lights) is exactly the wiring the tests run.
@@ -332,7 +332,9 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
     passes none, because the recorded pose-derived samples arrive through the replay hub like hub samples.
 
     hold_start: the game also starts when the hub is held on the START button (live play; a replay starts its games
-    where the recording says)."""
+    where the recording says).
+    hit_mode: "swing" (a swing the IMU sees meets the ball) or "contact" (the hand moving into the ball does, and the
+    hub's flick is the spin); a replay passes the recorded one."""
     camera = calibration.swing.source == "pose"
     latency = latency or latency_mod.Latency.from_config()
     pose_model = pose_model or posemodel.PoseModel.default()
@@ -351,11 +353,12 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         scope=scope or config.RECORD_SCOPE, t0_ns=clock.now_ns(), calibration=calibration, gyro_per_dps=gpd,
         accel_per_g=apg, fs_raw=fs, lag_s=config.CAMERA_LAG_S if lag_s is None else lag_s,
         stale_ms=config.STALE_MS if stale_ms is None else stale_ms, no_motor=no_motor, learn=learner is not None,
-        overrides=overrides, latency=dataclasses.asdict(latency), pose_model=pose_model.to_json(), clock=clock)
+        overrides=overrides, latency=dataclasses.asdict(latency), pose_model=pose_model.to_json(), hit_mode=hit_mode,
+        clock=clock)
     tilt = (TiltEstimator(calibration.tilt, gpd, apg, nominal_hz=config.HUB_RATE_HZ or 64.0)
             if calibration.tilt is not None and not camera else None)
     imu = ImuWorker(hub.imu if pose_gyro is None else queue.SimpleQueue(), SwingDetector(params), shake=shake,
-                    recorder=recorder, log=log, tilt=tilt)
+                    recorder=recorder, log=log, tilt=tilt, gyro_per_dps=None if camera else gpd)
     actuator = None                                      # no hub (--no-hub): no haptics, the sounds carry the cues
     if getattr(hub, "dev", None) is not None:
         # a pulse blanks the hub's gyro (the motors shake it); the camera does not feel the motors
@@ -367,9 +370,10 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
         client=mqtt_client if publishing else None, source=source, scope=scope or config.RECORD_SCOPE,
         no_publish=no_publish, seed=seed, box=calibration.box, omega_lo=calibration.swing.omega_lo,
         omega_hi=calibration.swing.omega_hi, t_pk=params.t_pk, spin_probs_fn=spin_probs_fn, learner=learner,
-        resume=resume, latency=latency, hand_model=pose_model.predictor, hold_start=hold_start,
-        wrist_axis=None if camera else strokepath.wrist_axis(
-            calibration.swing.u_fwd, None if calibration.tilt is None else calibration.tilt.axis))
+        resume=resume, latency=latency, hand_model=pose_model.predictor, hold_start=hold_start, hit_mode=hit_mode,
+        wrist_frame=None if camera or calibration.tilt is None else flick.wrist_frame(calibration.tilt.neutral,
+                                                                                      calibration.tilt.axis),
+        gyro_window=None if camera else imu.gyro_window)
     if vision is None:
         vision = VisionWorker(capture, landmarker, clock=clock, hand=calibration.hand, lag_s=lag_s,
                               tag_detector=tag_detector, phase_fn=lambda: session.game.phase,

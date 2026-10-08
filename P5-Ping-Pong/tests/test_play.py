@@ -175,3 +175,9 @@ def test_the_fake_game_starts_from_the_mouse_held_in_the_top_right_too():
     keys = iter([255] * 100 + [ord("q")])
     play.fake_loop(session, show=lambda frame: None, wait_key=lambda ms: next(keys), mouse_xy=mouse_xy)
     assert session.game.phase in ("COUNTDOWN", "RALLY")
+
+
+def test_live_play_hits_by_hand_contact_unless_asked_for_swings():
+    assert play.parse_args([]).hit_mode == "contact"
+    assert play.parse_args(["--hit-mode", "swing"]).hit_mode == "swing"
+

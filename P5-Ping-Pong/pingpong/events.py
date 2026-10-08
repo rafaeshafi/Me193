@@ -36,8 +36,6 @@ class SwingEvent:
     clipped: bool
     feat: tuple          # the 12 spin-classifier features
     src: str = "hub"
-    g_dps: tuple = (0.0, 0.0, 0.0)        # the gyro vector at the peak (bias removed), dps: how the hub was turning
-    net_rot_deg: tuple = (0.0, 0.0, 0.0)  # the rotation over the forward phase of the stroke, degrees, hub axes
 
 
 @dataclass(frozen=True)

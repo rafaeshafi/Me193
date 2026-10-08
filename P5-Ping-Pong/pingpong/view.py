@@ -51,13 +51,13 @@ class View:
             return rest, rest
         return self._stroke.pose(rest, view), rest
 
-    def start_stroke(self, events, now):
-        """A swing was seen: the paddle lunges to the ball it hit, or forward at nothing."""
+    def start_stroke(self, events, now, swing=True):
+        """The paddle lunges to the ball it hit; a swing that hit nothing (swing=True) lunges forward at nothing."""
         hit = next((e for e in events if e.kind in ("hit", "fault") and "contact" in e.data), None)
         if hit is not None:
             self._stroke = stage.hit_stroke(now, hit.data["contact_ns"], hit.data["contact"])
             return
-        rest = self.rest(now)
+        rest = self.rest(now) if swing else None
         if rest is not None:
             self._stroke = stage.miss_stroke(rest, now)
 
@@ -83,6 +83,8 @@ class View:
         if g.phase in ("LOBBY", "COUNTDOWN"):
             return None
         out, inc = g.outgoing_leg, g.incoming_leg
+        if g.held is not None and view >= g.held[0] and (out is None or view < out.t0_ns):
+            return g.held[1]                                           # the ball sits on your paddle until it is let go
         if out is not None and view >= out.t0_ns:
             limit = out.arrival_ns + round(physics.FLY_ON_S * S) if out.terminal == "arrive" else out.end_ns
             return out.position(view) if view <= limit else None       # a ball nobody returns is seen to go on by

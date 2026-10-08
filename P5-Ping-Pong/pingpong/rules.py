@@ -1,9 +1,13 @@
 """GameCore: the rally lifecycle (LOBBY > COUNTDOWN > RALLY > POINT_OVER / MATCH_OVER).
 
-Pure game logic driven by three inputs -- start(), on_swing(), tick() -- all with an
+Pure game logic driven by four inputs -- start(), on_swing(), on_pose(), tick() -- all with an
 explicit `now_ns`, so it runs identically on the real sensors, in --fake mode and
 in tests.  It owns no threads, no hardware and no I/O except calling the injected
 publisher when the score changes.
+
+  hit_mode "swing"    a swing the IMU detects meets the ball (the judge's gates J1-J6 decide)
+  hit_mode "contact"  the hand moving into the ball is the hit (contact.py); the ball stays on the paddle for a moment so the
+                      wrist's flick can be read, and leaves with the spin the flick gave it (flick.py)
 
   SURVIVAL  the CPU never misses; the first player miss/fault ends the game; the
             score is the streak (the record is what goes to MQTT)
@@ -12,23 +16,29 @@ publisher when the score changes.
 """
 
 import dataclasses
+import math
 
-from pingpong import levels, physics, strokepath
+from pingpong import contact, flick, levels, physics, stage, strokepath
 from pingpong import shot as shotmod
-from pingpong.events import GameEvent
+from pingpong.events import GameEvent, GateResult, Verdict
 from pingpong.judge import BallWindow, pose_at
 from pingpong.policy import reach_deficit_m
 
 S = 1_000_000_000
 BETWEEN_RALLIES = ("LOBBY", "POINT_OVER", "MATCH_OVER")
+CONTACT_GRACE_S = 0.15      # a ball is gone when the lowest paddle could not have met it this long ago and the hand was seen since
 
 
 class GameCore:
     def __init__(self, *, judge, tracker, policy, publisher=None, level=None, mode="survival",
                  target_points=7, omega_lo=300.0, omega_hi=1200.0, spin_probs_fn=None,
-                 countdown_s=3.0, point_pause_s=2.0, shot_model=None, wrist_axis=None):
+                 countdown_s=3.0, point_pause_s=2.0, shot_model=None, hit_mode="swing", wrist_frame=None,
+                 gyro_window=None, imu_delay_s=0.04):
         self.judge, self.tracker, self.policy, self.publisher = judge, tracker, policy, publisher
-        self.wrist_axis = wrist_axis                  # the hub's axis a twist is measured about (None: the twist is ignored)
+        self.hit_mode = hit_mode
+        self.wrist_frame = wrist_frame        # the hub's up / forward / right (flick.WristFrame); None: no spin from the wrist
+        self.gyro_window = gyro_window        # (lo_ns, hi_ns) -> [(arrival ns, gyro dps)]: what the hub felt around a contact
+        self.imu_delay_s = imu_delay_s        # the hub's samples are stamped when they arrive, this long after they happened
         self.shot_model = shot_model or strokepath.ShotModel()
         self.level_overrides = {}                      # --set level.X=v: applied to whichever level is chosen
         if publisher is not None:
@@ -47,6 +57,8 @@ class GameCore:
         self._record_before = tracker.record
         self._pause_reasons, self._paused_at = set(), None
         self.started_at_ns = None            # exactly when start() was last called (a replay needs it)
+        self.held = None                     # (when, (x, y, z)): the ball sitting on your paddle until it is let go
+        self._hand = self._pending = self._pose_horizon_ns = None
 
     @property
     def shot_model(self):
@@ -54,10 +66,10 @@ class GameCore:
 
     @shot_model.setter
     def shot_model(self, model):
-        """How the path of the hand and the twist of the hub shape a return (`--set shot.k_top=...`); what the player's
-        strokes usually twist is learnt afresh with it."""
+        """How the path of the hand and the flick of the wrist shape a return (`--set shot.k_aim=...`); what the player's
+        strokes usually turn the hub by is learnt afresh with it."""
         self._shot_model = model
-        self._twist = strokepath.TwistBaseline(model.twist_sd_deg, model.twist_warmup)
+        self._flick = flick.FlickBaseline(model.flick_warmup)
 
     # --- inputs ------------------------------------------------------------------------
     def set_level(self, level):
@@ -79,6 +91,7 @@ class GameCore:
             self.player_points = self.cpu_points = 0
         self.phase = "COUNTDOWN"
         self.started_at_ns = now_ns
+        self._hand = self._pending = self.held = None
         self._serve_at = now_ns + round(self.countdown_s * S)
         return True
 
@@ -106,12 +119,22 @@ class GameCore:
         if self.phase == "POINT_OVER" and now_ns >= self.point_over_until_ns:
             return self._serve(self.point_over_until_ns)
         if self.phase == "RALLY":
+            if self._pending is not None and now_ns >= self._pending["launch_ns"]:
+                return self._finish_contact(now_ns)
             if self._cpu_at is not None and now_ns >= self._cpu_at:
                 return self._cpu_response(self._cpu_at)
-            if self.incoming is not None and data_ns > self.judge.miss_deadline_ns(self.incoming):
+            if self.incoming is not None and self._gone(now_ns, data_ns):
                 self._observe(1.0, True)                                  # the player failed to return the ball
                 return [GameEvent("miss", now_ns, {"ball_id": self.incoming.ball_id})] + self._end_rally("miss", now_ns)
         return []
+
+    def _gone(self, now_ns, data_ns):
+        """No paddle position could still meet the ball.  A swing is only a fact once the IMU stream has reached the
+        deadline; a hand into the ball only once the poses have gone past the lowest paddle's depth."""
+        if self.hit_mode == "contact":
+            by = self.incoming_leg.time_at_z(stage.Z_REST_MIN)
+            return (self._pose_horizon_ns or 0) >= by and now_ns > by + round(CONTACT_GRACE_S * S)
+        return data_ns > self.judge.miss_deadline_ns(self.incoming)
 
     @property
     def paused(self):
@@ -150,6 +173,12 @@ class GameCore:
             leg = getattr(self, name)
             if leg is not None:
                 setattr(self, name, dataclasses.replace(leg, t0_ns=leg.t0_ns + delta_ns))
+        if self._pending is not None:                     # the ball waiting on the paddle waits as long again
+            self._pending = dict(self._pending, launch_ns=self._pending["launch_ns"] + delta_ns,
+                                 met_ns=self._pending["met_ns"] + delta_ns)
+        if self.held is not None:
+            self.held = (self.held[0] + delta_ns, self.held[1])
+        self._hand = None
         if self.incoming is not None:                     # the ball the judge holds follows its own (shifted) flight
             self.incoming = dataclasses.replace(self.incoming, t_c_ns=self.incoming.t_c_ns + delta_ns,
                                                 leg=self.incoming_leg)
@@ -164,7 +193,7 @@ class GameCore:
         return max(0.0, (self._serve_at - now_ns) / S)
 
     def on_swing(self, swing, pose_samples, now_ns):
-        if self.phase != "RALLY" or self.incoming is None or self.paused:
+        if self.hit_mode == "contact" or self.phase != "RALLY" or self.incoming is None or self.paused:
             return []
         verdict = self.judge.judge(swing, self.incoming, pose_samples, now_ns)
         events = [GameEvent("verdict", now_ns, {"verdict": verdict})]
@@ -183,7 +212,7 @@ class GameCore:
         self._ball_id += 1
         self.incoming = BallWindow(self._ball_id, leg.arrival_ns, plan.aim_ab, self.level, leg)
         self.incoming_leg, self.outgoing_leg = leg, None
-        self.phase, self._cpu_at = "RALLY", None
+        self.phase, self._cpu_at, self._hand = "RALLY", None, None
         return [GameEvent("serve", t0_ns, {"ball_id": self._ball_id, "v": plan.v, "aim_ab": plan.aim_ab,
                                            "arrival_ns": leg.arrival_ns, "special": plan.special})]
 
@@ -197,6 +226,7 @@ class GameCore:
 
     # --- the player's swing ----------------------------------------------------------------------
     def _on_hit(self, swing, verdict, pose_samples, now_ns):
+        """A swing that met the ball (hit_mode "swing"): the ball leaves where it was at the contact, at the gyro's strength."""
         ball, leg_in = self.incoming, self.incoming_leg
         contact_ns = verdict.contact_ns or max(now_ns, ball.t_c_ns)
         # the paddle meets the ball where the ball IS at the contact: the return leaves from that point
@@ -204,28 +234,93 @@ class GameCore:
             physics.x_of_a(ball.aim_ab[0]), physics.STRIKE_Y_M, physics.HIT_Z_M)
         at = pose_at(pose_samples, swing.t_ns, min_conf=self.judge.min_conf) or (pose_samples[-1] if pose_samples else None)
         paddle_a = self.judge.box.to_ab(at.u, at.v)[0] if at else 0.5          # where the hand was AT the impact
-        # the balls come in a level's share of the box, so the hand's lateral range is that share too: the aim
-        # spreads it back over the whole table (wide returns are how a point is won)
-        aim_a = min(1.0, max(0.0, 0.5 + (paddle_a - 0.5) / self.level.reach))
         probs = self.spin_probs_fn(swing.feat) if self.spin_probs_fn else None
-        # where the ball goes and how it spins also come from how the hand moved and how the hub turned during the stroke
-        path = strokepath.hand_path(pose_samples, swing.t_ns)
-        twist = strokepath.twist_deg(swing.net_rot_deg, self.wrist_axis)
-        stroke = strokepath.shape_return(path, self._twist.z(twist), self.shot_model)
-        sp = shotmod.make(w_pk=swing.w_pk, omega_lo=self.omega_lo, omega_hi=self.omega_hi,
-                          d_min_sw=verdict.d_min_sw, e_s=verdict.e_s, level=self.level,
-                          paddle_a=aim_a, spin_probs=probs, stroke=stroke)
-        self.s_prev = shotmod.swing_strength(swing.w_pk, self.omega_lo, self.omega_hi)
+        return self._launch(
+            ball=ball, contact_ns=contact_ns, contact=contact, verdict=verdict, paddle_a=paddle_a, probs=probs, now_ns=now_ns,
+            strength=shotmod.swing_strength(swing.w_pk, self.omega_lo, self.omega_hi),
+            path=strokepath.hand_path(pose_samples, swing.t_ns), flick_at=contact_ns)
+
+    # --- a hand into the ball (hit_mode "contact") ------------------------------------------------------------------------------
+    def on_pose(self, pose, pose_samples, now_ns):
+        """A hand reading.  In contact mode this is how a ball is hit: the readings before and after the moment the ball's
+        depth met the paddle's say whether the hand was level with it."""
+        self._pose_horizon_ns = max(self._pose_horizon_ns or 0, pose.t_scene_ns)
+        if self.hit_mode != "contact" or self.phase != "RALLY" or self.incoming is None or self.paused:
+            self._hand = None
+            return []
+        cur = (pose.t_scene_ns, pose.u, pose.v) if pose.conf >= self.judge.min_conf else None
+        prev, self._hand = self._hand, cur
+        if prev is None or cur is None or cur[0] <= prev[0]:
+            return []
+        met = contact.crossing(prev, cur, self.incoming_leg, self.judge.box, self.incoming.level.radius_sw)
+        return [] if met is None else self._met(met, pose_samples, now_ns)
+
+    def _met(self, met, pose_samples, now_ns):
+        """The ball's depth met the paddle's: a hit if the hand was level with it across the table, else it goes by."""
+        ball, model = self.incoming, self.shot_model
+        radius = ball.level.radius_sw
+        reached = GateResult("J1", True, "the ball reached your paddle")
+        if not met.hit:
+            gate = GateResult("J2", False, f"hand {met.d_sw:.2f} SW from the ball when it passed (limit {radius:.2f})")
+            verdict = Verdict("REJECTED", 0.0, 0.0, met.d_sw, (reached, gate), met.t_ns)
+            return [GameEvent("verdict", now_ns, {"verdict": verdict}), GameEvent("rejected", now_ns, {"gates": verdict.gates})]
+        path = strokepath.hand_path(pose_samples, met.t_ns, window_s=(-0.25, 0.0))
+        strength = strokepath.hand_strength(path, model)
+        speed = 0.0 if path is None else math.hypot(path.vu, path.vv)
+        gates = (reached, GateResult("J2", True, f"hand {met.d_sw:.2f} SW from the ball (limit {radius:.2f})"),
+                 GateResult("J3", True, f"hand {speed:.1f} SW/s: strength {strength:.2f}"))
+        verdict = Verdict("HIT", shotmod.quality(met.d_sw, 0.0, ball.level)[0], 0.0, met.d_sw, gates, met.t_ns)
+        paddle_a = self.judge.box.to_ab(met.u, met.v)[0]
+        aim_a = min(1.0, max(0.0, 0.5 + (paddle_a - 0.5) / self.level.reach))
+        launch_ns = max(now_ns, met.t_ns + round(model.hold_s * S))
+        # the ball sits on the paddle until it is let go; this return only holds it there (the real one is planned then)
+        self.outgoing_leg = physics.plan_return(launch_ns, shotmod.out_speed(strength), met.ball, (aim_a, 0.5))
+        self.held = (met.t_ns, met.ball)
+        self._pending = {"ball": ball, "met_ns": met.t_ns, "launch_ns": launch_ns, "contact": met.ball, "verdict": verdict,
+                         "path": path, "strength": strength, "paddle_a": paddle_a}
+        self.incoming = None
+        return [GameEvent("verdict", now_ns, {"verdict": verdict})]
+
+    def _finish_contact(self, now_ns):
+        """The hold is over: read the wrist's flick and let the ball go."""
+        p, self._pending, self.held = self._pending, None, None
+        return self._launch(ball=p["ball"], contact_ns=p["launch_ns"], contact=p["contact"], verdict=p["verdict"],
+                            strength=p["strength"], path=p["path"], paddle_a=p["paddle_a"], probs=None, now_ns=now_ns,
+                            flick_at=p["met_ns"], met_ns=p["met_ns"])
+
+    def _read_flick(self, met_ns):
+        """(topspin, sidespin) from how the hub turned around the moment the paddle met the ball."""
+        if self.gyro_window is None or self.wrist_frame is None:
+            return 0.0, 0.0
+        delay = round(self.imu_delay_s * S)
+        lo, hi = flick.window_ns(met_ns, delay, self.shot_model)
+        return flick.read_flick(self.gyro_window(lo, hi), met_ns, delay, self.shot_model, self.wrist_frame, self._flick)
+
+    # --- the ball leaves the paddle --------------------------------------------------------------------------------------------------
+    def _launch(self, *, ball, contact_ns, contact, verdict, strength, path, paddle_a, probs, now_ns, flick_at=None, met_ns=None):
+        """Shape the return (speed from the strength, aim and loft from the hand's path, spin from the flick), plan its
+        flight from `contact_ns`, and settle the rally: a fault, or a hit that counts."""
+        # the balls come in a level's share of the box, so the hand's lateral range is that share too: the aim spreads it
+        # back over the whole table (wide returns are how a point is won)
+        aim_a = min(1.0, max(0.0, 0.5 + (paddle_a - 0.5) / self.level.reach))
+        top, side = (0.0, 0.0) if flick_at is None else self._read_flick(flick_at)
+        stroke = strokepath.shape_return(path, top, side, self.shot_model)
+        sp = shotmod.make(w_pk=0.0, omega_lo=self.omega_lo, omega_hi=self.omega_hi, d_min_sw=verdict.d_min_sw,
+                          e_s=verdict.e_s, level=self.level, paddle_a=aim_a, spin_probs=probs, stroke=stroke,
+                          strength=strength)
+        self.s_prev = strength
         self.player_a, self.incoming = paddle_a, None
         self.outgoing_leg = physics.plan_return(
             contact_ns, sp.v_out, contact, (0.5 + sp.aim_a / 1.6, 0.5), topspin=sp.T, sidespin=sp.S, fault=sp.fault,
             loft_m=stroke.loft_m)
         data = {"label": sp.label, "v_out": sp.v_out, "kmh": shotmod.kmh(sp.v_out), "topspin": sp.T,
                 "sidespin": sp.S, "q_total": sp.q_total, "gates": verdict.gates, "e_s": verdict.e_s,
-                "contact_ns": contact_ns, "contact": contact,
+                "contact_ns": contact_ns, "contact": contact, "mode": self.hit_mode,
                 "stroke": {"vu": 0.0 if path is None else path.vu, "vv": 0.0 if path is None else path.vv,
-                           "twist_z": stroke.twist_z, "aim_shift": stroke.aim_shift, "loft_m": stroke.loft_m,
-                           "topspin": stroke.topspin, "sidespin": stroke.sidespin}}
+                           "aim_shift": stroke.aim_shift, "loft_m": stroke.loft_m, "topspin": stroke.topspin,
+                           "sidespin": stroke.sidespin}}
+        if met_ns is not None:
+            data["met_ns"] = met_ns                                   # when the ball met the paddle; contact_ns is when it left it
         self._observe(1.0 if sp.fault else 0.5 * (1.0 - sp.q_total), bool(sp.fault))
         if sp.fault:
             events = [GameEvent("fault", now_ns, dict(data, fault=sp.fault))]
@@ -252,7 +347,7 @@ class GameCore:
         self._record_before = self.tracker.record
         if self.publisher:
             self.publisher.update(self.tracker.value())      # live_streak publishes the reset
-        self.incoming = self._cpu_at = None
+        self.incoming = self._cpu_at = self._pending = self.held = None
         events = [GameEvent("rally_end", now_ns, {"reason": reason, "streak": final,
                                                   "record": self.tracker.record})]
         if self.mode == "survival":

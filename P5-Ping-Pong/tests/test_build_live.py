@@ -305,12 +305,41 @@ def test_holding_the_hand_in_the_top_right_of_the_reach_starts_a_game_through_th
     rig.close()
 
 
-def test_the_games_wrist_axis_comes_from_the_hub_calibrations_tilt_and_only_for_the_hub(tmp_path):
+def test_the_games_wrist_frame_comes_from_the_hub_calibrations_tilt_and_only_for_the_hub(tmp_path):
     base = dict(swing=SwingCalibration((0.0, 1.0, 0.0), 280.0, 1100.0), box=ReachBox(-1.5, 1.5, -0.9, 0.7), shoulder_w=0.2)
     profile.save("tilted", profile.Calibration(**base, tilt=TiltCalibration((1.0, 0.2, 0.0), (0.0, 0.0, 1.0), (0.0, 0.0, 0.0))),
                  root=tmp_path)
     profile.save("untilted", profile.Calibration(**base), root=tmp_path)
-    axis = live.build_live(live_args("--player", "tilted"), FakeEnv(), player_root=tmp_path).session.game.wrist_axis
-    assert axis == pytest.approx((1.0, 0.0, 0.0), abs=1e-9)                 # the doorknob axis made perpendicular to the stroke axis
-    assert live.build_live(live_args("--player", "untilted"), FakeEnv(), player_root=tmp_path).session.game.wrist_axis is None
+    frame = live.build_live(live_args("--player", "tilted"), FakeEnv(), player_root=tmp_path).session.game.wrist_frame
+    assert frame.up == pytest.approx((0.0, 0.0, 1.0)) and frame.fwd[2] == pytest.approx(0.0, abs=1e-9)   # the doorknob axis made horizontal
+    assert frame.right == pytest.approx((frame.fwd[1], -frame.fwd[0], 0.0))                                # forward x up
+    assert live.build_live(live_args("--player", "untilted"), FakeEnv(), player_root=tmp_path).session.game.wrist_frame is None
+
+
+def test_a_live_session_hits_by_hand_contact_and_the_game_can_ask_the_hub_how_it_turned(tmp_path):
+    import config
+
+    env = FakeEnv()
+    env.scenario = lambda now: (0, 0, 1000, 120, 0, 0)                                       # the gyro reads 120 counts on x
+    rig = live.build_live(live_args("--player", "newbie"), env, player_root=tmp_path)
+    game = rig.session.game
+    assert game.hit_mode == "contact"
+    env.sleep(0.5)
+    rig.pump()
+    now = env.clock.now_ns()
+    window = game.gyro_window(now - 400_000_000, now)
+    assert len(window) > 10 and window[0][1][0] == pytest.approx(120 / config.GYRO_PER_DPS)
+    rig.close()
+
+
+def test_a_fake_rig_and_a_replay_hit_by_swing_unless_the_recording_says_otherwise():
+    from pingpong import fakerig
+
+    assert fakerig.FakeRig().game.hit_mode == "swing"
+
+
+def test_hit_mode_swing_gives_the_old_game_where_only_a_swing_the_hub_sees_meets_the_ball(tmp_path):
+    rig = live.build_live(live_args("--player", "newbie", "--hit-mode", "swing"), FakeEnv(), player_root=tmp_path)
+    assert rig.session.game.hit_mode == "swing"
+    rig.close()
 

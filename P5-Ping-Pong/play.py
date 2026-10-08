@@ -8,6 +8,7 @@ Usage:
     ./pp play --player rafae --level 2 --mode match
     ./pp play --player guest          # no saved calibration, never publishes to the score topic
     ./pp play --no-publish --no-motor # rehearse without the broker / without motor pulses
+    ./pp play --hit-mode swing        # the old game: only a swing the hub's IMU sees meets the ball (default: contact)
     ./pp play --swing-source pose     # the camera's hand speed detects swings (auto when the hub measured < 25 Hz)
     ./pp play --no-hub                # camera only: no hub, no haptics (bring-up, or a flat battery)
     ./pp play --board                 # the leaderboard (best streaks, match wins) and nothing else
@@ -45,6 +46,9 @@ def make_parser():
     ap.add_argument("--no-record", action="store_true", help="do not write recordings/<session>/ (IMU, pose, events)")
     ap.add_argument("--no-audio", action="store_true", help="no game sounds (the S key mutes while playing)")
     ap.add_argument("--no-spin", action="store_true", help="ignore the trained spin model: every ball is flat")
+    ap.add_argument("--hit-mode", choices=("contact", "swing"), default="contact",
+                    help="contact: the hand moving into the ball hits it and a flick of the wrist spins it; "
+                         "swing: only a swing the hub's IMU detects meets the ball")
     ap.add_argument("--learn", action="store_true", help="the computer learns where you fail (Q-learning, saved per player)")
     ap.add_argument("--no-store", action="store_true", help="do not save finished games to the leaderboard database")
     ap.add_argument("--set", action="append", default=[], metavar="section.name=value",

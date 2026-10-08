@@ -81,7 +81,13 @@ class Session:
 
     # --- inputs ------------------------------------------------------------------------------
     def on_pose(self, pose):
+        """A hand reading; in contact mode a hand moving into the ball is a hit (the events say so)."""
         self.poses.append(pose)
+        if self.game.hit_mode != "contact":
+            return []
+        events = self.game.on_pose(pose, list(self.poses), self.clock.now_ns())
+        self._absorb(events)
+        return events
 
     def on_start(self):
         return self.game.start(self.clock.now_ns())
@@ -95,6 +101,8 @@ class Session:
                 self.game.set_level(level)
 
     def on_swing(self, swing):
+        if self.game.hit_mode == "contact":
+            return []                          # a swing is not what hits the ball here; the wrist's flick is what spins it
         now = self.clock.now_ns()
         events = self.game.on_swing(swing, list(self.poses), now)
         self._absorb(events)
@@ -105,6 +113,8 @@ class Session:
         now = self.clock.now_ns()
         events = self.game.tick(now, data_ns)
         self._absorb(events)
+        if self.game.hit_mode == "contact":
+            self.view.start_stroke(events, now, swing=False)       # the ball is let go: the paddle meets it
         self._countdown_sounds(events)
         self._bounce_sound(now)
         self._flush_sounds(now)
@@ -267,7 +277,8 @@ def _spin_text(top, side):
 def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=None, client=None,
                  source="live", scope="record_session", no_publish=False, seed=1, box=None,
                  omega_lo=300.0, omega_hi=1200.0, t_pk=250.0, spin_probs_fn=None, learner=None, resume=False,
-                 latency=None, hand_model=None, hold_start=False, shot_model=None, wrist_axis=None):
+                 latency=None, hand_model=None, hold_start=False, shot_model=None, hit_mode="swing", wrist_frame=None,
+                 gyro_window=None):
     clock = clock or FakeClock(start_ns=1_000_000_000)
     latency = latency or latency_mod.Latency.from_config()
     box = box or DEFAULT_BOX
@@ -278,7 +289,7 @@ def make_session(*, level=1, mode="survival", target=7, clock=None, actuator=Non
                     policy=CpuPolicy(random.Random(seed), learner=learner),
                     publisher=publisher, level=levels.LEVELS[level], mode=mode, target_points=target,
                     omega_lo=omega_lo, omega_hi=omega_hi, spin_probs_fn=spin_probs_fn, shot_model=shot_model,
-                    wrist_axis=wrist_axis)
+                    hit_mode=hit_mode, wrist_frame=wrist_frame, gyro_window=gyro_window, imu_delay_s=latency.imu_s)
     return Session(game, clock, actuator=actuator, latency=latency, hand_model=hand_model,
                    hold_start=holdstart.HoldStart() if hold_start else None,
                    mqtt_status=(lambda: "ok") if client is not None and not no_publish else None)
