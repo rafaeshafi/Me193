@@ -57,7 +57,8 @@ class GameCore:
         self._serve_at = self._cpu_at = self._out_shot = None
         self._record_before = tracker.record
         self._pause_reasons, self._paused_at = set(), None
-        self.started_at_ns = None            # exactly when start() was last called (a replay needs it)
+        self.started_at_ns = None            # exactly when start() was last called (a replay needs it) ...
+        self.started_countdown_s = countdown_s       # ... and how long its countdown was
         self.held = None                     # (when, (x, y, z)): the ball sitting on your paddle until it is let go
         self.remote = None                   # versus.Remote: the opponent is a person at another laptop, not the computer
         self._hand = self._pending = self._pose_horizon_ns = None
@@ -86,7 +87,8 @@ class GameCore:
         self.mode = mode
         return True
 
-    def start(self, now_ns):
+    def start(self, now_ns, countdown_s=None):
+        """Begin a game: the countdown (countdown_s seconds, else the game's usual) and the first serve."""
         if self.phase not in ("LOBBY", "MATCH_OVER") or self.paused:
             return False
         if self.phase == "MATCH_OVER":
@@ -96,7 +98,8 @@ class GameCore:
             self.remote.on_start(now_ns)
         self.started_at_ns = now_ns
         self._hand = self._pending = self.held = None
-        self._serve_at = now_ns + round(self.countdown_s * S)
+        self.started_countdown_s = self.countdown_s if countdown_s is None else countdown_s
+        self._serve_at = now_ns + round(self.started_countdown_s * S)
         return True
 
     def tick(self, now_ns, data_ns=None):

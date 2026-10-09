@@ -93,6 +93,17 @@ def test_start_runs_a_three_second_countdown_then_serves():
     assert game.incoming_leg.flight_s == pytest.approx(3.0 / levels.LEVELS[1].v_tier, rel=0.01)   # Rookie, s_prev 0.5
 
 
+def test_start_can_run_a_countdown_of_its_own_length_and_the_next_start_is_back_to_three_seconds():
+    game, _ = make()
+    assert game.start(0, countdown_s=5.0) is True
+    assert game.seconds_to_serve(0) == 5.0
+    assert game.tick(int(4.9 * S)) == [] and game.phase == "COUNTDOWN"
+    assert "serve" in kinds(game.tick(5 * S)) and game.phase == "RALLY"
+    game.phase = "MATCH_OVER"
+    game.start(20 * S)
+    assert game.seconds_to_serve(20 * S) == 3.0
+
+
 def test_start_is_ignored_mid_rally_and_level_changes_only_in_the_lobby():
     game, _ = make()
     assert game.set_level(levels.LEVELS[2]) is True and game.level.name == "Club"

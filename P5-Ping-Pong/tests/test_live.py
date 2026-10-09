@@ -198,11 +198,11 @@ def test_a_start_tag_from_the_camera_starts_the_countdown():
     assert r.game.phase == "COUNTDOWN"
 
 
-def test_a_level_tag_from_the_camera_sets_the_level():
+def test_a_level_tag_from_the_camera_starts_the_game_at_that_level():
     r = Rig()
     r.vision.tags = [TagEvent("LEVEL", 3, r.clock.now_ns())]
     r.rig.pump()
-    assert r.game.level.name == "Pro"
+    assert r.game.level.name == "Pro" and r.game.phase == "COUNTDOWN"
 
 
 def test_only_impacts_reach_the_judge_never_swing_starts():
@@ -453,8 +453,8 @@ def test_the_rig_records_poses_swings_game_events_tags_pauses_and_phase_changes(
     assert r.recorder.poses == [pose] and "tag" in kinds and "phase" in kinds
     phase = [d for k, d in r.recorder.events if k == "phase"][-1]
     assert phase["phase"] == "COUNTDOWN" and phase["started_at_ns"] == r.game.started_at_ns
-    assert phase["level"] == 1 and phase["mode"] == "survival"
-    r.advance(3.2)                                            # the first ball is served
+    assert phase["level"] == 1 and phase["mode"] == "survival" and phase["countdown_s"] == 5.0
+    r.advance(5.2)                                            # the first ball is served (a card's countdown is five seconds)
     r.imu.events = [fake_swing(r.clock.now_ns(), 600.0)]
     r.advance(0.05)
     swing = [d for k, d in r.recorder.events if k == "swing"]

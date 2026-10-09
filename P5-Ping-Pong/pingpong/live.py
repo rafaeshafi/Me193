@@ -191,8 +191,8 @@ class LiveRig:
         if phase != self._seen["phase"]:
             self._seen["phase"] = phase
             self._record("phase", now, {"phase": game.phase, "level": game.level.tag, "mode": game.mode,
-                                        "started_at_ns": game.started_at_ns, "player_points": game.player_points,
-                                        "cpu_points": game.cpu_points})
+                                        "started_at_ns": game.started_at_ns, "countdown_s": game.started_countdown_s,
+                                        "player_points": game.player_points, "cpu_points": game.cpu_points})
         pauses = sorted(game.pause_reasons)
         if pauses != self._seen["pauses"]:
             self._seen["pauses"] = pauses
@@ -383,7 +383,8 @@ def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None,
                   mqtt_client=mqtt_client if publishing else None, clock=clock, threaded=threaded,
                   stale_ms=stale_ms, recorder=recorder, pose_gyro=pose_gyro,
                   swing_source=calibration.swing.source, log=log)
-    session.bind_status(hub=rig.hub_status, mqtt=mqtt_link.status_fn(mqtt_client) if publishing else None)
+    session.bind_status(hub=rig.hub_status, mqtt=mqtt_link.status_fn(mqtt_client) if publishing else None,
+                        card=getattr(vision, "tag_hold", None))
     if overrides:
         overrides_mod.apply(rig, overrides)
     if publishing:

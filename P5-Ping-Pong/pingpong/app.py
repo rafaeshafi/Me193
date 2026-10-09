@@ -13,7 +13,7 @@ from pingpong import feedback, holdstart, levels, uistate
 from pingpong import latency as latency_mod
 from pingpong.clock import FakeClock
 from pingpong.events import PaddlePose, SwingEvent
-from pingpong.flow import Flow
+from pingpong.flow import CARD_COUNTDOWN_S, Flow
 from pingpong.hud import HudState
 from pingpong.judge import HitJudge
 from pingpong.mqtt_pub import ScorePublisher
@@ -42,6 +42,7 @@ class Session(OnlineMixin):
         self._cpu_mood, self._mood_until, self._point_for = "happy", 0, ""
         self._mqtt_status = mqtt_status or (lambda: "off")
         self._hub_status = hub_status or (lambda: "ok")
+        self._card_hold = lambda now_ns: None    # (card, how far 0..1) while an AprilTag card is held up (the camera's voter)
         self.latency = latency or latency_mod.Latency.from_config()
         self.poses = deque(maxlen=90)
         self.view = View(game, self.latency, self.poses, hand_model)
@@ -78,12 +79,15 @@ class Session(OnlineMixin):
     def has_notice(self):
         return bool(self._notice)
 
-    def bind_status(self, hub=None, mqtt=None):
-        """Point the HUD's HUB / MQTT indicators at live sources (the rig exists after the session)."""
+    def bind_status(self, hub=None, mqtt=None, card=None):
+        """Point the HUD's HUB / MQTT indicators, and the ring of a card being held up, at live sources (the rig exists after
+        the session).  card: a function of the time that says (card, how far the hold has come) or None."""
         if hub is not None:
             self._hub_status = hub
         if mqtt is not None:
             self._mqtt_status = mqtt
+        if card is not None:
+            self._card_hold = card
 
     # --- inputs ------------------------------------------------------------------------------
     def on_pose(self, pose):
@@ -95,8 +99,8 @@ class Session(OnlineMixin):
         self._absorb(events)
         return events
 
-    def on_start(self):
-        return self.game.start(self.clock.now_ns())
+    def on_start(self, countdown_s=None):
+        return self.game.start(self.clock.now_ns(), countdown_s)
 
     def on_tag(self, tag):
         if self.flow is not None:
@@ -107,11 +111,12 @@ class Session(OnlineMixin):
         if self.game.remote is not None:
             return                                           # a friend's game is not started or retuned by a card
         if tag.role == "START":
-            self.on_start()
+            self.on_start(CARD_COUNTDOWN_S)
         elif tag.role == "LEVEL":
             level = levels.level_for_tag(tag.value)
             if level is not None:
-                self.game.set_level(level)
+                self.game.set_level(level)                 # a card held up is the opponent, and the game begins against it
+                self.on_start(CARD_COUNTDOWN_S)
 
     def on_swing(self, swing):
         if self.game.hit_mode == "contact":
@@ -158,10 +163,10 @@ class Session(OnlineMixin):
             elif kind == "online":
                 self._online_action(*value)
 
-    def _start_game(self, level_tag, mode):
+    def _start_game(self, level_tag, mode, countdown_s=None):
         self.game.set_level(levels.LEVELS[level_tag])
         self.game.set_mode(mode)
-        self.apply(self.flow.started(self.on_start()))
+        self.apply(self.flow.started(self.on_start(countdown_s)))
 
     def _hold_to_start(self, now):
         """The hub held on the START button for long enough starts the game, like the key and the card."""
@@ -324,7 +329,8 @@ class Session(OnlineMixin):
             player_name=self.player, start_button=button, cursor=cursor,
             cpu_mood=self._cpu_mood if now < self._mood_until else "happy", anim_t=(now - self._t0_ns) / S,
             point_for=self._point_for if g.phase == "POINT_OVER" else "", screen=screen, ui=ui_state, results=results,
-            opponent_name=self.opponent_name, ping_ms=None if g.remote is None else g.remote.ping_ms)
+            opponent_name=self.opponent_name, ping_ms=None if g.remote is None else g.remote.ping_ms,
+            tag_hold=self._card_hold(now) if g.phase in ("LOBBY", "MATCH_OVER") else None)
 
     def _paused_text(self):
         if not self.game.paused:

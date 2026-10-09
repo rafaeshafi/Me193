@@ -40,6 +40,24 @@ def test_the_countdown_digit_is_drawn_only_in_the_countdown_phase():
     assert diff(lobby, count) > 20_000
 
 
+def test_each_countdown_digit_from_five_has_its_own_colour_and_the_last_one_is_the_go_colour():
+    colours = [hud.COUNTDOWN_COLOR[n] for n in (5, 4, 3, 2, 1)]
+    assert len(set(colours)) == 5
+    assert hud.COUNTDOWN_COLOR[1] == hud.MINT                          # green only for the last second
+
+
+def ring_top(frame, countdown_t=0.5):
+    """The colour of the countdown's ring at its top (the arc starts there and is drawn clockwise)."""
+    cx, cy = W // 2, H // 2 + 30
+    return frame[cy - 97, cx]
+
+
+@pytest.mark.parametrize("digit", [5, 4, 3, 2, 1])
+def test_the_countdown_ring_is_drawn_in_the_colour_of_its_digit(digit):
+    frame = hud.render(state(phase="COUNTDOWN", countdown=digit, countdown_t=0.5), size=(W, H))
+    assert np.abs(ring_top(frame).astype(int) - np.array(hud.COUNTDOWN_COLOR[digit])).max() <= 12
+
+
 def test_the_xray_panel_lists_gate_results_when_enabled():
     gates = (GateResult("J1", True, "timing +12 ms"), GateResult("J2", False, "hand 0.9 SW from the ball"))
     off = hud.render(state(phase="RALLY", gates=gates, show_xray=False), size=(W, H))
@@ -179,7 +197,7 @@ def test_a_long_lobby_notice_is_drawn_inside_the_frame_and_clear_of_the_start_pr
     rows, cols = np.where(changed)
     assert rows.size > 1000
     assert cols.min() >= 20 and cols.max() <= W - 20                  # nothing clipped at the left or right edge
-    assert rows.min() > 410                                           # below "SHOW THE START CARD / or press SPACE"
+    assert rows.min() > 410                                           # below "HOLD UP A CARD / for 2 seconds, or press SPACE"
 
 
 # --- what the x-ray panel and the leaderboard panel must not do ---------------------------------------------------------
@@ -412,3 +430,43 @@ def test_an_online_game_shows_the_ping_in_place_of_the_score_topics_state_and_wo
     slow = hud.render(state(phase="RALLY", mode="match", opponent_name="MAYA", ping_ms=900.0), size=(W, H))
     chip = (slice(H - 56, H - 14), slice(16, 420))
     assert diff(fast[chip], slow[chip]) > 3_000
+
+
+# --- a card held up --------------------------------------------------------------------------------------------------------------------------
+HOLD = {"title": dict(screen="TITLE", ui=hud.UiState(screen="TITLE", t_s=3.0)),
+        "mode": dict(screen="MODE", ui=hud.UiState(screen="MODE", t_s=3.0)),
+        "game lobby": dict(phase="LOBBY"),
+        "game over": dict(phase="MATCH_OVER")}
+
+
+def hold_ring(frame, colour):
+    """How many pixels of the frame's middle are in the card's colour (the ring that fills while it is held)."""
+    middle = frame[H // 2 - 150:H // 2 + 150, W // 2 - 150:W // 2 + 150].astype(int)
+    return int((np.abs(middle - np.array(colour)).max(axis=2) <= 10).sum())
+
+
+@pytest.mark.parametrize("where", sorted(HOLD))
+def test_a_card_being_held_up_puts_a_ring_in_the_middle_of_any_screen_that_fills_as_the_two_seconds_go_by(where):
+    plain = hud.render(state(**HOLD[where]), size=(W, H))
+    half = hud.render(state(tag_hold=(2, 0.5), **HOLD[where]), size=(W, H))
+    full = hud.render(state(tag_hold=(2, 1.0), **HOLD[where]), size=(W, H))
+    assert diff(plain, half) > 20_000
+    colour = hud.screens_common.CARDS[2][1]
+    assert hold_ring(half, colour) > hold_ring(plain, colour) + 800
+    assert hold_ring(full, colour) > hold_ring(half, colour) + 800
+
+
+def test_no_card_no_ring_and_the_screen_is_exactly_what_it_was():
+    for where in HOLD.values():
+        assert diff(hud.render(state(**where), size=(W, H)), hud.render(state(tag_hold=None, **where), size=(W, H))) == 0
+
+
+@pytest.mark.parametrize("card", [0, 1, 2, 3])
+@pytest.mark.parametrize("progress", [0.0, 0.3, 1.0])
+def test_every_card_can_be_drawn_at_any_point_of_the_hold(card, progress, monkeypatch):
+    said = []
+    real = fonts.draw
+    monkeypatch.setattr(fonts, "draw", lambda frame, text, *a, **kw: (said.append(text), real(frame, text, *a, **kw))[1])
+    frame = hud.render(state(screen="MODE", ui=hud.UiState(screen="MODE", t_s=3.0), tag_hold=(card, progress)), size=(W, H))
+    assert frame.shape == (H, W, 3)
+    assert hud.screens_common.CARDS[card][0] in said                   # the card is named: START, ROOKIE, CLUB or PRO

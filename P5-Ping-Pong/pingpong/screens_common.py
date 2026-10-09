@@ -8,7 +8,7 @@ from functools import lru_cache
 import cv2
 import numpy as np
 
-from pingpong import anim, court3d, fonts, scene, ui
+from pingpong import anim, court3d, fonts, levels, scene, ui
 from pingpong.cast import rgb
 
 NAVY, SLATE, WHITE = rgb(24, 48, 96), rgb(112, 126, 150), (255, 255, 255)
@@ -19,6 +19,9 @@ CORAL, CORAL_DARK = rgb(255, 124, 110), rgb(235, 76, 84)
 GOLD, PURPLE, PURPLE_DARK = rgb(255, 196, 40), rgb(160, 110, 245), rgb(112, 70, 205)
 PALE = rgb(214, 224, 240)
 HOVER_SCALE = 1.07
+CARDS = {0: ("START", ORANGE, ORANGE_DARK),                     # what the ring of a card being held up is called and coloured
+         **{tag: (levels.LEVELS[tag].name.upper(), *colors) for tag, colors in ((1, (GREEN, GREEN_DARK)), (2, (SKY, SKY_DARK)),
+                                                                                 (3, (CORAL, CORAL_DARK)))}}
 
 
 def size_of(frame):
@@ -129,6 +132,22 @@ def hold_bar(frame, cx, y, width, progress):
     ui.panel(frame, cx - width / 2, y, width, 16, radius=8, fill=PALE, opacity=1.0, shadow=False)
     if progress > 0:
         ui.panel(frame, cx - width / 2, y, max(16.0, width * progress), 16, radius=8, fill=(ORANGE, ORANGE_DARK), opacity=1.0, shadow=False)
+
+
+def card_hold(frame, hold):
+    """A card is being held up for a game: a ring in the middle of the screen, where the player is looking, that fills over the
+    two seconds with the card's name in it.  hold: (card, how far 0..1), or None for nothing."""
+    if hold is None:
+        return
+    card, progress = hold
+    name, color, _ = CARDS[card]
+    w, h = size_of(frame)
+    cx, cy, r = w // 2, h // 2 - 10, 112
+    ui.glow(frame, cx, cy, r * 1.8, color, 0.45)
+    cv2.circle(frame, (cx, cy), r, WHITE, -1, cv2.LINE_AA)
+    ui.ring(frame, cx, cy, r - 8, progress, color, 16, track=PALE)
+    fonts.draw(frame, name, cx, cy + 2, fonts.fit_size(name, 2 * r - 70, max_size=54, min_size=24), NAVY)
+    fonts.draw(frame, "KEEP HOLDING THE CARD", cx, cy + r + 40, 28, WHITE, outline=NAVY, outline_px=4)
 
 
 def back_button(frame, u, rect, *, label="BACK", target="back"):

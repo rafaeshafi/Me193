@@ -157,6 +157,10 @@ class VisionWorker:
     def latest_frame(self):
         return self._frame
 
+    def tag_hold(self, now_ns):
+        """(card, how far the hold has come 0..1) while a card is being held up for a game, else None: what the screen shows."""
+        return self.voter.hold(now_ns)
+
     def poll_tags(self):
         events = []
         while not self._tags.empty():

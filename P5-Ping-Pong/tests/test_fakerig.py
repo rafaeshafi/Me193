@@ -46,10 +46,29 @@ def test_the_start_card_is_what_starts_the_game_nothing_else_does():
     assert rig.game.phase == "LOBBY" and payloads(rig) == []
 
 
-def test_a_level_card_shown_before_the_start_card_sets_the_ball_speed_tier():
-    rig = fakerig.FakeRig(level=1, cards=[(0.2, 1.0, 2), (1.2, 2.8, 0)])
+def test_a_level_card_held_up_starts_the_game_at_that_ball_speed_tier_with_a_five_second_countdown():
+    rig = fakerig.FakeRig(level=1, cards=[(0.2, 3.0, 2)])
+    rig.run(until=lambda: rig.game.phase == "COUNTDOWN")
+    assert rig.game.level.name == "Club" and rig.game.seconds_to_serve(rig.clock.now_ns()) > 4.5
     rig.run(until=lambda: rig.game.phase == "RALLY")
     assert rig.game.level.name == "Club"
+
+
+def test_while_a_card_is_held_up_the_screen_shows_the_ring_filling_and_the_game_starts_when_it_is_full():
+    rig = fakerig.FakeRig(cards=[(0.5, 4.0, 3)])
+    seen = []
+    rig.run(until=lambda: (seen.append(rig.session.hud_state().tag_hold), rig.game.phase == "COUNTDOWN")[1], max_s=10)
+    holds = [h for h in seen if h]
+    assert holds and {card for card, _ in holds} == {3}
+    assert holds[0][1] < 0.3 and holds[-1][1] > 0.9
+    assert [progress for _, progress in holds] == sorted(progress for _, progress in holds)       # it only fills
+    assert rig.game.level.name == "Pro" and rig.session.hud_state().tag_hold is None
+
+
+def test_a_card_shown_for_only_a_second_starts_nothing():
+    rig = fakerig.FakeRig(cards=[(0.2, 1.2, 0), (2.0, 3.0, 3)])
+    rig.run(seconds=6.0)
+    assert rig.game.phase == "LOBBY"
 
 
 def test_a_fake_source_never_reaches_the_official_topic():

@@ -176,7 +176,7 @@ class FakeRig:
         self.origin_ns = self.clock.now_ns()
         camera = swing_source == "pose"                                # the camera, not the hub's gyro, detects swings
         calibration = calibration or Calibration.default(swing_source)
-        cards = [(0.6, 2.4, 0)] if cards is None else cards            # the START card, held 1.8 s
+        cards = [(0.6, 3.2, 0)] if cards is None else cards            # the START card, held up 2.6 s (a card counts after 2 s)
         self.player = ScriptedPlayer(calibration.box, w_pk=w_pk, timing_s=timing_s, cards=cards,
                                      pose_motion=camera or hand_motion)    # hand_motion: a hand that swings, hub gyro too
         self.player.origin_ns = self.origin_ns

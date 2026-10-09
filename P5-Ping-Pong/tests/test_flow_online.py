@@ -80,9 +80,11 @@ def test_the_keys_host_with_the_chosen_pace_or_join_the_game_in_focus():
     assert e.flow.screen == "WAIT" and online_actions(e)[-1] == ("join", "FGHJK")
 
 
-def test_the_online_screen_does_not_start_a_game_on_space_or_the_start_card():
+def test_the_online_screen_does_not_start_a_game_on_space_or_a_card():
     d = at_online()
     assert d.key(SPACE) == [] and d.tag("START") == [] and d.flow.screen == "ONLINE" and d.started() == []
+    d.tag("LEVEL", 3)
+    assert d.flow.screen == "ONLINE" and d.started() == []
 
 
 def test_back_closes_the_lobby_and_returns_to_the_choice_of_game():

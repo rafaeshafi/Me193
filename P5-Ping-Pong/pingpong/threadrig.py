@@ -49,7 +49,7 @@ class ThreadedFakeRig:
         self.origin_ns = self.clock.now_ns()
         camera = swing_source == "pose"
         calibration = Calibration.default(swing_source)
-        self.player = ScriptedPlayer(calibration.box, w_pk=w_pk, cards=[(0.6, 2.4, 0)] if cards is None else cards,
+        self.player = ScriptedPlayer(calibration.box, w_pk=w_pk, cards=[(0.6, 3.2, 0)] if cards is None else cards,
                                      pose_motion=camera)
         self.player.origin_ns = self.origin_ns
         self.dev = VibratingMotor(self.player, self.clock, vibration)

@@ -12,8 +12,9 @@ the computer serves a ball at you. Your webcam picture is a small corner of the 
   table; up and down is how far up the table the paddle stands (raise your hand to meet the ball sooner).
 - **The hub's IMU** says *when* you swung and *how hard*: the gyro peak sets the speed of your return.
   (If the bench finds the hub too slow to see a swing, the camera's hand speed does this job instead.)
-- **AprilTag cards** start the game (card 0) and set the level (cards 1–3 = Rookie, Club, Pro),
-  which sets how fast the computer's balls come.
+- **AprilTag cards** start the game and set the level: hold card 1, 2 or 3 (Rookie, Club, Pro) up to the camera for two
+  seconds and a game begins against that opponent (card 0 starts one with the choices so far); the level sets how fast the
+  computer's balls come, and the countdown is five seconds so you can put the card down and step into position.
 - **MQTT** carries your score live: the best streak of continuous hits goes to
   `ME193/Rogers/RafaeShafi` as a float.
 - **Haptics (the new thing)**: the hub's own motors, beep and light give you a cue for a perfect
@@ -148,13 +149,16 @@ stands, so reaching to the top right of your reach is reaching the top right of 
 runs across (START and PLAY AGAIN take 1.5 s, the cards and BACK about a second; the hub ticks when you come onto one and buzzes
 and beeps when it is pressed). A flicker of the reading shorter than 0.3 s does not undo a hold, and a hand that was already on
 a button when its screen came up has to leave once first, so one hold is one press. The keys do the same (below), and so do the
-cards: **card 0** starts a game at once with the choices so far (the assignment's own way in), **card 1, 2 or 3** picks the
-opponent.
+cards: hold one up for two seconds (a ring fills in the middle of the screen) and a game starts at once, **card 1, 2 or 3**
+against that opponent and **card 0** with the choices so far (the assignment's own way in). After a card the countdown is
+5-4-3-2-1 instead of 3-2-1, so there is time to put the card down and get into position. A card counts once, then has to be
+taken away to count again (a card left standing in the camera's view starts one game and no more); a card held for less than
+two seconds, or swept across the view, counts for nothing; changing the card in your hand starts the two seconds again.
 
-On a plain lobby (`--classic`) show the **START card** (or press SPACE), or **hold the hub on the START button** in the top
-right of the screen for 1.5 s (the same pointing, the bar fills while you hold, and on the game-over screen the same hold plays
-again). Then 3-2-1, and the computer serves. Show **card 1, 2 or 3** between rallies to change the level; **M** switches
-Rally/Match.
+On a plain lobby (`--classic`) hold a **card** up for two seconds (or press SPACE), or **hold the hub on the START button** in
+the top right of the screen for 1.5 s (the same pointing, the bar fills while you hold, and on the game-over screen the same hold
+plays again). Then the countdown (5-4-3-2-1 after a card, 3-2-1 after SPACE or the button), and the computer serves. The camera
+looks for cards only in the lobby and on the game-over screen, never during a game; **M** switches Rally/Match.
 
 | Key | |
 |---|---|
@@ -392,7 +396,7 @@ swing strength, how often the computer misses a ball, how often you would fault,
 
 ## Demo day: the graded take
 
-**Ten minutes before:** hub charged and awake, Continuity Camera off, the cards on a stand inside the camera frame,
+**Ten minutes before:** hub charged and awake, Continuity Camera off, the cards in your hand (a card left standing in the camera's view starts a game by itself),
 `./pp ready`, `./pp env_check`, one rehearsal with `--no-publish`. See what the broker holds right now:
 
 ```bash
@@ -406,8 +410,8 @@ haptic with a phone. A crash mid-take: restart with `--resume` so the best so fa
 **After it** use only `--no-publish` (a rehearsal would publish its own `1.0, 2.0, ...` over the graded value; the
 lobby warns you when the broker holds one). If the broker lost the value: `./pp republish_best --yes`.
 
-**Five-minute live demo:** subscriber window visible; START card, then level cards 1 → 2 (the flight visibly
-shortens); one Rally with the x-ray (**X**) and km/h; a Match at Club to 7 (or the first three points); the
+**Five-minute live demo:** subscriber window visible; hold level card 1 up for two seconds (a Rookie game), play a little, then
+card 2 on the results screen (the flight visibly shortens); one Rally with the x-ray (**X**) and km/h; a Match at Club to 7 (or the first three points); the
 haptic on camera; `./pp play --board`. The recorded video is the fallback.
 
 ## When something goes wrong

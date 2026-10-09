@@ -122,12 +122,37 @@ def test_space_on_the_title_starts_a_game_at_once_with_the_command_line_choices(
     assert s.game.phase == "COUNTDOWN" and s.game.level.name == "Pro" and s.game.mode == "match"
 
 
-def test_the_start_card_does_the_same_and_a_level_card_picks_the_opponent_first():
+def test_a_level_card_picks_the_opponent_and_starts_the_game_with_five_seconds_for_putting_the_card_down():
     s = make()
     settle(s)
     s.on_tag(TagEvent(role="LEVEL", value=2, t_ns=0))
-    s.on_tag(TagEvent(role="START", value=0, t_ns=0))
     assert s.game.phase == "COUNTDOWN" and s.game.level.name == "Club"
+    assert s.game.seconds_to_serve(s.clock.now_ns()) == 5.0 and hud(s).countdown == 5
+
+
+def test_the_start_card_starts_the_game_with_the_choices_so_far_and_the_same_five_seconds():
+    s = make(level=3, mode="match")
+    settle(s)
+    s.on_tag(TagEvent(role="START", value=0, t_ns=0))
+    assert s.game.phase == "COUNTDOWN" and s.game.level.name == "Pro" and s.game.mode == "match"
+    assert s.game.seconds_to_serve(s.clock.now_ns()) == 5.0
+
+
+def test_a_start_by_key_is_the_usual_three_seconds():
+    s = make()
+    settle(s)
+    key(s, SPACE)
+    assert s.game.seconds_to_serve(s.clock.now_ns()) == 3.0
+
+
+def test_the_screen_is_told_how_far_a_card_has_been_held_but_only_while_the_lobby_is_up():
+    s = make()
+    settle(s)
+    assert hud(s).tag_hold is None                                       # nothing bound: nothing shown
+    s.bind_status(card=lambda now_ns: (2, 0.4))
+    assert hud(s).tag_hold == (2, 0.4)
+    key(s, SPACE)
+    assert s.game.phase == "COUNTDOWN" and hud(s).tag_hold is None       # the game is on: the ring is gone
 
 
 def test_quitting_is_still_quitting_in_the_menus():

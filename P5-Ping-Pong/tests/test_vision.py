@@ -177,21 +177,37 @@ def test_tags_are_looked_for_only_in_the_lobby_and_at_most_ten_times_a_second():
     assert 8 <= det.calls <= 11
 
 
-def test_a_held_start_card_becomes_a_start_event_and_a_flash_does_not():
+def test_a_start_card_held_for_two_seconds_becomes_a_start_event_and_a_short_show_does_not():
     det = FakeTagDetector(ids=(0,))
     worker, clock, *_ = make(tag_detector=det, phase_fn=lambda: "LOBBY")
-    for _ in range(45):                                # 1.5 s of the card
+    for _ in range(45):                                # 1.5 s of the card: not yet
         tick(worker, clock)
-    events = worker.poll_tags()
-    assert [e.role for e in events] == ["START"]
+    assert worker.poll_tags() == []
+    for _ in range(30):                                # 2.5 s in all
+        tick(worker, clock)
+    assert [e.role for e in worker.poll_tags()] == ["START"]
     det2 = FakeTagDetector(ids=(0,))
     worker2, clock2, *_ = make(tag_detector=det2, phase_fn=lambda: "LOBBY")
-    for _ in range(6):                                 # 0.2 s flash
+    for _ in range(45):                                # 1.5 s, then taken away
         tick(worker2, clock2)
     det2.ids = ()
-    for _ in range(20):
+    for _ in range(40):
         tick(worker2, clock2)
     assert worker2.poll_tags() == []
+
+
+def test_the_worker_tells_the_screen_how_far_a_card_has_been_held():
+    det = FakeTagDetector(ids=(2,))
+    worker, clock, *_ = make(tag_detector=det, phase_fn=lambda: "LOBBY")
+    assert worker.tag_hold(clock.now_ns()) is None
+    for _ in range(30):                                # one second of card 2
+        tick(worker, clock)
+    card, progress = worker.tag_hold(clock.now_ns())
+    assert card == 2 and 0.35 < progress < 0.65
+    det.ids = ()
+    for _ in range(30):
+        tick(worker, clock)
+    assert worker.tag_hold(clock.now_ns()) is None
 
 
 def test_a_failed_read_is_not_an_error_and_returns_false():

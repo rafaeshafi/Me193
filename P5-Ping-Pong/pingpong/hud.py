@@ -14,7 +14,7 @@ from functools import lru_cache
 import cv2
 import numpy as np
 
-from pingpong import anim, cast, characters, court3d, fonts, holdstart, levels, scene, screens, ui
+from pingpong import anim, cast, characters, court3d, fonts, holdstart, levels, scene, screens, screens_common, ui
 from pingpong.cast import rgb
 from pingpong.uistate import Results, UiState
 
@@ -27,6 +27,7 @@ PING_OK_MS = 400                 # a line slower than this (there and back) is s
 # in front of the table they hid the ball coming at you.
 MESSAGE_Y, MESSAGE_SIZE, MESSAGE_W = 52, 44, 560
 GO_SIZE, GO_Y = 100, 62
+COUNTDOWN_COLOR = {5: SKY, 4: PURPLE, 3: CORAL, 2: ORANGE, 1: MINT}      # a digit each: the last second is the green one
 PIP_SIZE = (256, 144)            # the camera picture in the corner (px)
 CARD_W, CARD_H = 318, 100
 LABEL_COLOR = {"perfect": GOLD, "good": MINT, "early": ORANGE, "late": ORANGE}
@@ -80,6 +81,7 @@ class HudState:
     results: Results | None = None   # the results screen's words and numbers
     opponent_name: str = ""          # a friend being played online (their avatar stands behind the table); "" against the computer
     ping_ms: float | None = None     # how long a message takes there and back (online play), None until the first answer
+    tag_hold: tuple | None = None    # (card, how far the two seconds have come 0..1) while an AprilTag card is held up for a game
 
 
 @lru_cache(maxsize=4)
@@ -92,6 +94,7 @@ def render(state, size=(1280, 720), background=None):
     frame = np.empty((h, w, 3), dtype=np.uint8)
     if state.screen != "GAME":
         screens.render(frame, state, background)
+        screens_common.card_hold(frame, state.tag_hold)
         return frame
     scene.draw_scene(frame, _camera((w, h)), state)
     _score_cards(frame, state, w)
@@ -109,6 +112,7 @@ def render(state, size=(1280, 720), background=None):
         fonts.draw(frame, state.keys_hint, w // 2, h - 24, 20, WHITE, outline=NAVY, outline_px=3, opacity=0.85)
     if state.flash:
         _tint(frame, state.flash[0], state.flash[1])
+    screens_common.card_hold(frame, state.tag_hold)
     return frame
 
 
@@ -191,7 +195,7 @@ def _phase(frame, s, w, h):
         _lobby(frame, s, w, h)
     elif s.phase == "COUNTDOWN" and s.countdown is not None:
         t = anim.pop(min(1.0, s.countdown_t / 0.4))
-        color = {3: CORAL, 2: ORANGE}.get(s.countdown, MINT)
+        color = COUNTDOWN_COLOR.get(s.countdown, MINT)
         r = round(104 * min(1.2, max(0.2, t)))
         cx, cy = w // 2, h // 2 + 30
         ui.glow(frame, cx, cy, r * 1.9, color, 0.45)
@@ -210,10 +214,10 @@ def _lobby(frame, s, w, h):
     ui.panel(frame, w / 2 - 330, h / 2 - 120, 660, 190, radius=40, fill=WHITE, opacity=0.93)
     if s.start_button is not None:
         fonts.draw(frame, "HOLD THE HUB ON START", w / 2, h / 2 - 52, 52, NAVY)
-        fonts.draw(frame, "top right, 1.5 s   (or show the START card, or press SPACE)", w / 2, h / 2 + 20, 24, SLATE)
+        fonts.draw(frame, "top right, 1.5 s   (or hold a card up for 2 s, or press SPACE)", w / 2, h / 2 + 20, 24, SLATE)
     else:
-        fonts.draw(frame, "SHOW THE START CARD", w / 2, h / 2 - 52, 56, NAVY)
-        fonts.draw(frame, "or press SPACE", w / 2, h / 2 + 20, 34, SLATE)
+        fonts.draw(frame, "HOLD UP A CARD", w / 2, h / 2 - 52, 56, NAVY)
+        fonts.draw(frame, "for 2 seconds, or press SPACE", w / 2, h / 2 + 20, 32, SLATE)
 
 
 def _start_button(frame, s, w, h):

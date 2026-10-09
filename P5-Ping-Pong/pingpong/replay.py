@@ -145,7 +145,7 @@ def _start(rig, record):
     game = rig.session.game
     game.set_level(levels.LEVELS[record["level"]])                  # the game applies any level setting itself
     game.set_mode(record["mode"])
-    game.start(record["started_at_ns"])
+    game.start(record["started_at_ns"], record.get("countdown_s"))          # (a recording from before cards had their own countdown: 3 s)
 
 
 def replay(loaded, *, overrides=None, record_dir=None):

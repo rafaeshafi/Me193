@@ -30,11 +30,15 @@ def test_any_key_skips_the_intro_but_quitting_still_quits():
     assert d.key(SPACE) is not None and d.flow.screen == "TITLE"
 
 
-def test_the_start_card_skips_the_intro():
+def test_a_card_held_up_during_the_intro_starts_the_game_without_waiting_for_the_menus():
     d = Drive()
     d.run(ELSEWHERE, 0.5)
-    d.tag("START")
-    assert d.flow.screen == "TITLE"
+    d.tag("LEVEL", 2)
+    assert d.flow.screen == "GAME" and d.started() == [Action("start", (2, "survival", flowmod.CARD_COUNTDOWN_S))]
+    e = Drive(level_tag=3, mode="match")
+    e.run(ELSEWHERE, 0.5)
+    e.tag("START")
+    assert e.started() == [Action("start", (3, "match", flowmod.CARD_COUNTDOWN_S))]
 
 
 def test_holding_the_hub_in_the_top_right_skips_the_intro():
@@ -77,12 +81,37 @@ def test_space_starts_a_game_at_once_with_the_choices_so_far_and_enter_goes_on_t
     assert e.flow.screen == "MODE" and e.started() == []
 
 
-def test_the_start_card_starts_a_game_at_once_and_a_level_card_picks_the_opponent():
+def test_a_level_card_picks_the_opponent_and_starts_the_game_with_five_seconds_to_put_the_card_down():
+    assert flowmod.CARD_COUNTDOWN_S == 5.0
+    for card in (1, 2, 3):
+        d = at_title(mode="match")
+        d.tag("LEVEL", card)
+        assert d.started() == [Action("start", (card, "match", flowmod.CARD_COUNTDOWN_S))] and d.flow.screen == "GAME"
+        assert d.flow.level_tag == card
+
+
+def test_the_start_card_starts_a_game_at_once_with_the_choices_so_far_and_the_same_five_seconds():
+    d = at_title(level_tag=2, mode="match")
+    d.tag("START")
+    assert d.started() == [Action("start", (2, "match", flowmod.CARD_COUNTDOWN_S))] and d.flow.screen == "GAME"
+
+
+def test_a_card_start_is_felt_and_heard_like_any_other_choice():
     d = at_title()
     d.tag("LEVEL", 3)
-    assert d.flow.level_tag == 3
-    d.tag("START")
-    assert d.started() == [Action("start", (3, "survival"))] and d.flow.screen == "GAME"
+    assert "menu_select" in d.sounds() and "menu_select" in d.haptics()
+
+
+def test_a_start_by_key_or_by_pointing_keeps_the_short_countdown():
+    d = at_title()
+    d.key(SPACE)
+    assert d.started() == [Action("start", (1, "survival"))]
+
+
+def test_a_card_on_the_choice_of_game_starts_with_that_game_too():
+    d = at_mode()
+    d.tag("LEVEL", 3)
+    assert d.started() == [Action("start", (3, "survival", flowmod.CARD_COUNTDOWN_S))]
 
 
 def test_the_old_keys_still_work_digits_choose_the_level_and_m_the_game():
@@ -170,17 +199,18 @@ def test_the_keys_pick_an_opponent_digits_move_the_focus_and_enter_confirms():
     assert d.flow.screen == "VS" and d.flow.level_tag == 2
 
 
-def test_a_level_card_shown_on_the_opponent_screen_moves_the_focus_to_that_opponent():
+def test_a_level_card_shown_on_the_opponent_screen_is_that_opponent_and_the_game_begins():
     d = at_opponents()
     d.tag("LEVEL", 3)
-    assert d.flow.focus == 2 and d.flow.level_tag == 3 and d.flow.screen == "OPPONENT"
+    assert d.flow.level_tag == 3 and d.flow.screen == "GAME"
+    assert d.started() == [Action("start", (3, "match", flowmod.CARD_COUNTDOWN_S))]
 
 
-def test_the_start_card_on_the_opponent_screen_starts_the_game_with_the_one_in_focus():
+def test_the_start_card_on_the_opponent_screen_starts_the_game_with_the_opponent_chosen_so_far():
     d = at_opponents()
-    d.tag("LEVEL", 2)
+    chosen = d.flow.level_tag
     d.tag("START")
-    assert d.started() == [Action("start", (2, "match"))]
+    assert d.started() == [Action("start", (chosen, "match", flowmod.CARD_COUNTDOWN_S))]
 
 
 # --- the game and its results ---------------------------------------------------------------------------------------------------------
@@ -225,13 +255,33 @@ def test_from_the_results_the_hub_in_the_top_left_goes_to_the_choice_of_opponent
     assert e.flow.screen == "OPPONENT"
 
 
-def test_space_the_start_card_and_enter_play_again_from_the_results():
-    for press in (lambda d: d.key(SPACE), lambda d: d.key(ENTER), lambda d: d.tag("START")):
+def test_space_and_enter_play_again_from_the_results():
+    for press in (lambda d: d.key(SPACE), lambda d: d.key(ENTER)):
         d = started_game(level_tag=2)
         d.run(ELSEWHERE, 0.3, phase="MATCH_OVER")
         before = len(d.started())
         press(d)
         assert len(d.started()) == before + 1 and d.started()[-1] == Action("start", (2, "survival"))
+
+
+def test_a_card_held_up_on_the_results_plays_again_the_start_card_against_the_same_opponent_a_level_card_against_that_one():
+    d = started_game(level_tag=2)
+    d.run(ELSEWHERE, 0.3, phase="MATCH_OVER")
+    d.tag("START")
+    assert d.started()[-1] == Action("start", (2, "survival", flowmod.CARD_COUNTDOWN_S))
+    e = started_game(level_tag=2)
+    e.run(ELSEWHERE, 0.3, phase="MATCH_OVER")
+    e.tag("LEVEL", 3)
+    assert e.started()[-1] == Action("start", (3, "survival", flowmod.CARD_COUNTDOWN_S))
+
+
+def test_a_card_starts_nothing_during_the_face_off_it_is_already_on_its_way():
+    d = at_opponents()
+    d.run(OPP_AT[2], 1.5)
+    assert d.flow.screen == "VS"
+    d.tag("START")
+    d.tag("LEVEL", 3)
+    assert d.started() == [] and d.flow.screen == "VS"
 
 
 def test_a_hand_that_ended_the_game_up_in_the_corner_does_not_press_play_again():

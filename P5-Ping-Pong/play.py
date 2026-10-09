@@ -263,7 +263,7 @@ def run_live(args):
         sensor = "camera" if rig.swing_source == "pose" else "hub gyro"
         hub = "no hub" if rig.hub_status() == "off" else "hub ready"
         print(f"live: player {rig.player!r}, swings from the {sensor}, {hub}, camera on. "
-              "Point the hub at the screen and hold on a button, or SPACE / the START card to begin; Q quits.")
+              "Point the hub at the screen and hold on a button, or hold a card up for 2 s (1, 2 or 3 picks the opponent), or SPACE, to begin; Q quits.")
         run_loop(rig, show=lambda frame: cv2.imshow(TITLE, frame), wait_key=cv2.waitKey)
     except KeyboardInterrupt:
         pass

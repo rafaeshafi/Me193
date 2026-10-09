@@ -36,14 +36,40 @@ def test_the_scripted_run_never_touches_the_official_topic_when_the_source_is_fa
     assert demo == [f"{n}.0" for n in range(1, 6)]
 
 
-def test_start_and_level_tags_drive_the_game():
+def test_a_level_tag_starts_the_game_against_that_opponent_with_five_seconds_to_put_the_card_down():
     session = app.make_session(level=1)
     session.on_tag(TagEvent(role="LEVEL", value=3, t_ns=0))
-    assert session.game.level.name == "Pro"
-    session.on_tag(TagEvent(role="START", value=0, t_ns=0))
-    assert session.game.phase == "COUNTDOWN"
+    assert session.game.phase == "COUNTDOWN" and session.game.level.name == "Pro"
+    assert session.game.seconds_to_serve(session.clock.now_ns()) == 5.0
+    assert session.hud_state().countdown == 5
     session.on_tag(TagEvent(role="LEVEL", value=1, t_ns=0))        # mid-game: ignored
     assert session.game.level.name == "Pro"
+
+
+def test_the_start_tag_starts_the_game_with_the_same_five_seconds():
+    session = app.make_session(level=2)
+    session.on_tag(TagEvent(role="START", value=0, t_ns=0))
+    assert session.game.phase == "COUNTDOWN" and session.game.level.name == "Club"
+    assert session.game.seconds_to_serve(session.clock.now_ns()) == 5.0
+
+
+def test_a_start_that_is_not_a_card_keeps_the_three_second_countdown():
+    session = app.make_session()
+    session.on_start()
+    assert session.game.seconds_to_serve(session.clock.now_ns()) == 3.0
+
+
+def test_the_countdown_counts_down_from_five_for_a_card_and_serves_when_it_ends():
+    session = app.make_session()
+    session.on_tag(TagEvent(role="START", value=0, t_ns=0))
+    digits = []
+    for _ in range(5):
+        session.tick()
+        digits.append(session.hud_state().countdown)
+        session.clock.advance_s(1.0)
+    assert digits == [5, 4, 3, 2, 1]
+    session.tick()
+    assert session.game.phase == "RALLY"
 
 
 def test_the_countdown_counts_3_2_1_on_the_hud():

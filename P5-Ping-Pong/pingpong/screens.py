@@ -87,7 +87,7 @@ def title(frame, state):
         ui.panel(frame, 380, h - 140, w - 760, 30 + 34 * len(lines), radius=28, fill=WHITE, opacity=0.95, border=ORANGE, border_px=4)
         for i, line in enumerate(lines):
             fonts.draw(frame, line, w / 2, h - 113 + 34 * i, 26, cast.rgb(150, 90, 0), anchor="mm")
-    hint(frame, "ENTER  menus     \u2022     SPACE  quick start     \u2022     Q  quit", opacity=0.92 * arrival(u, 0.5, 0.5))
+    hint(frame, "ENTER  menus   \u2022   SPACE  quick start   \u2022   hold a card up for 2 s  play   \u2022   Q  quit", opacity=0.92 * arrival(u, 0.5, 0.5))
     pointer(frame, state)
 
 

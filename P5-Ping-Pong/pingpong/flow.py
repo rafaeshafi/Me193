@@ -5,8 +5,9 @@ opponent, a face-off, and after the match its results.
     MODE -> ONLINE -> WAIT -> VS -> (the game) -> RESULTS -> (rematch | ONLINE)                       (playing a friend)
 
 Every screen can be pointed at with the hub and held on (dwell.py), driven with a few keys, or short-cut with the AprilTag cards:
-the START card, or SPACE, starts a game at once with the choices so far (the assignment's own way in), and a LEVEL card picks
-the opponent.  The flow decides nothing about the game itself: it hands back Actions (start a game with this level and mode,
+a card held up for two seconds (tags.py) starts a game at once, the START card with the choices so far (the assignment's own way
+in) and a LEVEL card against that opponent, and the countdown is five seconds so the card can be put down and the player can get
+into position.  SPACE starts with the choices so far after the usual three.  The flow decides nothing about the game itself: it hands back Actions (start a game with this level and mode,
 play this sound, buzz the hub, change the music) that the Session carries out, and it stays out of the way while a game is on.
 Pure logic with the clock passed in.
 """
@@ -21,6 +22,7 @@ INTRO_S = 10.0
 VS_S = 2.4
 TICK_GAP_S = 0.35                 # the hover tick (sound and buzz) is not made more often than this
 GAME_GRACE_S = 0.25               # a game that has only just been started has not reached its phase yet
+CARD_COUNTDOWN_S = 5.0            # the countdown of a game a card started: time to lower it and get into position
 
 Action = namedtuple("Action", "kind value")          # kind: start (level_tag, mode) | sound | haptic | music (name or None) | online (verb, arg)
 
@@ -76,9 +78,10 @@ class Flow:
         self._music = want
         return [Action("music", want)]
 
-    def _launch(self, now_ns):
-        """Start a game now with the choices so far."""
-        return self._go("GAME", now_ns, Action("start", (self.level_tag, self.mode)))
+    def _launch(self, now_ns, countdown_s=None):
+        """Start a game now with the choices so far (countdown_s: a countdown of its own length, else the game's usual)."""
+        choice = (self.level_tag, self.mode) + (() if countdown_s is None else (countdown_s,))
+        return self._go("GAME", now_ns, Action("start", choice))
 
     def started(self, ok):
         """The Session says whether the game really started; if it could not (the hub is lost, say) it is the title again."""
@@ -278,28 +281,35 @@ class Flow:
         self.focus = max(0, min(count - 1, self.focus + step))
         return [Action("sound", "menu_tick")]
 
-    def _choose_level(self, tag):
+    def _pick(self, tag):
+        """The opponent is `tag` from now on (False: the pace of a game with a friend was settled by the host)."""
         if self.online_game or self.screen == "WAIT":
-            return []                                                       # the pace of a game with a friend was settled by the host
+            return False
         self.level_tag = tag
         if self.screen == "OPPONENT":
             self.focus = tag - 1
-        return [Action("sound", "menu_tick")]
+        return True
+
+    def _choose_level(self, tag):
+        return [Action("sound", "menu_tick")] if self._pick(tag) else []
 
     def on_tag(self, role, value, now_ns):
-        """-> the actions for an AprilTag card the flow takes, or None while a game is on."""
+        """-> the actions for an AprilTag card that has been held up long enough, or None while a game is on.  It starts a game
+        at once, with time to put the card down: the START card with the choices so far, a LEVEL card against that opponent.
+        Not from the face-off nor the online screens (a friend's game is not a card's to start): there a LEVEL card only picks."""
         self._last_ns = now_ns
         if self.screen == "GAME":
             return None
-        if role == "START":
-            if self.screen == "INTRO":
-                return self._go("TITLE", now_ns)
-            if self.screen == "RESULTS" and self.online_game:
-                return self._rematch()
-            return [] if self.screen in ("VS", "ONLINE", "WAIT") else self._launch(now_ns)
+        if role == "START" and self.screen == "RESULTS" and self.online_game:
+            return self._rematch()
         if role == "LEVEL" and value in (1, 2, 3):
-            return self._choose_level(value)
-        return []
+            if not self._pick(value):
+                return []
+        elif role != "START":
+            return []
+        if self.screen in ("VS", "ONLINE", "WAIT") or self.online_game:
+            return [Action("sound", "menu_tick")] if role == "LEVEL" else []
+        return self._launch(now_ns, CARD_COUNTDOWN_S) + self._selected()
 
     # --- what the screen is told ------------------------------------------------------------------------------------------------------
     def ui_state(self, now_ns, ab):

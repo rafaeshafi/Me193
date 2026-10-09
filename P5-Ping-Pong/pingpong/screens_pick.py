@@ -70,5 +70,5 @@ def opponent(frame, state):
     for k, tag in enumerate((1, 2, 3)):
         _opponent_card(frame, state, tag, menu_layout.OPPONENT_CARDS[tag], focus, arrival(u, 0.2 + 0.12 * k, 0.5))
     back_button(frame, u, menu_layout.BACK_BUTTON)
-    hint(frame, "hold the hub on an opponent   •   or  <  >  ENTER   •   a LEVEL card picks   •   DELETE  back", cx=w / 2 + 130)
+    hint(frame, "hold the hub on an opponent   •   or  <  >  ENTER   •   hold a LEVEL card up to play it   •   DELETE  back", cx=w / 2 + 130)
     pointer(frame, state)
