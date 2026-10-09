@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 W, H = 1280, 720
 TITLE = "P5 Ping-Pong  (Q to quit)"
+PICTURE_WAIT_S = 0.25          # the longest the loop waits for a picture that is still being drawn (it shows nothing new, then)
 
 
 def make_parser():
@@ -144,20 +145,28 @@ def selftest():
 
 
 def fake_loop(session, *, show, wait_key, mouse_xy):
-    """The --fake window loop: the mouse is the paddle, keys swing.  Returns when the player quits."""
-    from pingpong import hud, keys
+    """The --fake window loop: the mouse is the paddle, keys swing.  Returns when the player quits.  Each picture is drawn
+    (framepipe.py) while the window waits, and shown at the next turn."""
+    from pingpong import framepipe, hud, keys
     from pingpong.events import PaddlePose
 
-    while True:
-        x, y = mouse_xy()
-        a, b = min(1.0, max(0.0, x / W)), min(1.0, max(0.0, 1.0 - y / H))
-        u, v = session.game.judge.box.to_uv(a, b)
-        session.on_pose(PaddlePose(t_scene_ns=session.clock.now_ns(), u=u, v=v, conf=0.95, hand="right"))
-        session.tick()
-        show(hud.render(session.hud_state(), size=(W, H)))
-        key = wait_key(1) & 0xFF
-        if key != 255 and keys.handle_key(session, key, fake=True)[0] == "quit":
-            return
+    pipe = framepipe.FramePipe(lambda state: hud.render(state, size=(W, H)))
+    try:
+        while True:
+            picture = pipe.wait(PICTURE_WAIT_S)
+            if picture is not None:
+                show(picture)
+            x, y = mouse_xy()
+            a, b = min(1.0, max(0.0, x / W)), min(1.0, max(0.0, 1.0 - y / H))
+            u, v = session.game.judge.box.to_uv(a, b)
+            session.on_pose(PaddlePose(t_scene_ns=session.clock.now_ns(), u=u, v=v, conf=0.95, hand="right"))
+            session.tick()
+            pipe.submit(session.hud_state())
+            key = wait_key(1) & 0xFF
+            if key != 255 and keys.handle_key(session, key, fake=True)[0] == "quit":
+                return
+    finally:
+        pipe.close()
 
 
 def make_flow(args):
@@ -208,38 +217,55 @@ MAX_BAD_FRAMES = 30            # this many frames in a row that raise end the se
 def run_loop(rig, *, show, wait_key, fps=60.0, log=print):
     """The window loop: pump the rig, draw the HUD, handle keys.  Returns when the player quits.
 
-    One frame that raises (a bug that only shows on the real sensors) is reported once and skipped: the game, the
-    score on the broker and the hub's connection are worth more than that frame.  A loop that fails every frame
-    is not skipped forever: after MAX_BAD_FRAMES in a row the error ends the session (the rig is closed by the
-    caller).  Control-C is a KeyboardInterrupt and is never caught here.
-    """
-    from pingpong import hud, keys
+    On macOS the window's wait (cv2.waitKey) takes ~15 ms a frame whatever there is to draw, so the picture is drawn on a thread
+    (framepipe.py) during that wait: each turn shows the picture made from the state of the turn before and hands the new state
+    over.  `fps` is a ceiling for a window system whose wait is quick.
 
-    frame_ms = 1000.0 / fps
+    One frame that raises (a bug that only shows on the real sensors) is reported once and skipped: the game, the
+    score on the broker and the hub's connection are worth more than that frame.  A loop that fails every frame is not skipped
+    forever: after MAX_BAD_FRAMES in a row the error ends the session (the rig is closed by the caller).  Control-C is a
+    KeyboardInterrupt and is never caught here.
+    """
+    from pingpong import framepipe, hud, keys
+
+    frame_s = 1.0 / fps
+    pipe = framepipe.FramePipe(lambda state, camera: hud.render(state, size=(W, H), background=camera))
     bad, seen = 0, {}
-    while True:
-        t0 = time.perf_counter()
-        try:
-            rig.pump()
-            show(hud.render(rig.hud_state(), size=(W, H), background=rig.display_frame()))
-            bad = 0
-        except Exception as exc:
-            bad += 1
-            where = traceback.extract_tb(exc.__traceback__)[-1]               # the same bug at the same line is one report
-            key = (type(exc).__name__, where.filename, where.lineno)
-            seen[key] = seen.get(key, 0) + 1
-            if seen[key] == 1 or seen[key] % 100 == 0:
-                log(f"frame skipped ({type(exc).__name__}: {exc} at {Path(where.filename).name}:{where.lineno}, "
-                    f"{seen[key]} so far); the game carries on")
-            if bad >= MAX_BAD_FRAMES:
-                raise
-        key = wait_key(max(1, int(frame_ms - (time.perf_counter() - t0) * 1000.0))) & 0xFF
-        if key == 255:
-            continue
-        if key == ord("r"):
-            rig.reconnect_now()                       # give a lost hub a fresh budget of attempts
-        elif keys.handle_key(rig.session, key, fake=False)[0] == "quit":
-            return
+    try:
+        while True:
+            t0 = time.perf_counter()
+            try:
+                picture = pipe.wait(PICTURE_WAIT_S)            # drawn while the window was waiting
+                if picture is not None:
+                    note = getattr(rig, "note_picture", None)
+                    if note is not None:
+                        note()                                  # (what the screen really did goes in the report)
+                    show(picture)
+                rig.pump()
+                pipe.submit(rig.hud_state(), rig.display_frame())
+                bad = 0
+            except Exception as exc:
+                bad += 1
+                where = traceback.extract_tb(exc.__traceback__)[-1]               # the same bug at the same line is one report
+                key = (type(exc).__name__, where.filename, where.lineno)
+                seen[key] = seen.get(key, 0) + 1
+                if seen[key] == 1 or seen[key] % 100 == 0:
+                    log(f"frame skipped ({type(exc).__name__}: {exc} at {Path(where.filename).name}:{where.lineno}, "
+                        f"{seen[key]} so far); the game carries on")
+                if bad >= MAX_BAD_FRAMES:
+                    raise
+            key = wait_key(1) & 0xFF            # (1 ms: a longer one is not waited for more steadily, it makes the frames ragged)
+            spare = frame_s - (time.perf_counter() - t0)
+            if spare > 0.001:
+                time.sleep(spare)
+            if key == 255:
+                continue
+            if key == ord("r"):
+                rig.reconnect_now()                       # give a lost hub a fresh budget of attempts
+            elif keys.handle_key(rig.session, key, fake=False)[0] == "quit":
+                return
+    finally:
+        pipe.close()
 
 
 def run_live(args):

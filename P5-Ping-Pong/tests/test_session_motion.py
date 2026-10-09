@@ -80,13 +80,20 @@ def test_the_paddle_is_where_the_hand_puts_it_across_the_table_and_up_the_table(
 
 
 def test_a_moving_hand_is_drawn_where_it_was_last_read_unless_a_trained_model_says_where_it_will_be():
-    session = app.make_session()
+    session = app.make_session(latency=dataclasses.replace(latency.Latency.from_config(), glide_s=0.0))     # (not smoothed: see test_glide_session)
     for k in range(8):
         hand(session, -0.6 + 1.5 * k / 30, 0.0, 1.0 + k / 30)                      # 1.5 shoulder widths a second to the right
     session.clock.advance_s(0.0)
     box = session.game.judge.box
     last_u = -0.6 + 1.5 * 7 / 30
-    assert session.hud_state().rest == pytest.approx(stage.rest_position(box, last_u, 0.0))      # smooth, no guessing
+    assert session.hud_state().rest == pytest.approx(stage.rest_position(box, last_u, 0.0))      # no guessing
+
+    smooth = app.make_session()                                                    # the default glide: a little behind the reading, never ahead of it
+    for k in range(8):
+        hand(smooth, -0.6 + 1.5 * k / 30, 0.0, 1.0 + k / 30)
+    smooth.clock.advance_s(0.0)
+    behind = stage.rest_position(box, last_u - 1.5 / 30, 0.0)[0]
+    assert behind < smooth.hud_state().rest[0] <= stage.rest_position(box, last_u, 0.0)[0]
 
     class Model:
         def predict(self, poses, lead_s):

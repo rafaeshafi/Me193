@@ -359,3 +359,43 @@ def test_the_note_that_a_friend_left_stays_inside_the_screen_whatever_the_length
         edge = frame[100:142, W - 14:]                                               # the last columns of the pill's row: the court, not coral
         coral = np.array(cast.rgb(235, 76, 84), dtype=np.int32)
         assert (np.abs(edge.astype(np.int32) - coral).sum(axis=2) < 60).sum() == 0, name
+
+
+# --- the face-off's background is the same picture every frame ------------------------------------------------------------------------------------
+def reference_split(frame):
+    """The face-off's two-colour slash as it was drawn every frame before it was kept."""
+    import cv2
+
+    from pingpong import ui
+    from pingpong.cast import rgb
+
+    h, w = frame.shape[:2]
+    frame[:] = ui.gradient(h, w, rgb(160, 220, 255), rgb(70, 150, 240))
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.fillPoly(mask, [np.array([(0.58 * w, 0), (w, 0), (w, h), (0.42 * w, h)], dtype=np.int32)], 255, cv2.LINE_AA)
+    right = ui.gradient(h, w, rgb(255, 196, 170), rgb(240, 96, 110))
+    frame[mask > 0] = right[mask > 0]
+    cv2.line(frame, (round(0.58 * w) + 9, 0), (round(0.42 * w) + 9, h), (0, 0, 0), 22, cv2.LINE_AA)
+    cv2.line(frame, (round(0.58 * w), 0), (round(0.42 * w), h), (255, 255, 255), 18, cv2.LINE_AA)
+
+
+def test_the_face_offs_background_is_made_once_and_is_the_same_picture_as_drawing_it_each_time():
+    import time
+
+    from pingpong import screens_end
+
+    screens_end._split_picture.cache_clear()                            # (another test may have made it already)
+    for size in ((1280, 720), (960, 540)):
+        w, h = size
+        mine, theirs = np.empty((h, w, 3), np.uint8), np.empty((h, w, 3), np.uint8)
+        t0 = time.perf_counter()
+        screens_end._split(mine)
+        cold = time.perf_counter() - t0
+        reference_split(theirs)
+        assert (mine == theirs).all()
+        warm = []
+        for _ in range(5):
+            t0 = time.perf_counter()
+            screens_end._split(mine)
+            warm.append(time.perf_counter() - t0)
+        assert min(warm) * 4 < cold                                      # kept: a copy of a picture, not a drawing

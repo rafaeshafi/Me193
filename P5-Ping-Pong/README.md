@@ -217,12 +217,30 @@ ball is flat; `--no-spin` ignores the model.
 judged and what you feel line up (`pingpong/latency.py`, tunable with `--set latency.display_s=0.08` or in
 `config_local.json`): the hub's samples are stamped when they *arrive*, about 40 ms after your hand did it, and the
 swing is dated accordingly; the screen shows a frame 50 ms after it is drawn, so the ball and the computer's paddle (whose
-flights are known exactly) are **drawn ahead** by that much and what you see is where the ball is; your hand (the camera
-pipeline is 100 ms or more behind it) is drawn where the camera read it, because extrapolating its speed across that gap,
+flights are known exactly) are **drawn ahead** by that much and one turn of the game's loop more (a picture is drawn during
+the turn before it is shown) and what you see is where the ball is; your hand (the camera pipeline is 100 ms or more behind it)
+is drawn where the camera read it, smoothed between the readings (see below), because extrapolating its speed across that gap,
 which is what I first did, was no more accurate than holding it on my recorded games (3% worse) and made the paddle shimmer four
 times as much (a trained predictor can lead it again, see `./pp train_pose`); and the thump of a hit and its sound are **sent
 early** by the motors' and the speakers' delays so they arrive when the picture shows the contact. The camera's own lag is the
 one delay measured on this hardware (`./pp bench_cam`).
+
+**Keeping the picture smooth.** On the recordings of 10/7 the window ran at 49 pictures a second; after the new menus came in
+it ran at 23-25, which is what "jittery" was. On macOS `cv2.waitKey` takes about 15 ms a frame whatever there is to draw (measured:
+the same with nothing at all drawn, the same for a small window), and OpenCV lets other threads run while it waits, so each picture
+is now **drawn on a thread during that wait** (`framepipe.py`) and shown at the next turn: on this Mac a game frame is 59 pictures a
+second at 17.0 ms every time (it was 27-36 ms), and `./pp report` prints a `Screen:` line (pictures a second, how long a picture takes,
+the share over 25 ms) so a real session shows what the screen did. The rest is making a frame cheap: the corner picture is the pose
+model's own 640-px frame (flipping and shrinking a 1080p frame every turn cost 13 ms), the blend every panel and shadow goes through
+is done in whole numbers with OpenCV (half the time), and the face-off's background is made once. Three things make what moves
+look steady: the **ball** is drawn at sub-pixel positions and sizes (whole-pixel centres moved it in steps and made it pop from one size
+to the next); at the three moments the game only learns later what the ball does (your hand meeting it, the ball being let go after
+the hold, the computer meeting your return) the ball **waits at the paddle** until the game has said, then runs half as fast again as
+the clock until the picture has caught up (`ballclock.py`; before, it had been drawn flying past the paddle by then and jumped back:
+120-340 px in one picture on every hit of the real games, now none over about 100 px, which is a hard hit's own speed); and the
+**paddle and the pointer** are drawn glided between the camera's 30 readings a second (`glide.py`: two filters in a row, 25 ms in all,
+which took 61% of the wobble out of the real recordings for 16 ms of delay; `--set latency.glide_s=0` draws the hand held as read
+again). None of this changes anything the game decides: only what is drawn.
 
 **How a hit works.** By default (`--hit-mode contact`) **moving your hand into the ball hits it**. Your paddle stands where your
 hand puts it (across the table by how far right or left your hand is, up the table by how high it is, so raising your hand meets
@@ -367,7 +385,7 @@ mosquitto_sub -h test.mosquitto.org -t 'ME193/Rogers/#' -v
   Match by wins); the end screen shows the top five and highlights you.
 - **Recordings**: each live session writes `recordings/<time>-<player>/` (`session.json`, every raw IMU
   sample, every pose, every game event with all six gate results). `./pp report` turns it into numbers
-  (hits, timing, which gate rejected what, hub rate and worst gap, pauses, loop time).
+  (hits, timing, which gate rejected what, hub rate and worst gap, pauses, loop time, and how steady the screen was).
   `./pp replay <session> --set level.late_s=0.4` re-runs the recorded sensor data through the real code
   with changed settings, so a tuning question never needs another round of swinging.
 - **Sounds**: a pop whose pitch tells you the hit quality, a buzz for a miss, arpeggios for a point or

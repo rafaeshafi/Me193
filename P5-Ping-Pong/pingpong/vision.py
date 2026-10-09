@@ -49,7 +49,7 @@ class VisionWorker:
         self.history, self.tag_period_ns = history, round(1e9 / tag_hz)
         self._filter = PoseFilter(filter_params)         # One-Euro (trained settings, if any) behind a landmark-glitch gate
         self._poses = ()
-        self._frame = None
+        self._frame = self._picture = None
         self._tags = queue.SimpleQueue()
         self._infer_ms = deque(maxlen=120)
         self._frame_times = deque(maxlen=60)
@@ -79,6 +79,7 @@ class VisionWorker:
     def _pose(self, frame, t_read):
         h, w = frame.shape[:2]
         small = frame if w <= POSE_WIDTH else cv2.resize(frame, (POSE_WIDTH, int(h * POSE_WIDTH / w)))
+        self._picture = small                                    # the screen's corner window is made from this one: no second resize
         sh, sw = small.shape[:2]
         t0 = self.clock.now_ns()
         result = self.landmarker.detect_for_video(self.to_image(small), self._timestamp_ms(t_read))
@@ -156,6 +157,10 @@ class VisionWorker:
 
     def latest_frame(self):
         return self._frame
+
+    def latest_picture(self):
+        """The newest frame at the size the pose model sees (at most POSE_WIDTH wide): all the screen's corner window needs."""
+        return self._picture
 
     def tag_hold(self, now_ns):
         """(card, how far the hold has come 0..1) while a card is being held up for a game, else None: what the screen shows."""

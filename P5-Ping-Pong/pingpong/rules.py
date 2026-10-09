@@ -60,6 +60,7 @@ class GameCore:
         self.started_at_ns = None            # exactly when start() was last called (a replay needs it) ...
         self.started_countdown_s = countdown_s       # ... and how long its countdown was
         self.held = None                     # (when, (x, y, z)): the ball sitting on your paddle until it is let go
+        self.ball_passed = False             # contact mode: the ball's depth met the paddle's, the hand was not level, it goes by
         self.remote = None                   # versus.Remote: the opponent is a person at another laptop, not the computer
         self._hand = self._pending = self._pose_horizon_ns = None
 
@@ -224,7 +225,7 @@ class GameCore:
         self._ball_id += 1
         self.incoming = BallWindow(self._ball_id, leg.arrival_ns, plan.aim_ab, self.level, leg)
         self.incoming_leg, self.outgoing_leg = leg, None
-        self.phase, self._cpu_at, self._hand = "RALLY", None, None
+        self.phase, self._cpu_at, self._hand, self.ball_passed = "RALLY", None, None, False
         return [GameEvent("serve", t0_ns, {"ball_id": self._ball_id, "v": plan.v, "aim_ab": plan.aim_ab,
                                            "arrival_ns": leg.arrival_ns, "special": plan.special})]
 
@@ -273,6 +274,7 @@ class GameCore:
         radius = ball.level.radius_sw
         reached = GateResult("J1", True, "the ball reached your paddle")
         if not met.hit:
+            self.ball_passed = True
             gate = GateResult("J2", False, f"hand {met.d_sw:.2f} SW from the ball when it passed (limit {radius:.2f})")
             verdict = Verdict("REJECTED", 0.0, 0.0, met.d_sw, (reached, gate), met.t_ns)
             return [GameEvent("verdict", now_ns, {"verdict": verdict}), GameEvent("rejected", now_ns, {"gates": verdict.gates})]

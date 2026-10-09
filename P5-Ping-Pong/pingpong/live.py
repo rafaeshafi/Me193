@@ -71,6 +71,7 @@ class LiveRig:
         self._stale_since_ns = self._last_attempt_ns = None
         self._attempts, self._force_reconnect, self._reconnecting = 0, False, False
         self._loop_ms = deque(maxlen=20_000)
+        self._picture_s = deque(maxlen=60_000)       # when each picture was handed to the window (the window loop notes it)
         self._closed = False
 
     # --- lifecycle ------------------------------------------------------------------------------
@@ -287,8 +288,10 @@ class LiveRig:
 
     # --- display + stats ------------------------------------------------------------------------------------------
     def display_frame(self):
-        """The latest camera frame, mirrored so the player sees themselves as in a mirror."""
-        frame = self.vision.latest_frame()
+        """The latest camera picture, mirrored so the player sees themselves as in a mirror.  It is the pose model's small
+        picture where the camera offers one: the corner window is a fraction of it, and flipping a 1080p frame and shrinking it
+        again every turn cost 13 ms."""
+        frame = getattr(self.vision, "latest_picture", self.vision.latest_frame)()
         return None if frame is None else cv2.flip(frame, 1)
 
     def hud_state(self):
@@ -309,12 +312,23 @@ class LiveRig:
         hx, hy = hand_xy(landmarks, getattr(self.vision, "hand", "right"))
         return (1.0 - hx, hy) if 0.0 <= hx <= 1.0 and 0.0 <= hy <= 1.0 else None
 
+    def note_picture(self, t_s=None):
+        """The window loop hands a picture to the window now: what the player's screen actually did, for the report."""
+        self._picture_s.append(time.perf_counter() if t_s is None else t_s)
+
     def loop_stats(self):
+        """How long a turn of the game took (pump), and, once the window loop has noted its pictures, how steady the screen was."""
         times = sorted(self._loop_ms)
-        if not times:
-            return {"n": 0, "p50_ms": 0.0, "p95_ms": 0.0, "max_ms": 0.0}
-        return {"n": len(times), "p50_ms": times[len(times) // 2],
-                "p95_ms": times[min(len(times) - 1, int(len(times) * 0.95))], "max_ms": times[-1]}
+        stats = ({"n": 0, "p50_ms": 0.0, "p95_ms": 0.0, "max_ms": 0.0} if not times else
+                 {"n": len(times), "p50_ms": times[len(times) // 2],
+                  "p95_ms": times[min(len(times) - 1, int(len(times) * 0.95))], "max_ms": times[-1]})
+        shown = list(self._picture_s)
+        if len(shown) > 1:
+            gaps = sorted((b - a) * 1000.0 for a, b in zip(shown, shown[1:]))
+            stats.update(pictures=len(shown), fps=len(gaps) / (shown[-1] - shown[0]), frame_p50_ms=gaps[len(gaps) // 2],
+                         frame_p95_ms=gaps[min(len(gaps) - 1, int(len(gaps) * 0.95))], frame_max_ms=gaps[-1],
+                         over_25ms=sum(1 for g in gaps if g > 25.0) / len(gaps))
+        return stats
 
 
 def assemble(*, hub, capture, landmarker, calibration, clock, tag_detector=None, mqtt_client=None, level=1,

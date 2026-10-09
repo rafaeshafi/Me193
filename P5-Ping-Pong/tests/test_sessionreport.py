@@ -29,6 +29,24 @@ def test_a_clean_session_reports_hits_timing_speed_and_hub_health(tmp_path):
     assert s["kmh"]["max"] > 0 and sum(s["labels"].values()) == 5
 
 
+def test_the_report_says_how_steady_the_picture_was_when_the_window_loop_noted_its_frames(tmp_path):
+    rig = record(tmp_path)
+    for k in range(60):
+        rig.rig.note_picture(k * 0.0167 + (0.04 if k == 30 else 0.0))        # 60 fps, with one frame 40 ms late
+    rig.close()
+    screen = summarise(tmp_path)["screen"]
+    assert 50 < screen["fps"] < 62 and screen["frame_max_ms"] > 50 and screen["over_25ms"] > 0
+    text = sessionreport.format_report(summarise(tmp_path))
+    assert "Screen:" in text and "fps" in text and "over 25 ms" in text
+
+
+def test_a_session_nobody_watched_has_no_screen_line(tmp_path):
+    rig = record(tmp_path)
+    rig.close()
+    assert summarise(tmp_path)["screen"] is None
+    assert "Screen:" not in sessionreport.format_report(summarise(tmp_path))
+
+
 def test_a_missed_ball_ends_survival_and_is_counted(tmp_path):
     rig = fakerig.FakeRig(record_dir=tmp_path / "run", timing_s=0.6)
     rig.run(until=lambda: rig.game.phase == "MATCH_OVER", max_s=60)

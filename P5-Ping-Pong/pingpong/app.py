@@ -9,7 +9,7 @@ import math
 import random
 from collections import deque
 
-from pingpong import feedback, holdstart, levels, uistate
+from pingpong import feedback, glide, holdstart, levels, uistate
 from pingpong import latency as latency_mod
 from pingpong.clock import FakeClock
 from pingpong.events import PaddlePose, SwingEvent
@@ -37,6 +37,7 @@ class Session(OnlineMixin):
         self.hold_start = hold_start             # a holdstart.HoldStart: the game also starts when the hub is held on the START button
         self.flow = flow                         # a flow.Flow: the intro, the title and the choices of game and opponent, and the results
         self._hand_ab = None                     # where the hand points in the reach box, for that button
+        self._cursor = glide.Glide()             # ... and the pointer as it is drawn: smoothed between the camera's readings
         self._t0_ns = clock.now_ns()             # the faces' animation clock starts here
         self._last_summary, self._record_game = None, False       # how the last game went, for the results screen
         self._cpu_mood, self._mood_until, self._point_for = "happy", 0, ""
@@ -304,12 +305,14 @@ class Session(OnlineMixin):
         v = self.view
         view = v.view_ns(now)
         paddle, rest = v.paddle(now, view)
+        self._cursor.tau_s = self.latency.glide_s
+        drawn_ab = self._cursor.update(now, self._hand_ab)             # (what the hand is on is decided from the reading itself)
         button = cursor = None
         if self.hold_start is not None and self.flow is None and g.phase in holdstart.PHASES:
-            button, cursor = (self.hold_start.progress(), self.hold_start.inside), self._hand_ab
+            button, cursor = (self.hold_start.progress(), self.hold_start.inside), drawn_ab
         screen, ui_state, results = "GAME", None, None
         if self.flow is not None and self.flow.active:
-            screen, ui_state = self.flow.screen, self.flow.ui_state(now, self._hand_ab)
+            screen, ui_state = self.flow.screen, self.flow.ui_state(now, drawn_ab)
             if screen == "RESULTS" and self._last_summary is not None:
                 results = uistate.results_from_summary(self._last_summary, self._record_game)
         digit = None if remaining is None else max(1, math.ceil(remaining))
@@ -318,7 +321,7 @@ class Session(OnlineMixin):
             record=g.tracker.record, player_points=g.player_points, cpu_points=g.cpu_points,
             target=g.target_points, countdown=digit,
             countdown_t=0.0 if digit is None else min(1.0, max(0.0, 1.0 - (remaining - (digit - 1)))),
-            ball=v.ball(view), paddle=paddle, rest=rest, paddle_angle=v.paddle_angle, reach_m=v.reach_m(),
+            ball=v.ball(view, now), paddle=paddle, rest=rest, paddle_angle=v.paddle_angle, reach_m=v.reach_m(),
             zone=v.zone(now), cpu_x_m=v.cpu_x(view), cpu_swing=v.cpu_swing(view),
             last_kmh=self._last_kmh, last_label=self._last_label, spin_text=self._spin,
             mqtt_status=self._mqtt_status(), hub_status=self._hub_status(),

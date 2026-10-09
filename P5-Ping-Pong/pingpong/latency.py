@@ -5,9 +5,12 @@
                                                                        that clock by CAMERA_LAG_S, bench_cam measures it)
     peak of the gyro's rate -> end of the forward stroke    stroke_s   (where the player means the paddle to meet the ball;
                                                                        28 real swings: median 0.20 s, quartiles 0.14-0.24)
-    frame drawn -> light from the screen                    display_s  (+ up to loop_s: the loop runs at ~60 Hz)
+    state sampled -> frame handed to the window             loop_s     (the picture is drawn during one turn of the loop and
+                                                                       shown at the next: ~16 ms at 60 turns a second)
+    frame handed to the window -> light from the screen     display_s
     sound written -> heard                                  audio_s
     motor command written -> the hub's motors move          haptic_s
+    hand reading -> the hand as drawn (smoothed)            glide_s    (display only: the game uses the readings themselves)
 
 Only the camera's lag is measured here (against the hub); the rest are typical values with a basis, tunable in
 config_local.json or live with `--set latency.display_s=0.08`.  Compensating means placing every effect where it will
@@ -37,9 +40,10 @@ class Latency:
     audio_s: float = 0.025
     haptic_s: float = 0.050
     loop_s: float = 1 / 60
+    glide_s: float = 0.025          # the hand is drawn smoothed between the camera's readings over about this long (glide.py); 0: held
 
     def __post_init__(self):
-        if min(self.imu_s, self.stroke_s, self.display_s, self.audio_s, self.haptic_s, self.loop_s) < 0:
+        if min(self.imu_s, self.stroke_s, self.display_s, self.audio_s, self.haptic_s, self.loop_s, self.glide_s) < 0:
             raise ValueError("a delay cannot be negative")
 
     @classmethod
@@ -56,7 +60,7 @@ class Latency:
     @property
     def view_ahead_s(self):
         """How far ahead of now a frame is drawn, so that when the light reaches the eye it shows the world as it is then."""
-        return self.display_s + self.loop_s / 2
+        return self.display_s + self.loop_s
 
 
 def predict_hand(poses, now_ns, lat, *, min_conf=0.5, gain=GAIN, model=None):

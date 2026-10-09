@@ -23,7 +23,141 @@ def test_the_window_loop_pumps_shows_every_frame_and_quits_on_q():
 
     play.run_loop(rig.rig, show=frames.append, wait_key=wait_key)
     assert len(frames) == 3 and frames[0].shape == (play.H, play.W, 3)
-    assert rig.rig.loop_stats()["n"] == 3
+    assert rig.rig.loop_stats()["n"] == 4                     # (a picture is always in the making: one more state than pictures shown)
+
+
+def test_each_picture_shown_was_drawn_from_the_state_the_game_had_one_turn_before_and_none_is_shown_twice(monkeypatch):
+    from pingpong import hud
+
+    class Counting:
+        def __init__(self):
+            self.n = 0
+            self.session = type("S", (), {"game": None})()
+
+        def pump(self):
+            pass
+
+        def hud_state(self):
+            self.n += 1
+            return hud.HudState(streak=self.n)
+
+        def display_frame(self):
+            return None
+
+    monkeypatch.setattr(hud, "render", lambda state, size, background=None: state.streak)
+    rig, shown = Counting(), []
+    play.run_loop(rig, show=shown.append, wait_key=lambda ms: ord("q") if len(shown) >= 9 else 255)
+    assert shown == list(range(1, 10))
+
+
+def test_the_loop_tells_the_rig_each_time_it_hands_a_picture_to_the_window(monkeypatch):
+    from pingpong import hud
+
+    class Noting:
+        session = type("S", (), {"game": None})()
+
+        def __init__(self):
+            self.noted = 0
+
+        def pump(self):
+            pass
+
+        def hud_state(self):
+            return hud.HudState()
+
+        def display_frame(self):
+            return None
+
+        def note_picture(self):
+            self.noted += 1
+
+    monkeypatch.setattr(hud, "render", lambda state, size, background=None: 1)
+    rig, shown = Noting(), []
+    play.run_loop(rig, show=shown.append, wait_key=lambda ms: ord("q") if len(shown) >= 5 else 255)
+    assert len(shown) == 5 and rig.noted == 5
+
+
+def test_the_next_picture_is_drawn_while_the_window_waits(monkeypatch):
+    import time
+
+    from pingpong import hud
+
+    class Quiet:
+        session = type("S", (), {"game": None})()
+
+        def pump(self):
+            pass
+
+        def hud_state(self):
+            return hud.HudState()
+
+        def display_frame(self):
+            return None
+
+    def slow_picture(state, size, background=None):
+        time.sleep(0.02)                                      # a picture takes 20 ms to draw ...
+        return 1
+
+    def slow_wait(ms):
+        time.sleep(0.02)                                      # ... and the window's wait takes 20 ms too
+        return ord("q") if len(shown) >= 15 else 255
+
+    monkeypatch.setattr(hud, "render", slow_picture)
+    shown, t0 = [], time.perf_counter()
+    play.run_loop(Quiet(), show=shown.append, wait_key=slow_wait)
+    assert len(shown) == 15 and time.perf_counter() - t0 < 0.55         # drawn one after the other it would take 0.64 s
+
+
+def test_the_loop_does_not_draw_faster_than_the_display_when_the_window_returns_at_once(monkeypatch):
+    import time
+
+    from pingpong import hud
+
+    class Quiet:
+        session = type("S", (), {"game": None})()
+
+        def pump(self):
+            pass
+
+        def hud_state(self):
+            return hud.HudState()
+
+        def display_frame(self):
+            return None
+
+    monkeypatch.setattr(hud, "render", lambda state, size, background=None: 1)
+    shown, t0 = [], time.perf_counter()
+    play.run_loop(Quiet(), show=shown.append, wait_key=lambda ms: ord("q") if len(shown) >= 20 else 255, fps=100.0)
+    assert time.perf_counter() - t0 >= 0.17                    # 20 frames at 100 a second take at least a fifth of a second
+
+
+def test_an_error_while_drawing_a_picture_is_a_bad_frame_like_any_other(monkeypatch):
+    from pingpong import hud
+
+    state = {"n": 0}
+
+    def sometimes_broken(st, size, background=None):
+        state["n"] += 1
+        if state["n"] == 2:
+            raise ValueError("cannot draw frame 2")
+        return 1
+
+    class Quiet:
+        session = type("S", (), {"game": None})()
+
+        def pump(self):
+            pass
+
+        def hud_state(self):
+            return hud.HudState()
+
+        def display_frame(self):
+            return None
+
+    monkeypatch.setattr(hud, "render", sometimes_broken)
+    shown, logs = [], []
+    play.run_loop(Quiet(), show=shown.append, wait_key=lambda ms: ord("q") if len(shown) >= 6 else 255, log=logs.append)
+    assert len(shown) >= 6 and len([m for m in logs if "cannot draw frame 2" in m]) == 1
 
 
 def test_the_r_key_asks_a_lost_hub_to_reconnect_instead_of_reaching_the_game_keys():

@@ -144,12 +144,19 @@ def _zone(frame, cam, s):
 
 
 # --- the things standing in the scene -------------------------------------------------------------------------------------
+def _disc(frame, x, y, r, color):
+    """A filled anti-aliased disc at a sub-pixel centre and radius (1/16 px): a ball that moves a quarter of a pixel is drawn a quarter
+    of a pixel along and one that grows by a fraction of a pixel grows by it; whole-pixel centres and radii made it move in steps
+    and pop from one size to the next."""
+    cv2.circle(frame, (round(x * 16), round(y * 16)), round(r * 16), color, -1, cv2.LINE_AA, 4)
+
+
 def _ball(frame, cam, ball):
     px, py, sc = cam.project(*ball)
-    r = max(4, round(BALL_R_M * sc))
-    cv2.circle(frame, (round(px), round(py)), r + 2, BALL_RIM, -1, cv2.LINE_AA)
-    cv2.circle(frame, (round(px), round(py)), r, BALL, -1, cv2.LINE_AA)
-    cv2.circle(frame, (round(px - 0.35 * r), round(py - 0.35 * r)), max(1, round(0.22 * r)), (235, 250, 255), -1, cv2.LINE_AA)
+    r = max(4.0, BALL_R_M * sc)
+    _disc(frame, px, py, r + 2, BALL_RIM)
+    _disc(frame, px, py, r, BALL)
+    _disc(frame, px - 0.35 * r, py - 0.35 * r, max(1.0, 0.22 * r), (235, 250, 255))
 
 
 def _player_paddle(frame, cam, s):

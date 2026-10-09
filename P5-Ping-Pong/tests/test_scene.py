@@ -200,3 +200,37 @@ def test_a_zone_that_reaches_past_your_edge_or_the_far_end_is_clipped_not_spille
 def test_every_state_the_hud_can_hand_over_draws_without_error():
     render(phase="RALLY", ball=(0.2, -0.5, -0.4), paddle=(-0.8, 0.5, 1.2), rest=(-0.8, 0.16, 0.5), paddle_angle=80.0,
            reach_m=0.5, zone=(1.2, -0.3), cpu_x_m=-0.9, cpu_swing=0.99)
+
+
+# --- the ball moves by less than a pixel when it moves by less than a pixel ---------------------------------------------------------------------
+class Stub:
+    """A camera that puts the ball where the test says, at the size it says."""
+
+    def __init__(self, px, py, scale):
+        self.px, self.py, self.scale = px, py, scale
+
+    def project(self, x, y, z):
+        return self.px, self.py, self.scale
+
+
+def ball_centre(px, py=300.0, scale=140.0):
+    """The weighted centre of the ball's own colour in a picture of it drawn at (px, py), and its weight (the area)."""
+    frame = np.full((600, 800, 3), 255, dtype=np.uint8)
+    scene._ball(frame, Stub(px, py, scale), (0.0, 0.0, 1.0))
+    weight = 1.0 - np.clip(np.abs(frame.astype(float) - np.array(scene.BALL, dtype=float)).max(axis=2) / 255.0 * 4.0, 0.0, 1.0)
+    ys, xs = np.mgrid[:600, :800]
+    return float((weight * xs).sum() / weight.sum()), float((weight * ys).sum() / weight.sum()), float(weight.sum())
+
+
+def test_a_ball_moved_by_a_quarter_of_a_pixel_is_drawn_a_quarter_of_a_pixel_along():
+    xs = [ball_centre(300.0 + k * 0.25)[0] for k in range(9)]
+    steps = np.diff(xs)
+    assert all(0.15 < s < 0.35 for s in steps), steps                       # (whole-pixel centres gave steps of 0 and 1)
+    ys = [ball_centre(300.0, 300.0 + k * 0.25)[1] for k in range(9)]
+    assert all(0.15 < s < 0.35 for s in np.diff(ys)), np.diff(ys)
+
+
+def test_a_ball_growing_by_a_fraction_of_a_pixel_grows_by_that_fraction_and_not_in_whole_pixel_jumps():
+    areas = [ball_centre(300.0, 300.0, 120.0 + k * 1.2)[2] for k in range(10)]        # the radius grows by 0.06 px each time
+    steps = np.diff(areas)
+    assert all(s > 0 for s in steps) and max(steps) < 2.5 * np.mean(steps), steps

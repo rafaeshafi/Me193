@@ -2,6 +2,7 @@
 the numbers, paper falling for a win or a record, and two buttons: play again, change opponent)."""
 
 import math
+from functools import lru_cache
 
 import cv2
 import numpy as np
@@ -17,16 +18,24 @@ CHANGE_BUTTON = (1.0 - holdstart.BUTTON[0] - holdstart.BUTTON[2], holdstart.BUTT
 
 
 # --- the face-off -------------------------------------------------------------------------------------------------------------------------
-def _split(frame):
-    """Sky blue on the left, coral on the right, a white slash between them."""
-    w, h = size_of(frame)
-    frame[:] = ui.gradient(h, w, rgb(160, 220, 255), rgb(70, 150, 240))
+@lru_cache(maxsize=4)
+def _split_picture(w, h):
+    """Sky blue on the left, coral on the right, a white slash between them (it never changes: made once per size)."""
+    picture = np.empty((h, w, 3), dtype=np.uint8)
+    picture[:] = ui.gradient(h, w, rgb(160, 220, 255), rgb(70, 150, 240))
     mask = np.zeros((h, w), dtype=np.uint8)
     cv2.fillPoly(mask, [np.array([(0.58 * w, 0), (w, 0), (w, h), (0.42 * w, h)], dtype=np.int32)], 255, cv2.LINE_AA)
     right = ui.gradient(h, w, rgb(255, 196, 170), rgb(240, 96, 110))
-    frame[mask > 0] = right[mask > 0]
-    cv2.line(frame, (round(0.58 * w) + 9, 0), (round(0.42 * w) + 9, h), (0, 0, 0), 22, cv2.LINE_AA)
-    cv2.line(frame, (round(0.58 * w), 0), (round(0.42 * w), h), WHITE, 18, cv2.LINE_AA)
+    picture[mask > 0] = right[mask > 0]
+    cv2.line(picture, (round(0.58 * w) + 9, 0), (round(0.42 * w) + 9, h), (0, 0, 0), 22, cv2.LINE_AA)
+    cv2.line(picture, (round(0.58 * w), 0), (round(0.42 * w), h), WHITE, 18, cv2.LINE_AA)
+    picture.setflags(write=False)
+    return picture
+
+
+def _split(frame):
+    w, h = size_of(frame)
+    frame[:] = _split_picture(w, h)
 
 
 def vs(frame, state):

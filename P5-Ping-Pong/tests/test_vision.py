@@ -222,6 +222,22 @@ def test_the_latest_frame_is_available_for_display():
     assert worker.latest_frame().shape == (H, W, 3)
 
 
+def test_the_picture_for_the_screen_is_the_size_the_pose_model_sees_not_the_cameras_full_size():
+    class BigCapture(FakeCapture):
+        def read(self):
+            self.reads += 1
+            return True, np.full((1080, 1920, 3), 90, dtype=np.uint8)
+
+    worker, clock, *_ = make(capture=BigCapture())
+    assert worker.latest_picture() is None
+    tick(worker, clock)
+    assert worker.latest_frame().shape == (1080, 1920, 3)
+    assert worker.latest_picture().shape == (vision.POSE_WIDTH * 9 // 16, vision.POSE_WIDTH, 3)
+    small, clock2 = make()[0], None
+    tick(small, small.clock)
+    assert small.latest_picture().shape == (H, W, 3)                    # a frame that is small already is not changed
+
+
 def test_the_thread_runs_and_stops_cleanly_and_releases_the_camera():
     cap = FakeCapture()
     worker = vision.VisionWorker(cap, FakeLandmarker(), to_image=lambda f: f, lag_s=0.1)

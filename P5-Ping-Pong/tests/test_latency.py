@@ -30,9 +30,9 @@ def test_the_contact_lag_is_the_strokes_length_less_the_time_the_hub_took_to_tel
     assert dataclasses.replace(lat, imu_s=0.0).contact_lag_s == pytest.approx(0.14)
 
 
-def test_the_screen_is_drawn_ahead_by_the_display_delay_and_half_a_frame():
-    lat = latency.Latency(display_s=0.05, loop_s=1 / 60)
-    assert lat.view_ahead_s == pytest.approx(0.05 + 1 / 120)
+def test_the_screen_is_drawn_ahead_by_the_display_delay_and_a_whole_turn_of_the_loop():
+    lat = latency.Latency(display_s=0.05, loop_s=1 / 60)               # (a picture is drawn during the turn before it is shown)
+    assert lat.view_ahead_s == pytest.approx(0.05 + 1 / 60)
 
 
 def test_the_defaults_are_plausible_for_this_hardware():

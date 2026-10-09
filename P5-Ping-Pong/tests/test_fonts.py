@@ -167,3 +167,64 @@ def test_text_that_is_not_yet_a_pixel_tall_is_simply_not_drawn(both):
 def test_text_not_yet_a_pixel_tall_measures_as_nothing_and_wraps_to_nothing_much(both):
     assert fonts.measure("growing", 0) == (0, 0) and fonts.measure("growing", 0.4) == (0, 0)
     assert fonts.wrap_lines("a few words that are growing", 100, 0) and fonts.fit_size("x", 100, max_size=30, min_size=12) == 30
+
+
+# --- the blend itself: the one thing every panel, shadow, glow and word goes through ------------------------------------------------------------------
+def reference_blit(frame, color_or_bgr, alpha, x0, y0, opacity=1.0):
+    """The blend as it was first written (float32 numpy): the picture the faster one has to agree with."""
+    h, w = alpha.shape
+    fx0, fy0, fx1, fy1 = max(0, x0), max(0, y0), min(frame.shape[1], x0 + w), min(frame.shape[0], y0 + h)
+    if fx1 <= fx0 or fy1 <= fy0:
+        return
+    sx0, sy0 = fx0 - x0, fy0 - y0
+    weight = alpha[sy0:sy0 + fy1 - fy0, sx0:sx0 + fx1 - fx0].astype(np.float32) * (max(0.0, opacity) / 255.0)
+    roi = frame[fy0:fy1, fx0:fx1]
+    shown = roi.astype(np.float32)
+    if isinstance(color_or_bgr, np.ndarray):
+        src = color_or_bgr[sy0:sy0 + fy1 - fy0, sx0:sx0 + fx1 - fx0].astype(np.float32)
+    else:
+        src = np.array(color_or_bgr, dtype=np.float32)
+    shown += (src - shown) * weight[:, :, None]
+    roi[:] = (shown + 0.5).astype(np.uint8)
+
+
+def test_the_blend_agrees_with_the_exact_one_to_within_two_levels_whatever_it_is_given():
+    rng = np.random.RandomState(0)
+    base = rng.randint(0, 256, (200, 300, 3)).astype(np.uint8)
+    mask = rng.randint(0, 256, (60, 90)).astype(np.uint8)
+    picture = rng.randint(0, 256, (60, 90, 3)).astype(np.uint8)
+    for source in ((255, 40, 10), (0, 0, 0), picture):
+        for opacity in (1.0, 0.94, 0.5, 0.3, 0.0):
+            for x0, y0 in ((50, 40), (-20, -10), (250, 170), (-100, 5), (100, 500), (0, 0)):         # inside, cut at each edge, outside
+                exact, fast = base.copy(), base.copy()
+                reference_blit(exact, source, mask, x0, y0, opacity)
+                fonts.blit(fast, source, mask, x0, y0, opacity)
+                assert np.abs(exact.astype(int) - fast.astype(int)).max() <= 2, (opacity, x0, y0)
+
+
+def test_a_fully_opaque_mask_with_full_opacity_puts_the_source_there_exactly_and_a_clear_one_changes_nothing():
+    base = np.random.RandomState(1).randint(0, 256, (50, 60, 3)).astype(np.uint8)
+    frame = base.copy()
+    fonts.blit(frame, (10, 200, 90), np.full((20, 30), 255, np.uint8), 5, 6)
+    assert (frame[6:26, 5:35] == (10, 200, 90)).all()
+    frame2 = base.copy()
+    fonts.blit(frame2, (10, 200, 90), np.zeros((20, 30), np.uint8), 5, 6)
+    assert (frame2 == base).all()
+
+
+def test_the_blend_is_much_quicker_than_the_float_one_on_a_big_panel():
+    import time
+
+    rng = np.random.RandomState(2)
+    frame = rng.randint(0, 256, (720, 1280, 3)).astype(np.uint8)
+    mask = rng.randint(0, 256, (240, 1000)).astype(np.uint8)
+
+    def best(fn):
+        times = []
+        for _ in range(7):
+            t0 = time.perf_counter()
+            fn(frame, (20, 60, 200), mask, 100, 100, 0.94)
+            times.append(time.perf_counter() - t0)
+        return min(times)
+
+    assert best(fonts.blit) < 0.6 * best(reference_blit)

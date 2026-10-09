@@ -9,12 +9,14 @@ exactly when the picture shows the contact.  Nothing here changes the game: it o
 
 import dataclasses
 
+from pingpong import ballclock, contact, glide
 from pingpong import latency as latency_mod
 from pingpong import pd, physics, stage
 
 S = 1_000_000_000
 CPU_SWING_S = 0.3          # how long the computer's paddle takes to hit the ball (the HUD animates it)
 CPU_RECOVER_S = 0.6        # ... and to drift back to the middle after a return
+WAIT_REACH = 1.5           # a hand within this many radii of the ball is taken to be going to hit it, until the game says it did not
 
 
 class View:
@@ -24,6 +26,9 @@ class View:
         self.paddle_angle = 0.0                          # degrees: how far the hub is turned in the hand (set each frame)
         self._stroke = None
         self.cpu_swing_ns = None                         # when the computer last hit the ball
+        self._glide = glide.Glide(lat.glide_s)           # the hand as drawn: smoothed between the camera's readings
+        self._ball_clock = ballclock.BallClock()         # when, on the game's timeline, the picture shows the ball (see ballclock.py)
+        self._was_held = False
 
     # --- time -----------------------------------------------------------------------------------------------------
     def view_ns(self, now):
@@ -35,7 +40,9 @@ class View:
 
     # --- your paddle ---------------------------------------------------------------------------------------------------
     def hand(self, now):
-        return latency_mod.predict_hand(self.poses, now, self.latency, model=self.hand_model)
+        """The hand as it is drawn at `now`: where it is read (or predicted), smoothed between the camera's readings."""
+        self._glide.tau_s = self.latency.glide_s
+        return self._glide.update(now, latency_mod.predict_hand(self.poses, now, self.latency, model=self.hand_model))
 
     def rest(self, now):
         """Where the hand puts the paddle (None until a hand has been seen)."""
@@ -76,23 +83,61 @@ class View:
         return stage.zone(g.incoming_leg, sweet, g.level)
 
     # --- the ball -------------------------------------------------------------------------------------------------------
-    def ball(self, view):
+    def ball(self, view, now=None):
         """(x, y, z): your ball once it has left your paddle, otherwise the one coming at you, flying on past you if it
-        is not hit (it is seen to go by), and None while there is no ball."""
+        is not hit (it is seen to go by), and None while there is no ball.  `now`: the game's clock for this picture (the hand
+        is looked up at it); by default view less the display's lead.
+
+        The ball is shown at the moment `ballclock` says, which is `view` except at a junction (the hand meeting the ball, the
+        ball being let go, the computer meeting it): there it waits where the paddle is until the game has said what happens."""
         g = self.game
         if g.phase in ("LOBBY", "COUNTDOWN"):
+            self._ball_clock.reset()
+            self._was_held = False
             return None
-        out, inc = g.outgoing_leg, g.incoming_leg
-        if g.held is not None and view >= g.held[0] and (out is None or view < out.t0_ns):
-            return g.held[1]                                           # the ball sits on your paddle until it is let go
-        if out is not None and view >= out.t0_ns:
+        out, inc, held = g.outgoing_leg, g.incoming_leg, g.held
+        floor = None
+        if held is not None:
+            pin = held[0]                                              # on the paddle until it is let go
+        elif out is not None:
+            pin = out.arrival_ns if self._awaiting_return(out) else None
+            floor = out.t0_ns if self._was_held else None             # let go: it starts from the paddle, however long it waited
+        else:
+            pin = None if inc is None else self._paddle_plane_ns(view - round(self.latency.view_ahead_s * S) if now is None else now)
+        self._was_held = held is not None
+        at = self._ball_clock.tick(view, pin, floor)
+        if held is not None and at >= held[0] and (out is None or at < out.t0_ns):
+            return held[1]                                             # the ball sits on your paddle until it is let go
+        if out is not None and at >= out.t0_ns:
             limit = out.arrival_ns + round(physics.FLY_ON_S * S) if out.terminal == "arrive" else out.end_ns
-            if g.remote is not None and g.remote.awaiting and out.terminal == "arrive":
-                return out.position(min(view, out.arrival_ns))         # at their end it waits for them to hit it
-            return out.position(view) if view <= limit else None       # a ball nobody returns is seen to go on by
-        if inc is not None and view <= inc.arrival_ns + round(physics.FLY_ON_S * S):
-            return inc.position(view)
+            return out.position(at) if at <= limit else None           # a ball nobody returns is seen to go on by
+        if inc is not None and at <= inc.arrival_ns + round(physics.FLY_ON_S * S):
+            return inc.position(at)
         return None
+
+    def _awaiting_return(self, out):
+        """Your ball has reached the other end and the answer (the computer's, or the friend's) has not come yet."""
+        g = self.game
+        if out.terminal != "arrive":
+            return False
+        if g.remote is not None:
+            return g.remote.awaiting
+        return g.phase == "RALLY" and g.next_cpu_contact_ns is not None
+
+    def _paddle_plane_ns(self, now):
+        """When the incoming ball's depth reaches the paddle's, while its hit is still undecided and the hand is level with it
+        (contact mode, where the game decides it); None when there is nothing to wait for."""
+        g = self.game
+        if g.hit_mode != "contact" or g.phase != "RALLY" or g.incoming is None or g.paused or g.ball_passed:
+            return None
+        hand = self.hand(now)
+        if hand is None:
+            return None
+        box, leg = g.judge.box, g.incoming_leg
+        t_plane = leg.time_at_z(stage.rest_z(box, hand[1]))
+        if abs(hand[0] - contact.ball_u(box, leg.position(t_plane)[0])) > WAIT_REACH * g.incoming.level.radius_sw:
+            return None
+        return t_plane
 
     # --- the computer's paddle ----------------------------------------------------------------------------------------------
     def cpu_swing(self, view):

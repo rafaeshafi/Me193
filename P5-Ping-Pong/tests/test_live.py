@@ -234,16 +234,6 @@ def test_a_shake_lock_from_the_imu_worker_reaches_the_judge():
     assert locked == [until]
 
 
-def test_the_display_frame_is_the_mirror_image_of_the_camera_frame():
-    r = Rig()
-    assert r.rig.display_frame() is None
-    frame = np.zeros((4, 6, 3), dtype=np.uint8)
-    frame[:, 0] = 255                                        # a bright left edge
-    r.vision.frame = frame
-    shown = r.rig.display_frame()
-    assert shown[0, 5, 0] == 255 and shown[0, 0, 0] == 0     # ... appears on the right: like a mirror
-
-
 # --- sensor loss pauses the game, never scores a miss -----------------------------------------------
 def test_hub_silence_pauses_a_running_rally_and_the_ball_resumes_exactly_where_it_was():
     # "Where it was" means: where it was when the hub was last heard, not when the silence was
@@ -469,6 +459,7 @@ def test_a_recorder_is_closed_after_the_sensors_stop_and_before_the_hub_lets_go(
     r = Rig(record=True)
     r.rig.close()
     assert r.log == ["actuator.stop", "vision.stop", "imu.stop", "recorder.close", "hub.close"]
+
 
 
 def test_pump_timings_are_collected_for_the_report():

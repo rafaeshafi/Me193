@@ -99,7 +99,15 @@ def summarize(loaded):
         "pose_tracking": None if vision.get("lock") is None else {**vision["lock"], "frames": vision.get("frames", len(pose_t))},
         "pauses": _pauses(events, t0, end), "hub_trouble": sum(1 for e in events if e["k"] == "hub" and e["d"]["status"] != "ok"),
         "loop_p95_ms": summary["loop"]["p95_ms"] if summary else None,
+        "screen": _screen(summary),
     }
+
+
+def _screen(summary):
+    """How steady the picture was (the window loop's own measure of the pictures it showed), or None: nobody was watching."""
+    loop = (summary or {}).get("loop") or {}
+    keys = ("fps", "frame_p50_ms", "frame_p95_ms", "frame_max_ms", "over_25ms")
+    return {k: loop[k] for k in keys} if all(k in loop for k in keys) else None
 
 
 def _spin_counts(hits, visible=0.15):
@@ -180,4 +188,8 @@ def format_report(s):
         lines.append(f"  paused ({', '.join(p['reasons'])}) for {p['seconds']:.1f} s at {p['start_s']:.1f} s")
     if s["loop_p95_ms"] is not None:
         lines.append(f"Main loop p95: {s['loop_p95_ms']:.2f} ms")
+    if s["screen"] is not None:
+        scr = s["screen"]
+        lines.append(f"Screen: {scr['fps']:.1f} fps (a picture every {scr['frame_p50_ms']:.1f} ms, p95 {scr['frame_p95_ms']:.1f} ms, "
+                     f"slowest {scr['frame_max_ms']:.0f} ms, {100.0 * scr['over_25ms']:.1f}% over 25 ms)")
     return "\n".join(lines)
