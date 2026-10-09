@@ -14,7 +14,7 @@ cmd="${1:-help}"
 [ $# -gt 0 ] && shift
 
 case "$cmd" in
-  env_check|scan_hubs|reset_hub|bench_hub|bench_cam|bench_haptics|make_cards|calibrate_swing|train_spin|train_pose|watch_score|republish_best|sim|report|replay|showcase|lobby)
+  env_check|scan_hubs|reset_hub|bench_hub|bench_cam|bench_haptics|make_cards|calibrate_swing|train_spin|train_pose|watch_score|republish_best|sim|report|replay|showcase|lobby|board)
     if [ ! -f "tools/$cmd.py" ]; then echo "tools/$cmd.py is not built yet" >&2; exit 1; fi
     exec "$PY" "tools/$cmd.py" "$@"
     ;;
@@ -55,6 +55,7 @@ case "$cmd" in
 ./pp make_cards                     (re)generate the printable AprilTag cards in docs/cards/
 ./pp showcase                       the intro as a video and a picture of every screen (data/showcase/), no camera or hub needed
 ./pp lobby [--secs N]               the games friends have opened, and whether the game server can be reached (play --online)
+./pp board deploy|test              put the score on the UNO Q's LED matrix over the USB cable (deploy: copy + start the app; test: show some scenes)
 ./pp ready                          imports + pytest + every tool --selftest (run before each block)
 ./pp play [--fake|--player NAME|--level N|--mode M|--hit-mode contact|swing]   the game (live: Double Motor + camera; the hand into the ball hits, a wrist flick spins)
 ./pp play --swing-source pose|--no-hub   the camera's hand speed detects swings (auto when the hub is < 25 Hz)

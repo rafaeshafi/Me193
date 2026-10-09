@@ -1,0 +1,9 @@
+name: PingPong Scoreboard
+icon: 🏓
+description: The ping-pong game's score on the 8x13 LED matrix. Between games it alternates the streak you are on and your best; in a game it is the scoreboard. The game on the Mac sends frames through the USB cable (adb forward) to port 7788.
+
+# A list of network ports that the application exposes.
+ports: [7788]
+
+# A list of bricks used by this application.
+bricks: []

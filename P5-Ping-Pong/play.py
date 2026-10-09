@@ -11,6 +11,7 @@ Usage:
     ./pp play --no-intro --no-music   # straight to the title, quietly (the intro flies in from the sky and lasts ten seconds)
     ./pp play --classic               # the plain lobby with its hold-the-hub-on-START button, no menus, no intro
     ./pp play --windowed              # a window the size of the picture, not full screen (full screen is how the game opens)
+    ./pp board deploy                 # put the scoreboard app on the UNO Q (USB cable); the game then shows the score on its matrix
     ./pp play --hit-mode swing        # the old game: only a swing the hub's IMU sees meets the ball (default: contact)
     ./pp play --swing-source pose     # the camera's hand speed detects swings (auto when the hub measured < 25 Hz)
     ./pp play --no-hub                # camera only: no hub, no haptics (bring-up, or a flat battery)
@@ -56,6 +57,7 @@ def make_parser():
     ap.add_argument("--no-music", action="store_true", help="the sounds but no music in the intro and the menus")
     ap.add_argument("--no-intro", action="store_true", help="start at the title: skip the flight in from the sky")
     ap.add_argument("--windowed", action="store_true", help="a window the size of the picture instead of full screen")
+    ap.add_argument("--no-board", action="store_true", help="do not show the score on the UNO Q's LED matrix (it is shown when the board is on the cable)")
     ap.add_argument("--classic", action="store_true",
                     help="the plain lobby (hold the hub on START, or SPACE) instead of the intro, title and menus")
     ap.add_argument("--no-spin", action="store_true", help="ignore the trained spin model: every ball is flat")
@@ -146,9 +148,9 @@ def selftest():
     return 0
 
 
-def fake_loop(session, *, show, wait_key, mouse_xy):
+def fake_loop(session, *, show, wait_key, mouse_xy, board=None):
     """The --fake window loop: the mouse is the paddle, keys swing.  Returns when the player quits.  Each picture is drawn
-    (framepipe.py) while the window waits, and shown at the next turn."""
+    (framepipe.py) while the window waits, and shown at the next turn.  `board`: a boardlink.BoardLink to show the score on."""
     from pingpong import framepipe, hud, keys
     from pingpong.events import PaddlePose
 
@@ -163,7 +165,10 @@ def fake_loop(session, *, show, wait_key, mouse_xy):
             u, v = session.game.judge.box.to_uv(a, b)
             session.on_pose(PaddlePose(t_scene_ns=session.clock.now_ns(), u=u, v=v, conf=0.95, hand="right"))
             session.tick()
-            pipe.submit(session.hud_state())
+            state = session.hud_state()
+            pipe.submit(state)
+            if board is not None:
+                board.show(state)
             key = wait_key(1) & 0xFF
             if key != 255 and keys.handle_key(session, key, fake=True)[0] == "quit":
                 return
@@ -185,6 +190,20 @@ def track_mouse(window, cv2):
     mouse = {"xy": (W // 2, int(H * 0.7))}
     cv2.setMouseCallback(window.title, lambda event, x, y, flags, param: mouse.update(xy=window.picture_xy(x, y)))
     return lambda: mouse["xy"]
+
+
+def open_board(args, for_game=None):
+    """The link that shows the score on the UNO Q's matrix, started; None with --no-board or when there is no adb to reach a board with."""
+    if args.no_board:
+        return None
+    if for_game is None:
+        from pingpong import boardlink
+
+        for_game = boardlink.for_game
+    board = for_game(log=print)
+    if board is not None:
+        board.start()
+    return board
 
 
 def make_flow(args):
@@ -217,9 +236,12 @@ def run_fake(args):
     window = open_window(args, cv2)
     mouse_xy = track_mouse(window, cv2)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    board = open_board(args)
     try:
-        fake_loop(session, show=window.show, wait_key=cv2.waitKey, mouse_xy=mouse_xy)
+        fake_loop(session, show=window.show, wait_key=cv2.waitKey, mouse_xy=mouse_xy, board=board)
     finally:
+        if board is not None:
+            board.close()
         session.close_online()
         if session.audio is not None:
             session.audio.stop()
@@ -230,12 +252,14 @@ def run_fake(args):
 MAX_BAD_FRAMES = 30            # this many frames in a row that raise end the session (with the error)
 
 
-def run_loop(rig, *, show, wait_key, fps=60.0, log=print):
+def run_loop(rig, *, show, wait_key, fps=60.0, log=print, board=None):
     """The window loop: pump the rig, draw the HUD, handle keys.  Returns when the player quits.
 
     On macOS the window's wait (cv2.waitKey) takes ~15 ms a frame whatever there is to draw, so the picture is drawn on a thread
     (framepipe.py) during that wait: each turn shows the picture made from the state of the turn before and hands the new state
     over.  `fps` is a ceiling for a window system whose wait is quick.
+
+    `board`: a boardlink.BoardLink; each state drawn is also given to it, to show the score on the UNO Q's matrix.
 
     One frame that raises (a bug that only shows on the real sensors) is reported once and skipped: the game, the
     score on the broker and the hub's connection are worth more than that frame.  A loop that fails every frame is not skipped
@@ -258,7 +282,10 @@ def run_loop(rig, *, show, wait_key, fps=60.0, log=print):
                         note()                                  # (what the screen really did goes in the report)
                     show(picture)
                 rig.pump()
-                pipe.submit(rig.hud_state(), rig.display_frame())
+                state = rig.hud_state()
+                pipe.submit(state, rig.display_frame())
+                if board is not None:
+                    board.show(state)
                 bad = 0
             except Exception as exc:
                 bad += 1
@@ -300,16 +327,19 @@ def run_live(args):
         print(f"cannot start live mode: {exc}", file=sys.stderr)
         return 2
     window = open_window(args, cv2)
+    board = open_board(args)
     try:
         rig.start()
         sensor = "camera" if rig.swing_source == "pose" else "hub gyro"
         hub = "no hub" if rig.hub_status() == "off" else "hub ready"
         print(f"live: player {rig.player!r}, swings from the {sensor}, {hub}, camera on. "
               "Point the hub at the screen and hold on a button, or hold a card up for 2 s (1, 2 or 3 picks the opponent), or SPACE, to begin; Q quits.")
-        run_loop(rig, show=window.show, wait_key=cv2.waitKey)
+        run_loop(rig, show=window.show, wait_key=cv2.waitKey, board=board)
     except KeyboardInterrupt:
         pass
     finally:
+        if board is not None:
+            board.close()
         rig.close()
         cv2.destroyAllWindows()
     return 0

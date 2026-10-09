@@ -35,6 +35,7 @@ your own laptop with your own hub: see [Playing a friend](#playing-a-friend).
 - [Setup](#setup)
 - [First time: the bench, in order](#first-time-the-bench-in-order)
 - [Playing](#playing)
+- [The score on the UNO Q](#the-score-on-the-uno-q)
 - [Playing a friend](#playing-a-friend)
 - [The score on MQTT](#the-score-on-mqtt)
 - [What it shows and records](#what-it-shows-and-records)
@@ -50,6 +51,7 @@ your own laptop with your own hub: see [Playing a friend](#playing-a-friend).
 |---|---|
 | Mac | webcam, speakers, Bluetooth; a table to stand the laptop on, lid tilted so your head to hips is in frame at ~1.8 m, front-lit (no window behind you) |
 | LEGO Education Double Motor | held in your dominant fist; a wrist lanyard on every player; its Connection Card colour + 4-digit serial |
+| Arduino UNO Q (optional) | on the USB cable, it shows the score on its LED matrix (`./pp board deploy` once; see "The score on the UNO Q") |
 | Printed AprilTag cards | `./pp make_cards` writes `docs/cards/card0-3.pdf`; print at **Actual size** on matte paper and check the tag edge with a ruler (15 cm) |
 
 ## Setup
@@ -127,6 +129,8 @@ before and after the filter, so more games make the next training better. `./pp 
 ./pp play --no-intro --no-music          # straight to the title, quietly
 ./pp play --classic                      # the plain lobby (hold the hub on START, or SPACE): no intro, no menus
 ./pp play --windowed                     # a window the size of the picture (the game opens full screen)
+./pp play --no-board                     # leave the UNO Q's matrix alone (the score is on it whenever the board is on the cable)
+./pp board deploy                        # put the scoreboard app on the UNO Q over the USB cable (once; ./pp board test shows some scenes)
 ./pp showcase                            # the intro as a video and a picture of every screen, in data/showcase/
 ```
 
@@ -272,6 +276,23 @@ impact and at the impact; the ball is where its flight puts it at the contact, t
 paddle your hand height puts on the table · **J3** swing big and
 clean enough · **J4** pose and IMU agree on the moment (logged only) · **J5** one hit per ball, not
 too fast · **J6** paddle not locked after the hub was shaken.
+
+## The score on the UNO Q
+
+With the UNO Q on the USB cable the game shows its score on the board's 8 x 13 LED matrix. **Between games** it alternates every three
+seconds between the streak you are on (the last game's, until the next starts; dim `C`, then the number) and your best (dim `B`,
+then the number). **In a Rally** it is the streak in big digits with a bar along the bottom that fills towards your best and
+flashes once you are at it; **in a Match** it is the points, yours, a dash, the computer's. With nothing heard for eight seconds
+(the game quit, the cable out) the board shows three dim dots.
+
+`./pp board deploy` copies the app in `uno_q/pingpong-board` to the board with `adb` (the one Arduino App Lab installed: a different
+`adb` would replace the server App Lab started), starts it and waits for it to answer; the first start compiles the sketch on the
+board, a minute or two. The board runs **one app at a time**: if RateNgo or another app is running, `deploy` says so and stops
+only if you add `--replace` (App Lab starts it again). `./pp board test` shows a few scenes one after another. The board has no
+network on the cable, so the game reaches it with `adb forward` (port 17788 on the Mac to 7788 on the board); the game works out
+every frame (`pingpong/matrix.py`) and the board only draws what it is sent, so the whole look is tested here
+(`tests/test_matrix.py`). Everything about the board is optional and never waited for: no `adb`, no board, no app, a pulled cable
+only leave the matrix as it was, and `--no-board` turns it off.
 
 ## Playing a friend
 
@@ -456,8 +477,9 @@ pingpong/   the game: sensing (hub, imu_worker, swing, shake, vision, pose, tags
             spinflow, store, recorder, replay, sessionreport, overrides, livebuild, posegyro, fakerig, threadrig,
             sources_fake), the hand (body, posemodel, posetrain, posetake), playing a friend (netproto, netlink, versus,
             online, onlinesession, screens_online, loopnet: an in-memory network for the tests)
+uno_q/      pingpong-board: the scoreboard app that runs on the UNO Q (Python + a sketch); pingpong/matrix.py and boardlink.py are the game's side
 tools/      scan_hubs  env_check  bench_hub  bench_cam  bench_haptics  calibrate_swing  reset_hub
-            report  replay  train_spin  train_pose  sim  watch_score  republish_best  make_cards
+            report  replay  train_spin  train_pose  sim  watch_score  republish_best  make_cards  lobby  board
 tests/      one file per module; the whole pipeline also runs on fake hardware (test_fakerig.py)
 docs/       PLAN.md (the full design), JOURNAL.md (one line per surprise), diagram.md, cards/
 data/ recordings/ calibration*.json config_local.json   (never committed: players, videos, measurements)
