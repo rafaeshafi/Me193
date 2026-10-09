@@ -10,6 +10,7 @@ Usage:
     ./pp play --no-publish --no-motor # rehearse without the broker / without motor pulses
     ./pp play --no-intro --no-music   # straight to the title, quietly (the intro flies in from the sky and lasts ten seconds)
     ./pp play --classic               # the plain lobby with its hold-the-hub-on-START button, no menus, no intro
+    ./pp play --windowed              # a window the size of the picture, not full screen (full screen is how the game opens)
     ./pp play --hit-mode swing        # the old game: only a swing the hub's IMU sees meets the ball (default: contact)
     ./pp play --swing-source pose     # the camera's hand speed detects swings (auto when the hub measured < 25 Hz)
     ./pp play --no-hub                # camera only: no hub, no haptics (bring-up, or a flat battery)
@@ -54,6 +55,7 @@ def make_parser():
     ap.add_argument("--no-audio", action="store_true", help="no game sounds (the S key mutes while playing)")
     ap.add_argument("--no-music", action="store_true", help="the sounds but no music in the intro and the menus")
     ap.add_argument("--no-intro", action="store_true", help="start at the title: skip the flight in from the sky")
+    ap.add_argument("--windowed", action="store_true", help="a window the size of the picture instead of full screen")
     ap.add_argument("--classic", action="store_true",
                     help="the plain lobby (hold the hub on START, or SPACE) instead of the intro, title and menus")
     ap.add_argument("--no-spin", action="store_true", help="ignore the trained spin model: every ball is flat")
@@ -169,6 +171,22 @@ def fake_loop(session, *, show, wait_key, mouse_xy):
         pipe.close()
 
 
+def open_window(args, cv2):
+    """The game's window, open: full screen (the picture in black bars to the screen's shape, fullscreen.py) unless --windowed."""
+    from pingpong import fullscreen
+
+    window = fullscreen.Window(TITLE, size=(W, H), fullscreen=not args.windowed, cv2=cv2)
+    window.open()
+    return window
+
+
+def track_mouse(window, cv2):
+    """The mouse over the window as a position in the picture: -> a function that gives the latest one."""
+    mouse = {"xy": (W // 2, int(H * 0.7))}
+    cv2.setMouseCallback(window.title, lambda event, x, y, flags, param: mouse.update(xy=window.picture_xy(x, y)))
+    return lambda: mouse["xy"]
+
+
 def make_flow(args):
     """The way into a game (intro, title, the choice of game and of opponent, the results), or None for --classic."""
     from pingpong import livebuild
@@ -196,13 +214,11 @@ def run_fake(args):
 
         session.audio = Audio(music=not args.no_music)
         session.audio.start()
-    mouse = {"xy": (W // 2, int(H * 0.7))}
-    cv2.namedWindow(TITLE)
-    cv2.setMouseCallback(TITLE, lambda event, x, y, flags, param: mouse.update(xy=(x, y)))
+    window = open_window(args, cv2)
+    mouse_xy = track_mouse(window, cv2)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
-        fake_loop(session, show=lambda frame: cv2.imshow(TITLE, frame), wait_key=cv2.waitKey,
-                  mouse_xy=lambda: mouse["xy"])
+        fake_loop(session, show=window.show, wait_key=cv2.waitKey, mouse_xy=mouse_xy)
     finally:
         session.close_online()
         if session.audio is not None:
@@ -283,14 +299,14 @@ def run_live(args):
     except live.LiveSetupError as exc:
         print(f"cannot start live mode: {exc}", file=sys.stderr)
         return 2
-    cv2.namedWindow(TITLE)
+    window = open_window(args, cv2)
     try:
         rig.start()
         sensor = "camera" if rig.swing_source == "pose" else "hub gyro"
         hub = "no hub" if rig.hub_status() == "off" else "hub ready"
         print(f"live: player {rig.player!r}, swings from the {sensor}, {hub}, camera on. "
               "Point the hub at the screen and hold on a button, or hold a card up for 2 s (1, 2 or 3 picks the opponent), or SPACE, to begin; Q quits.")
-        run_loop(rig, show=lambda frame: cv2.imshow(TITLE, frame), wait_key=cv2.waitKey)
+        run_loop(rig, show=window.show, wait_key=cv2.waitKey)
     except KeyboardInterrupt:
         pass
     finally:

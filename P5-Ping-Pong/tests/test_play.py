@@ -346,6 +346,33 @@ def test_the_new_way_in_can_be_left_out_or_quietened_from_the_command_line():
     assert args.no_intro and args.no_music and args.classic
 
 
+def test_the_game_opens_its_window_full_screen_unless_it_is_asked_for_a_plain_one():
+    from test_fullscreen import FakeCv2
+
+    assert play.parse_args([]).windowed is False and play.parse_args(["--windowed"]).windowed is True
+    cv = FakeCv2()
+    window = play.open_window(play.parse_args(["--fake"]), cv)
+    assert window.fullscreen and window.title == play.TITLE
+    assert ("setWindowProperty", play.TITLE, cv.WND_PROP_FULLSCREEN, cv.WINDOW_FULLSCREEN) in cv.calls
+    cv = FakeCv2()
+    window = play.open_window(play.parse_args(["--fake", "--windowed"]), cv)
+    assert not window.fullscreen and cv.calls == [("namedWindow", play.TITLE)]
+
+
+def test_the_fake_mouse_is_followed_in_picture_pixels_whatever_the_window_shows_round_the_picture():
+    import numpy as np
+    from pingpong import fullscreen
+    from test_fullscreen import FakeCv2
+
+    cv = FakeCv2()
+    window = fullscreen.Window(play.TITLE, size=(play.W, play.H), cv2=cv, view_size=lambda title: (1512.0, 949.0))
+    mouse_xy = play.track_mouse(window, cv)
+    assert mouse_xy() == (play.W // 2, int(play.H * 0.7))                      # before the mouse has moved
+    window.show(np.zeros((play.H, play.W, 3), np.uint8))                     # the picture now has black bars above and below
+    cv.mouse_callback(0, 300, 41 + 100, 0, None)
+    assert mouse_xy() == (300, 100)
+
+
 def test_live_play_hits_by_hand_contact_unless_asked_for_swings():
     assert play.parse_args([]).hit_mode == "contact"
     assert play.parse_args(["--hit-mode", "swing"]).hit_mode == "swing"

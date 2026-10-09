@@ -126,8 +126,11 @@ before and after the filter, so more games make the next training better. `./pp 
 ./pp play --board                        # the leaderboard and nothing else
 ./pp play --no-intro --no-music          # straight to the title, quietly
 ./pp play --classic                      # the plain lobby (hold the hub on START, or SPACE): no intro, no menus
+./pp play --windowed                     # a window the size of the picture (the game opens full screen)
 ./pp showcase                            # the intro as a video and a picture of every screen, in data/showcase/
 ```
+
+**Full screen.** The game opens full screen, with the picture in black bars to the shape of the screen rather than stretched (`--windowed` for a plain window). macOS only lets the *active* application go full screen, so a game started while another app has the focus is maximised instead (click it, or press Control-Command-F, to go full screen).
 
 **The way in.** The game opens like a console sports game, and none of it needs the keyboard. An **intro** flies in out of a flash
 of sunlight over the clouds, across a little island with its palms, along the pier and down onto the sunny terrace where the
