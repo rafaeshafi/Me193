@@ -131,7 +131,7 @@ def test_the_card_in_focus_for_the_keys_looks_like_the_one_the_hand_is_on():
 def test_each_opponent_has_a_card_with_a_name_a_level_and_stars(monkeypatch):
     seen = drawn_text(monkeypatch)
     render("OPPONENT", t_s=3.0)
-    assert {"PIP", "COCO", "MAX", "ROOKIE", "CLUB", "PRO", "BACK"} <= set(seen)
+    assert {"PIP", "COCO", "ROGERS", "ROOKIE", "CLUB", "PRO", "BACK"} <= set(seen)
     assert {"SPEED", "DEFENSE", "SPIN"} <= set(seen)
     assert {"Let's rally!", "Bring your best!"} <= set(seen)
 
@@ -160,7 +160,7 @@ def test_the_face_off_shows_both_names_and_the_game(monkeypatch):
     assert {"RAFAE", "COCO", "VS"} <= set(seen) and any("MATCH" in text for text in seen)
     seen.clear()
     render("VS", t_s=1.5, level_tag=3, mode="survival")
-    assert "MAX" in seen and any("RALLY" in text for text in seen)
+    assert "ROGERS" in seen and any("RALLY" in text for text in seen)
 
 
 def test_the_two_come_in_from_the_sides_and_the_face_off_flashes_white_at_the_end():

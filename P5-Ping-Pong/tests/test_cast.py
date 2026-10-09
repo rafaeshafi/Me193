@@ -18,7 +18,7 @@ def test_every_level_a_card_can_set_has_its_own_opponent():
 def test_an_opponent_has_a_name_a_line_to_say_and_a_look_of_its_own():
     looks = [cast.OPPONENTS[n] for n in (1, 2, 3)]
     for look in looks:
-        assert look.name and look.tagline and look.hair_style in cast.HAIR_STYLES and look.accessory in cast.ACCESSORIES
+        assert look.name and look.tagline and look.hair_style in cast.OPPONENT_HAIR_STYLES and look.accessory in cast.ACCESSORIES
     assert len({look.shirt for look in looks}) == 3 and len({look.hair for look in looks}) == 3
     assert len({(look.hair_style, look.accessory) for look in looks}) == 3
 
@@ -62,3 +62,22 @@ def test_a_friend_online_stands_behind_the_table_with_their_own_avatar_not_the_l
     assert cast.opponent_look("Club", "") is cast.COCO
     friend = cast.opponent_look("Club", "Maya")
     assert friend == cast.player_look("MAYA") and friend.name == "MAYA" and friend != cast.COCO
+
+
+def test_the_hardest_opponent_is_drawn_after_the_professors_photo():
+    """Gray-brown wavy hair, light blue eyes, a wide smile with laugh lines, fair skin and a black polo with its collar open."""
+    look = cast.ROGERS
+    assert cast.OPPONENTS[3] is look and cast.opponent_by_name("Pro") is look and cast.opponent_by_name("Insane") is look
+    assert cast.opponent_for(levels.LEVELS[4]) is look                                       # the Insane row has no card: it borrows the hardest
+    assert look.name == "ROGERS" and look.tagline
+    red, green, blue = look.hair[2], look.hair[1], look.hair[0]                              # (a Look's colours are BGR)
+    assert max(red, green, blue) - min(red, green, blue) <= 25 and 80 <= (red + green + blue) / 3 <= 150          # gray-brown, not a colour
+    assert look.hair_style == "wavy" and look.wide_smile and look.mature
+    assert look.eyes[0] - look.eyes[2] >= 50                                                 # blue: far more blue than red
+    assert max(look.shirt) < 60 and look.collar == "polo"
+    assert min(look.skin) > 150
+
+
+def test_nobody_else_is_drawn_with_the_professors_features():
+    for look in (cast.PIP, cast.COCO, cast.player_look("rafae"), cast.player_look("maya")):
+        assert look.eyes is None and not look.wide_smile and not look.mature and look.collar == "v" and look.hair_style != "wavy"

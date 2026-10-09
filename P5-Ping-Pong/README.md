@@ -137,7 +137,7 @@ of sunlight over the clouds, across a little island with its palms, along the pi
 table stands, and lands exactly on the camera the game is played from (ten seconds; hold the hub in the top right to skip it).
 The **title** has the name of the game, who is playing and whether the hub and the broker are up, and a **START** button. Then
 you choose a **game** (a *Rally*: keep it going as long as you can; or a *Match* to 7) and an **opponent**: *Pip* (Rookie),
-*Coco* (Club) or *Max* (Pro), each with a portrait, stars for how fast, how well covered and how spinny they are, and a line they
+*Coco* (Club) or *Rogers* (Pro, the hardest: a cartoon of Prof. Rogers drawn after a photo, with his tousled gray-brown hair, light blue eyes, laugh lines, wide smile and black polo; the photo itself is not in the repo), each with a portrait, stars for how fast, how well covered and how spinny they are, and a line they
 like to say; after a **face-off** with the two of you and a big VS comes the 3-2-1. When it is over the **results** show who won
 (or the new record), the numbers (hits, longest rally, top speed, time) and the leaderboard, with **PLAY AGAIN** and **CHANGE
 OPPONENT**. Your avatar is made from your name (the same one every time), the people on the terrace cheer, and the opponent

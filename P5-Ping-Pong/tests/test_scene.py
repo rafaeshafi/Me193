@@ -155,7 +155,7 @@ def test_the_opponent_stands_behind_the_far_end_with_a_head_above_the_table_and_
 
 
 def test_the_opponent_is_the_one_that_stands_for_the_level():
-    for name, look in (("Rookie", cast.PIP), ("Club", cast.COCO), ("Pro", cast.MAX)):
+    for name, look in (("Rookie", cast.PIP), ("Club", cast.COCO), ("Pro", cast.ROGERS)):
         f = render(phase="RALLY", level_name=name)
         assert count(f, look.hair) > 100 and count(f, look.shirt) > 300, name
     assert count(render(level_name="Club"), cast.PIP.shirt) < 50

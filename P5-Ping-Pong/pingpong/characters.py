@@ -17,6 +17,7 @@ BOB_PERIOD_S, BOB_UNITS = 1.6, 1.4
 BLINK_PERIOD_S, BLINK_AT_S, BLINK_S = 3.2, 3.0, 0.12
 EYE, WHITE, MOUTH, TONGUE, CHEEK, FRAME = (40, 30, 40), (255, 255, 255), (50, 40, 130), (110, 110, 235), (170, 150, 245), (50, 50, 60)
 SHIFT, ONE = 3, 8                                           # sub-pixel drawing: coordinates are multiplied by 2 ** SHIFT
+STREAK_BY = 62                                              # the lighter strands in gray hair: this much lighter than the hair
 
 HEAD_Y_UNITS = -10.0
 OPP_BUST_M, OPP_CENTER_Y_M, OPP_FOLLOW = 0.66, 0.45, 0.5     # the opponent: bust height, where its centre is above the table, how far it follows the paddle
@@ -29,6 +30,10 @@ def eyes_closed(t_s):
 
 def _dark(color, k=0.62):
     return tuple(int(c * k) for c in color)
+
+
+def _lighter(color, by):
+    return tuple(min(255, c + by) for c in color)
 
 
 class _Pen:
@@ -73,7 +78,21 @@ def _arc_points(cx, cy, ax, ay, start, end, n=14):
 
 
 # --- the parts of a portrait ------------------------------------------------------------------------------------------------
+def _polo(p, look):
+    """A polo shirt with its collar open: two flaps either side of the neck and a placket with two buttons down the front."""
+    p.ell(0, 50, 46, 30, look.shirt, start=180, end=360)
+    p.poly([(-8, 6), (8, 6), (8, 26), (-8, 26)], _dark(look.skin, 0.88), outline=False)            # neck
+    p.poly([(-13, 20), (13, 20), (0, 38)], look.skin, outline=False)                              # the V it is open to
+    for side in (-1, 1):                                                                          # the points of the collar lie open on the chest
+        p.poly([(side * 17, 17.5), (side * 6, 20), (side * 2, 37), (side * 12.5, 30.5), (side * 20.5, 25)], look.trim)
+    p.line(0, 38, 0, 49, _dark(look.trim, 0.7), 1.6)
+    for y in (41.5, 46.5):
+        p.ell(0, y, 1.2, 1.2, _lighter(look.trim, 50), outline=False)
+
+
 def _torso(p, look):
+    if look.collar == "polo":
+        return _polo(p, look)
     p.ell(0, 50, 46, 30, look.shirt, start=180, end=360)
     p.arc(0, 50, 40, 24, 205, 335, look.trim, 3.2)                       # a sporty stripe along the shoulders
     p.poly([(-8, 6), (8, 6), (8, 26), (-8, 26)], _dark(look.skin, 0.88), outline=False)            # neck
@@ -98,6 +117,38 @@ def _hair_cap(p, look, spikes=0):
         p.poly([(bx - side[0], by - side[1]), (tx, ty), (bx + side[0], by + side[1])], look.hair)
 
 
+TUFTS = ((226, 0.10, 8.0), (259, 0.06, 6.0), (289, 0.13, 9.0), (322, 0.08, 6.5), (349, 0.05, 5.0))     # (angle, height as a share of the radius, width)
+STRANDS = ((0.90, 200, 262, 0.0, "light"), (0.78, 255, 330, 1.3, "light"), (0.86, 290, 345, 2.4, "light"),
+           (0.72, 215, 300, 3.1, "light"), (0.95, 235, 300, 0.7, "dark"), (0.82, 205, 245, 2.0, "dark"), (0.80, 300, 352, 4.0, "dark"))
+
+
+def _tufted_arc(cx, cy, ax, ay, start, end, n=90):
+    """The top of tousled hair: an arc whose edge rolls a little and has a few tufts sticking out of it."""
+    points = []
+    for t in np.linspace(0, 1, n):
+        deg = start + (end - start) * t
+        k = 1.0 + 0.035 * math.sin(2 * math.pi * 3.5 * t + 0.8)
+        k += sum(h * math.exp(-0.5 * ((deg - at) / width) ** 2) for at, h, width in TUFTS)
+        a = math.radians(deg)
+        points.append((cx + ax * k * math.cos(a), cy + ay * k * math.sin(a)))
+    return points
+
+
+def _wavy_front(p, look):
+    """Tousled hair on top with its sides cut short (the ears are free), swept over a high forehead, with gray strands through it."""
+    outer = _tufted_arc(0, -13, 35, 40, 186, 354)
+    hairline = [(32, -12), (30.5, -18.5), (27, -25), (18, -31.5), (6, -35), (-6, -34.5), (-16, -31), (-23, -25.5), (-28, -19), (-31, -12)]
+    p.poly(outer + hairline, look.hair)
+    for f, a0, a1, phase, tone in STRANDS:
+        color = _lighter(look.hair, STREAK_BY) if tone == "light" else _dark(look.hair, 0.78)
+        pts = []
+        for t in np.linspace(0, 1, 18):
+            a, r = math.radians(a0 + (a1 - a0) * t), 1.1 * math.sin(2 * math.pi * 2.0 * t + phase)
+            pts.append(((f * 34 + r) * math.cos(a), -13 + (f * 38 + r) * math.sin(a)))
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            p.line(x0, y0, x1, y1, color, 1.2)
+
+
 def _hair_back(p, look):
     if look.hair_style == "curly":
         for a in range(165, 380, 24):
@@ -119,6 +170,8 @@ def _hair_front(p, look):
         _hair_cap(p, look)
         p.ell(0, -54, 11, 10, look.hair)
         p.arc(0, -46, 10, 3, 0, 180, look.trim, 3)
+    elif style == "wavy":
+        _wavy_front(p, look)
 
 
 def _brows(p, look, mood):
@@ -126,10 +179,38 @@ def _brows(p, look, mood):
     color = _dark(look.hair, 0.7)
     for side in (-1, 1):
         raised = -4.5 if mood == "smug" and side == -1 else 2.0 if mood == "smug" else 0.0
-        p.line(side * 6.5, inner + raised, side * 15, outer + raised, color, 2.6)
+        if look.mature:                                                  # thin and arched, not the bars of a cartoon child
+            raised *= 0.65
+            top = min(inner, outer) - 1.1 + raised
+            p.line(side * 6.5, inner + raised, side * 11, top, _dark(look.hair, 0.82), 1.8)
+            p.line(side * 11, top, side * 16, outer + 0.8 + raised, _dark(look.hair, 0.82), 1.8)
+        else:
+            p.line(side * 6.5, inner + raised, side * 15, outer + raised, color, 2.6)
 
 
-def _mouth(p, mood):
+WIDE_SMILE = {"happy": (0.0, 9.5), "grin": (0.0, 13.0), "smug": (-1.2, 11.0)}       # mood -> (tilt: a smirk, how far the mouth is open)
+
+
+def _smile_curves(tilt, depth):
+    """The opening of a wide smile as two curves, upper lip and lower, from one corner of the mouth to the other."""
+    xs = np.linspace(-14.0, 14.0, 25)
+    bend, lift = 1.0 - (xs / 14.0) ** 2, tilt * xs / 14.0
+    return ([(x, 6.0 + 2.6 * b + dy) for x, b, dy in zip(xs, bend, lift)], [(x, 6.0 + depth * b + dy) for x, b, dy in zip(xs, bend, lift)])
+
+
+def _wide_smile(p, tilt, depth):
+    upper, lower = _smile_curves(tilt, depth)
+    p.poly(upper + lower[::-1], MOUTH, outline=False)
+    teeth = [(ux, uy + 0.62 * (ly - uy)) for (ux, uy), (_, ly) in zip(upper, lower)]
+    p.poly(upper + teeth[::-1], WHITE, outline=False)
+    for curve in (upper, lower):
+        for (x0, y0), (x1, y1) in zip(curve, curve[1:]):
+            p.line(x0, y0, x1, y1, MOUTH, 1.1)
+
+
+def _mouth(p, mood, wide=False):
+    if wide and mood in WIDE_SMILE:
+        return _wide_smile(p, *WIDE_SMILE[mood])
     if mood == "grin":
         p.ell(0, 9, 12, 9, MOUTH, start=0, end=180, edge=0.8)
         p.ell(0, 7.5, 9.5, 3.4, WHITE, outline=False, start=0, end=180)
@@ -148,11 +229,36 @@ def _mouth(p, mood):
         p.arc(0, 8, 10, 7, 22, 158, MOUTH, 2.4)
 
 
+def _bezier(a, b, c, n=9):
+    return [((1 - t) ** 2 * a[0] + 2 * t * (1 - t) * b[0] + t * t * c[0], (1 - t) ** 2 * a[1] + 2 * t * (1 - t) * b[1] + t * t * c[1])
+            for t in np.linspace(0, 1, n)]
+
+
+def _laugh_lines(p, look):
+    """The lines of a face that smiles a lot: across the forehead, fanning out from the corners of the eyes, under the eyes and
+    round the corners of the smile."""
+    color = _dark(look.skin, 0.88)
+    p.arc(0, -26.0, 18, 4.4, 215, 325, color, 0.7)
+    p.arc(0, -28.5, 14, 3.6, 218, 322, color, 0.7)
+    for side in (-1, 1):
+        for end in ((21.8, -11.5), (22.4, -9.0), (21.8, -6.5)):
+            p.line(side * 17.0, -9.0, side * end[0], end[1], color, 0.6)
+        p.arc(side * 11, -5.8, 6.4, 2.6, 25, 155, color, 0.7)
+        fold = _bezier((side * 7.2, 3.2), (side * 17.5, 3.5), (side * 18.8, 10.5))
+        for (x0, y0), (x1, y1) in zip(fold, fold[1:]):
+            p.line(x0, y0, x1, y1, color, 0.8)
+
+
 def _face(p, look, mood, closed):
     for side in (-1, 1):
-        p.blend_ell(side * 18, 5, 6.5, 4.2, CHEEK, 0.55)
+        p.blend_ell(side * 18, 5, 6.5, 4.2, CHEEK, 0.2 if look.mature else 0.55)
         if closed:
             p.arc(side * 11, -9, 4.6, 3.2, 200, 340, EYE, 2.0)
+        elif look.eyes is not None:
+            p.ell(side * 11, -9, 4.0, 4.2, look.eyes, outline=False)                          # the iris
+            p.ell(side * 11, -9, 1.9, 2.1, EYE, outline=False)                                # the pupil
+            p.ell(side * 11 - 1.3, -10.4, 1.1, 1.1, WHITE, outline=False)
+            p.arc(side * 11, -9.3, 5.0, 4.6, 200, 340, _dark(look.skin, 0.45), 1.1)           # a lid over it: eyes that smile
         else:
             p.ell(side * 11, -9, 4.1, 5.4, EYE, outline=False)
             p.ell(side * 11 - 1.4, -11.4, 1.5, 1.5, WHITE, outline=False)
@@ -161,7 +267,9 @@ def _face(p, look, mood, closed):
             p.ell(dx, dy, 0.9, 0.9, _dark(look.skin, 0.8), outline=False)
     _brows(p, look, mood)
     p.ell(0, 2, 2.6, 1.8, _dark(look.skin, 0.8), outline=False)
-    _mouth(p, mood)
+    _mouth(p, mood, look.wide_smile)
+    if look.mature:
+        _laugh_lines(p, look)
 
 
 def _accessory(p, look):
@@ -201,7 +309,7 @@ def draw_bust(frame, cx, cy, size, look, *, mood="happy", t=0.0, bob=True):
     _hair_back(head, look)
     for side in (-1, 1):
         head.ell(side * 30, -8, 6, 7, look.skin)                          # ears
-    head.ell(0, HEAD_Y_UNITS, 30, 31, look.skin)
+    head.ell(0, HEAD_Y_UNITS - 31 + look.head_ry, 30, look.head_ry, look.skin)                      # (a longer face grows down from the same forehead)
     _face(head, look, mood, eyes_closed(t))
     _hair_front(head, look)
     _accessory(head, look)

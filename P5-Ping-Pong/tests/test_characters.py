@@ -33,7 +33,7 @@ def bust(look, size=200, **kw):
 
 
 # --- the portrait ---------------------------------------------------------------------------------------------------------
-@pytest.mark.parametrize("who", [cast.PIP, cast.COCO, cast.MAX, cast.player_look("rafae"), cast.player_look("maya")])
+@pytest.mark.parametrize("who", [cast.PIP, cast.COCO, cast.ROGERS, cast.player_look("rafae"), cast.player_look("maya")])
 def test_a_portrait_shows_the_skin_the_hair_and_the_shirt_of_its_look(who):
     frame = bust(who)
     for color in (who.skin, who.hair, who.shirt):
@@ -66,7 +66,7 @@ def test_a_mood_changes_the_face_and_leaves_the_shoulders_alone(a, b):
 
 def test_every_mood_can_be_drawn():
     for mood in characters.MOODS:
-        assert changed(bust(cast.MAX, mood=mood), blank()).sum() > 5000
+        assert changed(bust(cast.ROGERS, mood=mood), blank()).sum() > 5000
 
 
 def test_the_eyes_close_for_a_blink_and_a_blink_is_short():
@@ -85,7 +85,7 @@ def test_a_head_bobs_gently_and_the_shoulders_stay_put():
     assert not diff[H // 2 + int(0.34 * 200):].any()                              # below the neck: the shoulders do not move
 
 
-@pytest.mark.parametrize("style", cast.HAIR_STYLES)
+@pytest.mark.parametrize("style", cast.OPPONENT_HAIR_STYLES)
 def test_every_hair_style_draws_and_differs_from_the_others(style):
     import dataclasses
 
@@ -129,12 +129,12 @@ def test_the_opponent_stands_behind_the_far_end_of_the_table_and_gets_smaller_fu
 
 def test_the_head_is_where_it_is_projected_and_the_body_stops_at_the_table_edge(cam):
     frame = court()
-    characters.draw_opponent(frame, cam, cast.MAX, x_m=0.0, z_m=3.1, grip_px=(500, 150), body_rows=210)
+    characters.draw_opponent(frame, cam, cast.ROGERS, x_m=0.0, z_m=3.1, grip_px=(500, 150), body_rows=210)
     cx, cy, _ = characters.head_px(cam, 0.0, 3.1)
     assert (frame[round(cy), round(cx)] != np.array(BG)).any()
     below = changed(frame[210:], court()[210:])
     assert below.sum() == 0 or bounds(below)[0] < 560                           # nothing of the body behind the table edge
-    assert count(frame[208:210], cast.MAX.shirt) > 20                             # but it reaches the edge
+    assert count(frame[208:210], cast.ROGERS.shirt) > 20                             # but it reaches the edge
 
 
 def test_the_opponent_follows_the_paddle_sideways_a_little(cam):
@@ -219,3 +219,67 @@ def test_a_portrait_still_growing_from_nothing_is_not_drawn_and_is_not_an_error(
     for d in (0, 0.4, 1, 3):
         characters.portrait(frame, 200, 200, d, cast.PIP)
     assert np.array_equal(frame, blank())
+
+
+# --- the hardest opponent: after the professor's photo -------------------------------------------------------------------------------------
+def lighter_than(frame, color, by=30):
+    return (frame.astype(int) >= np.array(color, dtype=int) + by).all(axis=2)
+
+
+def test_the_professor_has_light_blue_eyes_that_show():
+    frame = bust(cast.ROGERS, size=300, bob=False)
+    assert count(frame, cast.ROGERS.eyes) > 300
+    assert count(bust(cast.ROGERS, size=300, bob=False, t=3.05), cast.ROGERS.eyes) < 40                     # closed for a blink: no eyes
+
+
+def test_the_professor_smiles_with_all_his_teeth_and_the_others_do_not():
+    def teeth(look, mood):
+        frame = bust(look, size=300, bob=False, mood=mood)
+        face = frame[H // 2 + 6:H // 2 + 60, W // 2 - 60:W // 2 + 60]                                     # from under the nose to the chin
+        return int((face == 255).all(axis=2).sum())
+
+    assert teeth(cast.ROGERS, "happy") > 250 and teeth(cast.ROGERS, "smug") > 250 and teeth(cast.ROGERS, "grin") > 250
+    assert teeth(cast.COCO, "happy") < 20 and teeth(cast.ROGERS, "sad") < 20                                # a loser's mouth is not a smile
+
+
+def test_the_professor_wears_a_black_polo_with_a_collar_of_its_own():
+    import dataclasses
+
+    frame = bust(cast.ROGERS, size=300, bob=False)
+    sporty = bust(dataclasses.replace(cast.ROGERS, collar="v"), size=300, bob=False)
+    assert count(frame, cast.ROGERS.shirt) > 2500 and count(frame, cast.ROGERS.trim) > 200                      # the flaps of the collar
+    outside = lambda f: count(f[:, : W // 2 - 72], cast.ROGERS.trim) + count(f[:, W // 2 + 72:], cast.ROGERS.trim)      # noqa: E731
+    assert outside(frame) == 0 and outside(sporty) > 100                                                        # and no stripe along the shoulders
+
+
+def test_the_professors_gray_hair_has_lighter_streaks_in_it():
+    frame = bust(cast.ROGERS, size=300, bob=False)
+    crown = frame[: H // 2 - 120]                                                                            # above the top of the head: only hair
+    assert lighter_than(crown, cast.ROGERS.hair).sum() > 150
+
+
+def test_the_professors_older_face_is_drawn_on_the_face_and_nowhere_else():
+    import dataclasses
+
+    plain = dataclasses.replace(cast.ROGERS, mature=False)
+    with_lines, without = bust(cast.ROGERS, size=300, bob=False), bust(plain, size=300, bob=False)
+    diff = changed(with_lines, without)
+    assert 150 < diff.sum() < 9000
+    x0, y0, x1, y1 = bounds(diff)
+    assert y0 > H // 2 - 0.33 * 300 and y1 < H // 2 + 0.2 * 300                                              # not in the hair, not below the chin
+    assert x0 > W // 2 - 0.3 * 300 and x1 < W // 2 + 0.3 * 300
+
+
+@pytest.mark.parametrize("a, b", [("happy", "sad"), ("happy", "cheer"), ("sad", "surprised"), ("neutral", "smug"), ("happy", "grin")])
+def test_a_mood_changes_the_professors_face_and_leaves_his_shoulders_and_hair_alone(a, b):
+    diff = changed(bust(cast.ROGERS, mood=a, bob=False), bust(cast.ROGERS, mood=b, bob=False))
+    assert diff.sum() > 60
+    _, y0, _, y1 = bounds(diff)
+    assert y1 < H // 2 + 0.24 * 200 and y0 > H // 2 - 0.33 * 200
+
+
+def test_the_professors_portrait_stays_inside_the_box_it_was_given():
+    frame = bust(cast.ROGERS, size=240)
+    x0, y0, x1, y1 = bounds(changed(frame, blank()))
+    assert x0 >= W // 2 - 0.62 * 240 and x1 <= W // 2 + 0.62 * 240
+    assert y0 >= H // 2 - 0.62 * 240 and y1 <= H // 2 + 0.55 * 240
