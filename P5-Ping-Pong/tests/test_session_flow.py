@@ -3,7 +3,8 @@ carry out what the flow asks for: start a game with these choices, make this sou
 
 import pytest
 
-from pingpong import app, flow, keys
+from pingpong import app, flow, fonts, keys
+from pingpong import hud as screen
 from pingpong.events import PaddlePose, TagEvent
 from pingpong.flow import Flow
 
@@ -195,6 +196,44 @@ def test_when_a_game_ends_the_results_come_up_with_its_words_and_numbers():
     st = hud(s)
     assert st.screen == "RESULTS" and st.results.title == "GAME OVER" and st.results.won is None
     assert dict(st.results.stats)["HITS"] == "0" and [label for label, _ in st.results.stats][-1] == "TIME"
+
+
+def drawn_text(state, monkeypatch):
+    """Everything the screen writes for this state, as (text, size)."""
+    drawn, real = [], fonts.draw
+
+    def spy(frame, text, x, y, size, *a, **kw):
+        drawn.append((text, round(size)))
+        return real(frame, text, x, y, size, *a, **kw)
+
+    monkeypatch.setattr(fonts, "draw", spy)
+    screen.render(state, size=(1280, 720))
+    return drawn
+
+
+def rally_of_three_then_a_miss(s):
+    app.play_until_hits(s, 3)                                    # three returns in a row ...
+    while s.game.phase != "MATCH_OVER":                          # ... and then nobody swings: the next ball is the miss that ends it
+        hold(s, ELSEWHERE, 0.1)
+        assert s.clock.now_ns() < 90 * S
+
+
+def test_the_results_of_a_rally_show_the_streak_it_ended_on_not_the_zero_the_last_miss_left(monkeypatch):
+    s = make()
+    settle(s)
+    key(s, SPACE)
+    rally_of_three_then_a_miss(s)
+    hold(s, ELSEWHERE, 1.5)
+    st = hud(s)
+    assert st.screen == "RESULTS" and dict(st.results.stats)["LONGEST RALLY"] == "3"
+    score = max((t for t in drawn_text(st, monkeypatch) if t[0].isdigit()), key=lambda t: t[1])         # the big number
+    assert score[0] == "3" and st.streak == 3
+
+
+def test_the_game_over_panel_without_menus_shows_the_streak_it_ended_on_too(monkeypatch):
+    s = app.make_session()
+    rally_of_three_then_a_miss(s)
+    assert any(t[0] == "streak 3    best 3" for t in drawn_text(s.hud_state(), monkeypatch))
 
 
 def test_a_lost_match_says_so_and_the_opponent_cheers():

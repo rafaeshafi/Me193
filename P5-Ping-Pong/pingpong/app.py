@@ -297,6 +297,12 @@ class Session(OnlineMixin):
             self._flash, self._flash_until = flash, now + round(0.15 * S)
 
     # --- HUD -------------------------------------------------------------------------------------------
+    def _shown_streak(self):
+        """The streak the screens show: the rally's own, and once the game is over the one it ended on (the miss reset the tracker's)."""
+        if self.game.phase == "MATCH_OVER" and self._last_summary is not None:
+            return self._last_summary["streak"]
+        return self.game.tracker.streak
+
     def hud_state(self, leaderboard=()):
         g, now = self.game, self.clock.now_ns()
         if not leaderboard and g.phase == "MATCH_OVER" and self.leaderboard_fn is not None and g.remote is None:
@@ -317,7 +323,7 @@ class Session(OnlineMixin):
                 results = uistate.results_from_summary(self._last_summary, self._record_game)
         digit = None if remaining is None else max(1, math.ceil(remaining))
         return HudState(
-            phase=g.phase, mode=g.mode, level_name=g.level.name, streak=g.tracker.streak,
+            phase=g.phase, mode=g.mode, level_name=g.level.name, streak=self._shown_streak(),
             record=g.tracker.record, player_points=g.player_points, cpu_points=g.cpu_points,
             target=g.target_points, countdown=digit,
             countdown_t=0.0 if digit is None else min(1.0, max(0.0, 1.0 - (remaining - (digit - 1)))),
