@@ -21,6 +21,11 @@ STANDBY = "".join("2" if i in (43, 45, 47) else "0" for i in range(PIXELS))     
 log = logging.getLogger("scoreboard")
 
 
+def levels(frame):
+    """A frame (104 characters 0-7) as the 104 bytes the MCU is sent."""
+    return bytes(int(c) for c in frame)
+
+
 def parse(line):
     """A line of the game's talk -> the frame (104 characters, each 0-7), or None if it is not a frame."""
     line = line.strip()

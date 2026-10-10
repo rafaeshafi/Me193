@@ -2,10 +2,10 @@
 
 namespace pingpong {
 
-void decodeFrame(const char* text, size_t length, uint8_t* levels) {
+void normalizeFrame(const uint8_t* values, size_t length, uint8_t* levels) {
   for (int i = 0; i < kPixels; ++i) {
-    char c = static_cast<size_t>(i) < length ? text[i] : '0';
-    levels[i] = (c >= '0' && c <= '7') ? static_cast<uint8_t>(c - '0') : 0;
+    uint8_t v = (values != nullptr && static_cast<size_t>(i) < length) ? values[i] : 0;
+    levels[i] = v > kBrightest ? kBrightest : v;
   }
 }
 
