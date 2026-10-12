@@ -5,6 +5,7 @@ detects swings, whose calibration, then the hub, camera, broker, sounds and lead
 player can fix says how, and a failure after the hub connected lets the hub go again.
 """
 
+import dataclasses
 import sqlite3
 from pathlib import Path
 
@@ -119,6 +120,12 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
     owner = profile.slug(args.player) == config.OWNER
     calibration = (None if guest else profile.load(args.player, root=player_root, source=swing_source)) \
         or profile.Calibration.default(swing_source)
+    hand = getattr(args, "hand", None)
+    if hand and hand != calibration.hand:                        # a guest, or a first try before calibrating, names the hand
+        if calibration.calibrated:
+            log(f"{args.player}'s calibration was made with the {calibration.hand} hand, so its reach box will not fit the "
+                f"{hand} one: run ./pp calibrate_swing --player {args.player} --hand {hand}")
+        calibration = dataclasses.replace(calibration, hand=hand)
     no_publish = bool(args.no_publish or guest or not owner)    # a guest, or anyone but the owner, must never touch the owner's score
     if not (guest or owner or args.no_publish):
         log(f"scores are not published to the score topic: it belongs to the player {config.OWNER}, and this player is {args.player}")
@@ -199,6 +206,7 @@ def build_live(args, env, *, player_root=None, record_root=None, store_path=None
         rig.session.set_notice(f"SCORE NOT SENT: only the player {config.OWNER} publishes it")
     if not calibration.calibrated:
         flags = (" --swing-source pose" + (" --no-hub" if args.no_hub else "")) if camera else ""
+        flags = (" --hand left" if calibration.hand == "left" else "") + flags
         rig.session.set_notice(f"UNCALIBRATED: run ./pp calibrate_swing --player {args.player}{flags}")
     elif calibration.tilt is None and not camera:
         rig.session.set_notice(f"PADDLE STAYS UPRIGHT: run ./pp calibrate_swing --player {args.player} --tilt-only "

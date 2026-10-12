@@ -3,7 +3,8 @@
 Usage (from Terminal.app: camera and Bluetooth are not available to the Claude app):
     cd ~/ME193/P5-Ping-Pong
     ./pp calibrate_swing --player rafae            # the card comes from config_local.json
-    ./pp calibrate_swing --player rafae --hand left
+    ./pp calibrate_swing --player arbert --hand left          # the hub is in the LEFT fist: saved with the player, so later
+                                                              # calibrations, train_pose and play all follow that hand
     ./pp calibrate_swing --player rafae --tilt-only           # just teach the paddle to turn with the hub (~15 s)
     ./pp calibrate_swing --player rafae --swing-source pose   # the camera's hand speed instead of the hub's gyro
     ./pp calibrate_swing --player rafae --no-hub              # camera only (implies --swing-source pose)
@@ -47,7 +48,8 @@ def parse_args(argv=None):
     ap.add_argument("--card-color", default=None)
     ap.add_argument("--card-serial", default=None)
     ap.add_argument("--player", default="rafae")
-    ap.add_argument("--hand", choices=("right", "left"), default="right")
+    ap.add_argument("--hand", choices=("right", "left"), default=None,
+                    help="the hand that holds the hub (default: the hand this player was last calibrated with, else right)")
     ap.add_argument("--no-tilt", action="store_true", help="skip the step that teaches the paddle to turn with the hub")
     ap.add_argument("--tilt-only", action="store_true",
                     help="only teach the paddle to turn with the hub (~15 s); the saved calibration keeps everything else")
@@ -80,7 +82,9 @@ def _draw_map(frame, flow, hand_uv, rect):
         px, py = _map_point(rect, *hand_uv)
         cv2.circle(frame, (px, py), 12, WHITE, 2, cv2.LINE_AA)
         cv2.circle(frame, (px, py), 3, WHITE, -1, cv2.LINE_AA)
-    canvas.draw_text(frame, "YOUR HAND", (x0 + 8, y0 + 20), 0.5, GREY, 1)
+    canvas.draw_text(frame, f"YOUR {flow.hand.upper()} HAND", (x0 + 8, y0 + 20), 0.5, GREY, 1)
+    canvas.draw_text(frame, f"wrong hand? Q, then --hand {'right' if flow.hand == 'left' else 'left'}",
+                     (x0, y0 + h + 26), 0.5, GREY, 1)
 
 
 def render_frame(flow, background, hand_uv, last_note, size=(W, H)):
@@ -141,6 +145,7 @@ def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), fr
         print(f"cannot calibrate: {exc}", file=sys.stderr)
         return 2
     camera = source == "pose"
+    hand = args.hand or profile.saved_hand(args.player, root=profile_root) or "right"
     existing = None
     if args.tilt_only:
         existing = None if camera else profile.load(args.player, root=profile_root, source=source)
@@ -170,11 +175,11 @@ def run(env, args, *, profile_root=None, show, wait_key, notify, size=(W, H), fr
                   "apps using it, turn Continuity Camera off)", file=sys.stderr)
             return 2
         live.request_720p(capture)
-        vision = VisionWorker(capture, env.make_landmarker(), clock=env.clock, hand=args.hand, body=BodyTracker(),
+        vision = VisionWorker(capture, env.make_landmarker(), clock=env.clock, hand=hand, body=BodyTracker(),
                               to_image=getattr(env, "to_image", None))
         units = (posegyro.GYRO_PER_DPS, posegyro.ACCEL_PER_G, posegyro.FS_RAW) if camera else \
             (config.GYRO_PER_DPS, config.ACCEL_PER_G, config.HUB_FS_RAW)
-        flow = CalibrationFlow(gyro_per_dps=units[0], hand=args.hand, accel_per_g=units[1], fs_raw=units[2],
+        flow = CalibrationFlow(gyro_per_dps=units[0], hand=hand, accel_per_g=units[1], fs_raw=units[2],
                                source=source, tilt=not args.no_tilt)
         if existing is not None:
             flow.step = "tilt"                            # the saved calibration already has everything else

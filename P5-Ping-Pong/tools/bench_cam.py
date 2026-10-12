@@ -4,6 +4,7 @@ Usage (Terminal.app only -- camera and Bluetooth):
     ./pp bench_cam                          # fps, tags, wave (lag + hub rate under load), mqtt, hud
     ./pp bench_cam --only tags              # just the printed cards
     ./pp bench_cam --only wave --secs-wave 15
+    ./pp bench_cam --only wave --hand left  # the hub in the LEFT fist: the wave step follows that hand (default right)
     ./pp bench_cam --official-check         # also one retained 0.0 to the OFFICIAL topic, then cleared (asks first)
     ./pp bench_cam --selftest
 
@@ -197,7 +198,7 @@ def _hud(show, add, ask):
 
 def run(env, *, card, ids=(0, 1, 2, 3), secs=None, only=STEPS, camera_index=0, official=False, mqtt_load=True,
         config_path, report_path, prompt, ask, out, ready_s=5.0, show=lambda frame: None,
-        on_camera=lambda vision: None):
+        on_camera=lambda vision: None, hand="right"):
     secs = {"fps": 10.0, "tag": 5.0, "wave": 12.0, **(secs or {})}
     results = []
 
@@ -220,7 +221,7 @@ def run(env, *, card, ids=(0, 1, 2, 3), secs=None, only=STEPS, camera_index=0, o
                 request_720p(capture)
                 if camera_index != config.CAMERA_INDEX:
                     config.write_local({"CAMERA_INDEX": camera_index}, config_path)
-                vision = VisionWorker(capture, env.make_landmarker(), clock=env.clock, lag_s=0.0,
+                vision = VisionWorker(capture, env.make_landmarker(), clock=env.clock, lag_s=0.0, hand=hand,
                                       to_image=getattr(env, "to_image", None))
                 if env.threaded:
                     vision.start()
@@ -286,6 +287,7 @@ def main(argv=None):
     ap.add_argument("--ready-s", type=float, default=5.0, help="seconds to get into position after Enter")
     ap.add_argument("--official-check", action="store_true", help="also one retained 0.0 on the official topic (asks)")
     ap.add_argument("--no-mqtt-load", action="store_true")
+    ap.add_argument("--hand", choices=("right", "left"), default="right", help="the hand that holds the hub: the wave step follows it")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args(argv)
     if args.selftest:
@@ -316,7 +318,7 @@ def main(argv=None):
                       camera_index=args.camera_index, official=args.official_check, mqtt_load=not args.no_mqtt_load,
                       config_path=config.LOCAL_PATH, report_path=config.HERE / "recordings" / "bench_cam.json",
                       prompt=prompt, ask=ask, out=print, ready_s=args.ready_s, show=window.show_still,
-                      on_camera=window.attach)
+                      on_camera=window.attach, hand=args.hand)
     finally:
         cv2.destroyAllWindows()
     print("\nbench_cam:", "ALL GOOD" if code == 0 else "FIX THE FAIL LINES ABOVE, then re-run those steps (--only ...)")

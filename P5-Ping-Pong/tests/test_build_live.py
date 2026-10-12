@@ -79,6 +79,45 @@ def test_a_saved_calibration_is_loaded_for_the_player(tmp_path):
     assert rig.session.hud_state().message == "" and rig.imu.tilt is not None           # fully calibrated: nothing to say
 
 
+def left_handed_player(root, name="arbert"):
+    saved = profile.Calibration(swing=SwingCalibration((0.0, 1.0, 0.0), 280.0, 1100.0), box=ReachBox(-1.8, -0.2, -0.9, 0.7),
+                                shoulder_w=0.2, hand="left",
+                                tilt=TiltCalibration((1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 0.0, 0.0)))
+    profile.save(name, saved, root=root)
+
+
+def test_a_left_handed_guest_is_followed_on_the_left_hand_by_naming_it(tmp_path):
+    rig = live.build_live(live_args("--player", "guest", "--hand", "left"), FakeEnv(), player_root=tmp_path)
+    assert rig.calibration.hand == "left" and rig.vision.hand == "left"
+    assert live.build_live(live_args("--player", "guest"), FakeEnv(), player_root=tmp_path).vision.hand == "right"
+
+
+def test_a_player_with_no_calibration_is_told_how_to_calibrate_the_hand_they_play_with(tmp_path):
+    left = live.build_live(live_args("--player", "arbert", "--hand", "left"), FakeEnv(), player_root=tmp_path)
+    assert "calibrate_swing --player arbert --hand left" in left.session.hud_state().message
+    right = live.build_live(live_args("--player", "newbie"), FakeEnv(), player_root=tmp_path)
+    assert "calibrate_swing --player newbie" in right.session.hud_state().message
+    assert "--hand" not in right.session.hud_state().message
+
+
+def test_the_camera_follows_the_hand_a_player_was_calibrated_with_without_being_told(tmp_path):
+    left_handed_player(tmp_path)
+    rig = live.build_live(live_args("--player", "arbert"), FakeEnv(), player_root=tmp_path)
+    assert rig.vision.hand == "left" and rig.calibration.hand == "left"
+
+
+def test_naming_the_other_hand_follows_it_but_says_the_calibration_was_made_with_the_first(tmp_path):
+    left_handed_player(tmp_path)
+    messages = []
+    rig = live.build_live(live_args("--player", "arbert", "--hand", "right"), FakeEnv(), player_root=tmp_path,
+                          log=messages.append)
+    assert rig.vision.hand == "right"
+    assert any("left hand" in m and "calibrate_swing --player arbert --hand right" in m for m in messages)
+    same = []
+    live.build_live(live_args("--player", "arbert", "--hand", "left"), FakeEnv(), player_root=tmp_path, log=same.append)
+    assert not any("left hand" in m for m in same)                               # the same hand: nothing to say
+
+
 def test_the_hub_is_connected_with_the_configured_notify_interval_and_card(tmp_path):
     env = FakeEnv()
     live.build_live(live_args("--player", "rafae"), env, player_root=tmp_path)

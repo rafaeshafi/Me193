@@ -1,5 +1,6 @@
 """tools/calibrate_swing.py: the guided calibration, end to end on fake hardware."""
 
+import dataclasses
 import math
 
 import numpy as np
@@ -13,11 +14,14 @@ from tools import calibrate_swing as tool
 S = 1_000_000_000
 
 
-def fake_env(script):
+LEFT_CORNERS = ((-1.7, 0.7), (-0.4, 0.7), (-0.4, -0.6), (-1.7, -0.6))        # a left hand reaches to the player's left
+
+
+def fake_env(script, hand="right"):
     env = FakeEnv(hz=66.0)
     t0 = env.clock.now_ns()
     env.scenario = lambda now: (*script.accel_raw((now - t0) / S), *script.imu_raw((now - t0) / S))
-    env.make_landmarker = lambda: FakeLandmarker(lambda t_ns: script.hand_uv((t_ns - t0) / S), env.clock)
+    env.make_landmarker = lambda: FakeLandmarker(lambda t_ns: script.hand_uv((t_ns - t0) / S), env.clock, hand=hand)
     return env
 
 
@@ -219,3 +223,37 @@ def test_calibrating_on_the_hub_before_its_units_were_measured_warns_but_the_cam
     camera = fakerig.CalibrationScript(u_true=(0.8, 0.6, 0.0), camera=True)
     run_camera(tmp_path, camera_env(camera), "--no-hub")
     assert "bench_hub" not in capsys.readouterr().err
+
+
+def test_a_left_handed_player_is_calibrated_on_the_left_hand_and_it_is_saved_with_them(tmp_path):
+    env = fake_env(fakerig.CalibrationScript(hand="left", corners=LEFT_CORNERS), hand="left")
+    code = tool.run(env, args_for(tmp_path, "--hand", "left"), profile_root=tmp_path, show=lambda f: None,
+                    wait_key=lambda ms: 255, notify=lambda note: None, size=(320, 180), frame_hz=5.0)
+    assert code == 0
+    cal = profile.load("rafae", root=tmp_path)
+    assert cal.hand == "left" and cal.box.u_max < 0.0 and cal.box.u_max - cal.box.u_min > 1.0     # the box is on the player's left
+
+
+def test_a_player_calibrated_on_the_left_hand_is_followed_on_the_left_again_without_the_flag(tmp_path):
+    lefty = dataclasses.replace(profile.Calibration.default(), hand="left", calibrated=True)
+    profile.save("rafae", lefty, root=tmp_path)
+    env = fake_env(fakerig.CalibrationScript(hand="left", corners=LEFT_CORNERS), hand="left")
+    give_up = env.clock.now_ns() + 300 * S                       # following the wrong hand would wait for ever: stop it
+    code = tool.run(env, args_for(tmp_path), profile_root=tmp_path, show=lambda f: None,
+                    wait_key=lambda ms: ord("q") if env.clock.now_ns() > give_up else 255, notify=lambda note: None,
+                    size=(320, 180), frame_hz=5.0)
+    assert code == 0 and profile.load("rafae", root=tmp_path).hand == "left"
+
+
+def test_the_window_names_the_hand_it_follows_and_how_to_change_it(monkeypatch):
+    from pingpong import canvas
+
+    seen, real = [], canvas.draw_text
+    monkeypatch.setattr(canvas, "draw_text", lambda frame, text, *a, **k: (seen.append(text), real(frame, text, *a, **k))[1])
+    tool.render_frame(CalibrationFlow(gyro_per_dps=10.0, hand="left"), None, None, "", size=(1280, 720))
+    shown = " ".join(seen)
+    assert "YOUR LEFT HAND" in shown and "--hand right" in shown
+    seen.clear()
+    tool.render_frame(CalibrationFlow(gyro_per_dps=10.0), None, None, "", size=(1280, 720))
+    shown = " ".join(seen)
+    assert "YOUR RIGHT HAND" in shown and "--hand left" in shown

@@ -1,5 +1,6 @@
 """Calibration (swing axis + strengths, reach box, shoulder width) saved per player."""
 
+import dataclasses
 import json
 
 import pytest
@@ -111,3 +112,22 @@ def test_a_camera_calibration_lives_in_its_own_file_and_never_replaces_the_hub_o
 def test_a_player_with_only_a_hub_calibration_has_no_camera_calibration_yet(tmp_path):
     profile.save("rafae", sample(), root=tmp_path)
     assert profile.load("rafae", root=tmp_path, source="pose") is None
+
+
+def test_the_hand_a_player_was_calibrated_with_can_be_asked_for(tmp_path):
+    assert profile.saved_hand("arbert", root=tmp_path) is None                 # nobody yet
+    profile.save("arbert", sample(), root=tmp_path)                            # sample() is left-handed
+    assert profile.saved_hand("Arbert", root=tmp_path) == "left"
+
+
+def test_the_hand_is_remembered_from_a_camera_calibration_too_and_the_hub_one_comes_first(tmp_path):
+    profile.save("arbert", dataclasses.replace(camera_sample(), hand="left"), root=tmp_path)
+    assert profile.saved_hand("arbert", root=tmp_path) == "left"
+    profile.save("arbert", dataclasses.replace(sample(), hand="right"), root=tmp_path)
+    assert profile.saved_hand("arbert", root=tmp_path) == "right"              # the hub's calibration is the one play loads first
+
+
+def test_a_damaged_file_does_not_stop_the_hand_from_being_asked(tmp_path):
+    (tmp_path / "arbert").mkdir()
+    (tmp_path / "arbert" / "calibration.json").write_text("{not json")
+    assert profile.saved_hand("arbert", root=tmp_path) is None

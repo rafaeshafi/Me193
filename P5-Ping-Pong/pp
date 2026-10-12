@@ -40,13 +40,13 @@ case "$cmd" in
     cat <<'EOF'
 ./pp env_check [--card-color C --card-serial NNNN] [--skip camera,mqtt,hub]   first contact with the hardware
 ./pp scan_hubs                      find your hub's card colour + serial (passive BLE scan)
-./pp bench_cam                      camera: fps, tag read rate at 1.8 m, camera-vs-IMU lag, hub rate under load
+./pp bench_cam [--hand left]        camera: fps, tag read rate at 1.8 m, camera-vs-IMU lag, hub rate under load
 ./pp bench_haptics                  which motor pulses you feel + how long the IMU rings (blanking time)
 ./pp reset_hub                      free a hub still 'connected' to a dead run (~24 s ghost)
 ./pp train_spin --player NAME       teach the game your spin: 12 flat, 12 top, 12 back swings (after calibrate_swing)
 ./pp train_pose --player NAME --record   a 95 s guided take, then trains the pose model on it: pose model, filter, hand prediction
 ./pp train_pose --player NAME [--dry-run]   train on the sessions and the take already recorded (no camera needed)
-./pp calibrate_swing --player NAME  guided calibration: shoulders, reach corners, 5 soft + 5 full swings
+./pp calibrate_swing --player NAME [--hand left]  guided calibration: shoulders, reach corners, 5 soft + 5 full swings (the hand is remembered)
 ./pp watch_score [--secs N]          log what the broker holds on ME193/Rogers/# (durable evidence of the score)
 ./pp republish_best [--yes]         re-send your best value to the official topic once (dry run unless --yes)
 ./pp sim [--quality 0.4]            how the levels and swing strengths play out (no sensors)
@@ -57,7 +57,7 @@ case "$cmd" in
 ./pp lobby [--secs N]               the games friends have opened, and whether the game server can be reached (play --online)
 ./pp board deploy|test              put the score on the UNO Q's LED matrix over the USB cable (deploy: copy + start the app; test: show some scenes)
 ./pp ready                          imports + pytest + every tool --selftest (run before each block)
-./pp play [--fake|--player NAME|--level N|--mode M|--hit-mode contact|swing]   the game (live: Double Motor + camera; the hand into the ball hits, a wrist flick spins)
+./pp play [--fake|--player NAME|--hand left|--level N|--mode M|--hit-mode contact|swing]   the game (live: Double Motor + camera; the hand into the ball hits, a wrist flick spins)
 ./pp play --swing-source pose|--no-hub   the camera's hand speed detects swings (auto when the hub is < 25 Hz)
 Camera and Bluetooth tools must be run from Terminal.app, not from the Claude app.
 EOF

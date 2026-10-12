@@ -74,6 +74,8 @@ def make_parser():
     ap.add_argument("--card-color", default=None, help="Connection Card colour (default: config_local.json)")
     ap.add_argument("--card-serial", default=None, help="Connection Card serial, a 4-digit string")
     ap.add_argument("--player", default="rafae", help="player profile; 'guest' = no saved calibration, never publishes")
+    ap.add_argument("--hand", choices=("right", "left"), default=None,
+                    help="the hand that holds the hub (default: the hand the player was calibrated with; right without one)")
     ap.add_argument("--online", action="store_true", help="play a friend over the internet: open the list of their games straight away")
     ap.add_argument("--host", action="store_true", help="open a game for a friend at once (--level sets the speed, --target the points)")
     ap.add_argument("--join", metavar="CODE", default=None, help="join the game with this code at once")

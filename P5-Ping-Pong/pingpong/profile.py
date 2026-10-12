@@ -101,3 +101,16 @@ def load(name, root=None, source="imu"):
     except (ValueError, KeyError, TypeError) as exc:
         raise ValueError(f"calibration file {path} is damaged ({exc}); delete it and re-run "
                          "./pp calibrate_swing") from exc
+
+
+def saved_hand(name, root=None):
+    """The hand the player's saved calibration was made with (the hub's first, then the camera's), or None when they have
+    none yet or the file is damaged (a new calibration replaces it)."""
+    for source in ("imu", "pose"):
+        try:
+            saved = load(name, root=root, source=source)
+        except ValueError:
+            continue
+        if saved is not None:
+            return saved.hand
+    return None

@@ -79,6 +79,7 @@ not trust are reported and **not** written. Do these from Terminal.app:
 ./pp bench_haptics             # which motor pulses you feel, and how long the IMU rings after one
 ./pp calibrate_swing --player rafae   # shoulders, four reach corners, hub upright + turned side to side, 5 soft + 5 full swings (~4 minutes)
 ./pp calibrate_swing --player rafae --tilt-only   # just the paddle turning with the hub (~15 s; the rest is kept)
+./pp calibrate_swing --player arbert --hand left   # the hub in the LEFT fist: the hand is saved with the player; play, train_pose and later calibrations follow it
 ./pp train_spin --player rafae        # optional: 12 flat, 12 top, 12 back swings -> your spin model (~3 minutes)
 ./pp train_pose --player rafae --record   # optional: a 95 s guided take -> your pose model, a steadier hand (~3 minutes)
 ```
@@ -120,6 +121,7 @@ before and after the filter, so more games make the next training better. `./pp 
 ./pp play --player rafae --level 2 --mode match --target 7
 ./pp play --player rafae --learn         # the computer learns where you fail (Q-learning, kept between games)
 ./pp play --player guest                 # no saved calibration; never publishes the score
+./pp play --player guest --hand left     # a left-handed guest (a calibrated player is followed on the hand they were calibrated with)
 ./pp play --fake                         # no hardware: mouse is the paddle, SPACE/J/K swing
 ./pp play --no-publish --no-motor        # rehearse without the broker / without motor pulses
 ./pp play --player rafae --hit-mode swing      # the old game: only a swing the hub's IMU detects meets the ball
@@ -323,12 +325,13 @@ python3.12 -m venv my_env && my_env/bin/pip install -r requirements.txt
 ./pp ready                                     # imports + tests, no hardware
 ./pp scan_hubs                                 # wake the hub and read its Connection Card colour and serial
 ./pp env_check --card-color green --card-serial 0123   # camera, Bluetooth, hub rate; saves the card to config_local.json
-./pp calibrate_swing --player maya             # shoulders, reach corners, swings (a few minutes; this is what makes the hand a good paddle)
+./pp calibrate_swing --player maya             # shoulders, reach corners, swings (a few minutes; this is what makes the hand a good paddle; left-handed: add --hand left)
 ./pp play --player maya --online
 ```
 
-Their own name is the player (`--player`): it gives them their own avatar and their own calibration. Without a hub, `--no-hub`
-plays on the camera alone. **A friend's laptop never touches the score**: only the player named in `config.OWNER` (`rafae`)
+Their own name is the player (`--player`): it gives them their own avatar and their own calibration. A left-handed friend adds
+`--hand left` to `calibrate_swing` once: the hand is saved with the calibration and `play` follows it from then on (the calibration window
+says which hand it is following, and how to change it). Without a hub, `--no-hub` plays on the camera alone. **A friend's laptop never touches the score**: only the player named in `config.OWNER` (`rafae`)
 ever publishes to the score topic, so a friend running `./pp play` with their own name plays normally and nothing is sent (the title says SCORE NOT SENT), and
 nothing that happens in a game with a friend, even yours, is ever published or counted in your record or the leaderboard.
 

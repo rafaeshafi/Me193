@@ -20,7 +20,7 @@ u_of, speed_of = fakerig.wave_u, fakerig.wave_speed
 class Bench:
     """An environment, the answers the tool prompts get, and where its files go."""
 
-    def __init__(self, tmp_path, *, tau=0.10, person=True, tag_rate=1.0, imu_follows_hand=True, hz=66.0):
+    def __init__(self, tmp_path, *, tau=0.10, person=True, tag_rate=1.0, imu_follows_hand=True, hz=66.0, hand="right"):
         self.env = FakeEnv(hz=hz)
         self.held, self.prompts, self.asked = {"id": None}, [], []
         self.answers = {"hud": True, "official": False}
@@ -30,7 +30,7 @@ class Bench:
         self.env.scenario = lambda now: (0, 0, 1000, round((80.0 * speed_of(rel(now)) if imu_follows_hand
                                                             else abs(rng.normal(0, 200))) * GPD), 0, 0)
         self.env.make_landmarker = lambda: FakeLandmarker(
-            lambda t_ns: (u_of(rel(t_ns)), 0.1 * u_of(rel(t_ns))) if person else None, self.env.clock, lag_s=tau)
+            lambda t_ns: (u_of(rel(t_ns)), 0.1 * u_of(rel(t_ns))) if person else None, self.env.clock, lag_s=tau, hand=hand)
         seen = {"n": 0}
 
         def ids(t_ns):
@@ -69,6 +69,16 @@ def test_everything_passes_on_a_healthy_rig_and_the_lag_is_written_to_the_config
     assert got["camera_lag"]["status"] == "PASS" and got["camera_fps"]["status"] == "PASS"
     assert json.loads(bench.config_path.read_text())["CAMERA_LAG_S"] == pytest.approx(0.10, abs=0.015)
     assert all(got[f"tag_{i}"]["status"] == "PASS" for i in range(4))
+
+
+def test_a_left_handed_player_waves_the_hub_in_the_left_hand_and_the_lag_is_still_measured(tmp_path):
+    bench = Bench(tmp_path, hand="left")
+    _, code = bench.run(only=("wave",), hand="left")
+    assert code == 0, bench.out
+    assert json.loads(bench.config_path.read_text())["CAMERA_LAG_S"] == pytest.approx(0.10, abs=0.015)
+    wrong = Bench(tmp_path / "wrong", hand="left")                       # the right hand is not the one that waves
+    _, code = wrong.run(only=("wave",))
+    assert code != 0 and not wrong.config_path.exists()
 
 
 def test_every_card_is_asked_for_by_number_and_measured_separately(tmp_path):
@@ -190,6 +200,7 @@ def test_main_wires_the_live_window_to_the_camera_to_every_wait_and_to_the_hud_s
     seen = {}
 
     def fake_run(env, *, show, on_camera, **kw):
+        seen["hand"] = kw.get("hand")
         assert calls == []                                    # nothing on screen before the camera runs
         on_camera(vision)
         env.sleep(0.12)                                       # a wait inside a step: the window must keep drawing
@@ -200,8 +211,9 @@ def test_main_wires_the_live_window_to_the_camera_to_every_wait_and_to_the_hud_s
         return [], 0
 
     monkeypatch.setattr(bench_cam, "run", fake_run)
-    assert bench_cam.main(["--only", "fps"]) == 0
+    assert bench_cam.main(["--only", "fps", "--hand", "left"]) == 0
     assert seen["live"] >= 2 and seen["after"] == seen["live"] + 1       # live frames, then only the HUD still
+    assert seen["hand"] == "left"                                        # the hand that holds the hub is the one followed
 
 
 def test_the_selftest_is_green():
