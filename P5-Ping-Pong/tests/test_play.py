@@ -422,6 +422,12 @@ def test_the_fake_game_can_play_a_friend_too():
     assert session.online is not None and session.flow.screen == "WAIT"
 
 
+def test_a_fake_game_is_played_under_the_players_own_name_like_a_live_one():
+    for name in ("ann", "rafae"):
+        session = play.make_fake_session(play.parse_args(["--fake", "--no-intro", "--player", name]))
+        assert session.hud_state().player_name == name                  # the cards, the face-off and the results say whose game it is
+
+
 def test_two_fake_games_play_each_other_with_the_mouse_and_the_swing_keys_over_the_network():
     from pingpong import keys
     from pingpong.clock import FakeClock

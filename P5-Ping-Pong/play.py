@@ -221,9 +221,11 @@ def make_fake_session(args, clock=None, net=None):
     from pingpong import app, netlink, online
     from pingpong.clock import Clock
 
-    return app.make_session(level=args.level, mode=args.mode, target=args.target, clock=clock or Clock(), client=None,
-                            source="fake", seed=args.seed, hold_start=True, flow=make_flow(args),
-                            online=online.Online(net or netlink.Network(), name=args.player))
+    session = app.make_session(level=args.level, mode=args.mode, target=args.target, clock=clock or Clock(), client=None,
+                               source="fake", seed=args.seed, hold_start=True, flow=make_flow(args),
+                               online=online.Online(net or netlink.Network(), name=args.player))
+    session.player = args.player                                  # whose game it is, as in a live one (the cards and screens name it)
+    return session
 
 
 def run_fake(args):
