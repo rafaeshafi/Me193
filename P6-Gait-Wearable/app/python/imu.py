@@ -60,3 +60,8 @@ class Ring:
         if len(self._buf) < n:
             return None
         return list(self._buf)[-n:]
+
+    def recent(self, seconds=4.0):
+        """Up to the newest `seconds` of samples, however few have arrived (for the live trace)."""
+        n = int(round(seconds * self.rate))
+        return list(self._buf)[-n:]

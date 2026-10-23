@@ -57,3 +57,12 @@ def test_ring_sequence_wrap_and_clear_keep_counters():
     ring.clear()
     ring.push(9, [(0,) * 6])
     assert ring.dropped == 1 and ring.total == 4
+
+
+def test_ring_recent_returns_whatever_has_arrived():
+    ring = Ring(seconds=1.0, rate=10)
+    assert ring.recent(0.5) == []
+    ring.push(0, [(1, 0, 0, 0, 0, 0)] * 3)
+    assert len(ring.recent(0.5)) == 3
+    ring.push(1, [(2, 0, 0, 0, 0, 0)] * 4)
+    assert len(ring.recent(0.5)) == 5 and ring.recent(0.5)[-1][0] == 2

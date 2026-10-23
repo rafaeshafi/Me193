@@ -78,7 +78,7 @@ class Gait:
     def snapshot(self):
         """Everything the phone page shows, as plain JSON-able types."""
         with self._lock:
-            recent = self.ring.window(4.0) or []
+            recent = self.ring.recent(4.0)
         s = self.state
         real = ("---", "NO IMU")
         agree = None if s["act"] in real or s["m1"] in real else int(s["act"] == s["m1"])
