@@ -1384,7 +1384,7 @@ class Vote:
   "classes": ["BIKE", "RUN", "STAND", "WALK"],
   "note": "seed thresholds from the spec, replaced by train/train.py",
   "root": {
-    "f": "gyro_rms", "t": 15.0,
+    "f": "gyro_rms", "t": 40.0,
     "l": {"label": "STAND"},
     "r": {
       "f": "gyro_ratio", "t": 0.6,
@@ -2309,7 +2309,8 @@ function render(s) {
   drawWave(s.wave || []);
   $("prompt").textContent = s.recorder.prompt || "";
   $("rec").textContent = s.recorder.active ? `recording ${s.recorder.file} (${s.recorder.rows} rows)` : (s.imu ? "" : "no IMU data");
-  $("sessions").innerHTML = (s.sessions || []).slice().reverse().map(n => `<li><a href="/data/${encodeURIComponent(n)}">${n}</a></li>`).join("");
+  const sessionsHtml = (s.sessions || []).slice().reverse().map(n => `<li><a href="/data/${encodeURIComponent(n)}">${n}</a></li>`).join("");
+  if ($("sessions").innerHTML !== sessionsHtml) $("sessions").innerHTML = sessionsHtml;   // keep the links stable so a tap lands
   $("features").textContent = Object.entries(s.features || {}).map(([k, v]) => `${k} = ${v}`).join("\n");
 }
 let es = null;
@@ -2481,17 +2482,19 @@ serve(gait, port=8080)
 log.info("models loaded (depth %d and %d), web on 8080, data in %s", gait.m1.depth(), gait.m2.depth(), DATA)
 
 _last_payload = None
+_last_sent = 0.0
 _last_log = 0.0
 
 
 def loop():
-    global _last_payload, _last_log
+    global _last_payload, _last_sent, _last_log
     gait.tick()
     p = gait.payload()
-    if p != _last_payload:
-        _last_payload = p
+    if p != _last_payload or time.monotonic() - _last_sent > 5:   # resend so a reset MCU gets the screen back
         try:
             Bridge.call("tft", p, timeout=2)
+            _last_payload = p
+            _last_sent = time.monotonic()
         except Exception as e:  # the sketch may still be compiling or resetting; keep going
             log.warning("tft: %s", e)
     wave = gait.take_wave()
@@ -2623,6 +2626,7 @@ cd ~/ME193 && git add P6-Gait-Wearable && git commit -m "P6-Gait-Wearable: main.
 ```python
 import csv
 import json
+import math
 import random
 
 import numpy as np
@@ -2663,6 +2667,8 @@ def test_person_of_filename():
     assert person_of("20261023-120000-guided-ann.csv") == "ann"
     assert person_of("20261023-120000-walk.csv") == "me"
     assert person_of("20261023-120000-guided.csv") == "me"
+    assert person_of("20261023-120000-walk-ann-2.csv") == "ann"
+    assert person_of("20261023-120000-walk-2.csv") == "me"
 
 
 def test_export_matches_sklearn_and_round_trips(tmp_path):
@@ -2695,6 +2701,20 @@ def test_windows_do_not_straddle_a_time_gap(tmp_path):
         csv.writer(f).writerows(lines)
     labels = [lab for lab, _ in windows(p)]
     assert len(labels) == 6                                # 2 x ((300 - 200) / 50 + 1)
+
+
+def test_windows_survive_arrival_jitter(tmp_path):
+    p = tmp_path / "20261023-120000-walk.csv"
+    write_session(p, ["WALK"], seconds=30.0)
+    clean = len(list(windows(p)))
+    with open(p) as f:
+        lines = list(csv.reader(f))
+    for i, row in enumerate(lines[1:]):
+        row[0] = "%.3f" % (float(row[0]) + 0.03 * math.sin(i // 10))   # one shift per 10-row batch
+    with open(p, "w", newline="") as f:
+        csv.writer(f).writerows(lines)
+    assert clean == 57                                     # (3000 - 200) / 50 + 1
+    assert len(list(windows(p))) == clean
 ```
 
 Run: `.venv/bin/python -m pytest tests/test_train.py -q`
@@ -2716,6 +2736,7 @@ tree never sees windows from the session it is scored on; the exported trees are
 import argparse
 import csv
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -2744,10 +2765,10 @@ def load_session(path):
 
 
 def runs(rows):
-    """Split rows wherever t is not contiguous (the board clears its buffer on a FIFO reset, which shows as a jump)."""
+    """Split rows at a real break in t (FIFO overflow or re-probe, 0.8 s or more). Batches are stamped on arrival, so ordinary jitter makes t step back a few ms; that must not split."""
     run = []
     for row in rows:
-        if run and not (0 <= row[0] - run[-1][0] <= 0.15):
+        if run and not (-0.3 <= row[0] - run[-1][0] <= 0.3):
             yield run
             run = []
         run.append(row)
@@ -2772,7 +2793,8 @@ def windows(path, rate=RATE):
 
 def person_of(name):
     """<stamp>-<kind>[-<who>].csv -> who, or 'me' when there is no suffix."""
-    parts = Path(name).stem.split("-", 3)
+    stem = re.sub(r"-2$", "", Path(name).stem)      # a second take in the same second gets a -2 suffix
+    parts = stem.split("-", 3)
     return parts[3] if len(parts) >= 4 else "me"
 
 
@@ -2882,7 +2904,7 @@ if __name__ == "__main__":
 - [ ] **Step 3: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/test_train.py -q`
-Expected: `4 passed`
+Expected: `5 passed`
 
 - [ ] **Step 4: Commit**
 
@@ -3083,7 +3105,10 @@ no batches at all: check the sketch compiled (`arduino-app-cli app list` over ad
 
 The TFT shows the big word (STAND when the plate lies still, its X axis horizontal reads ~0 g so expect `pk` near 0;
 hold it X-down to read 1.0), "MODEL 1: PEAK G ONLY" caption, the sweep drawing a flat line at the 1 g mark when X points
-down, cadence `--`, peak g. Shake it along X: the sweep should show the shakes and the big word flip to WALK or RUN.
+down, cadence `--`, peak g. Swing the plate like a thigh (rotate it back and forth about an axis across the plate, a full stride per second) while
+bobbing it along X: the sweep shows the bobs, Model 1 flips to WALK or RUN from the peaks, and Model 2 flips too because it
+needs the rotation; a straight shake with no rotation moves only Model 1. Pedal it in a smooth circle lying flat and
+the big word should go BIKE while Model 1 stays STAND or WALK.
 
 - [ ] **Step 4: Phone page over the cable first (no hotspot needed)**
 
