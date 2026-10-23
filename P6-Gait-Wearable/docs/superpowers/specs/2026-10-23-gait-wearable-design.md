@@ -39,11 +39,13 @@ story for the explanation point.
 - **Strap:** two VELCRO Brand All-Purpose Elastic Straps, 27 in x 1 in (model 90441, bought). Worn on
   the right mid-thigh, front-lateral, screen facing up when the wearer looks down. Snug. A loose strap
   smears every signal.
-- **Plate:** one laser-cut 3 mm acrylic plate, about 110 x 75 mm, carrying everything. UNO Q on its four
-  mounting holes with M3 standoffs; TFT on its four 3.0 mm corner holes (pattern 87.4 x 54.4 mm, from
-  the whoop-hr measurements); MPU6050 breakout screwed flat to the plate next to the board with its X
-  axis pointing down the thigh. Two 27 x 4 mm slots, one near each end, for the straps. The plate is a
-  CadQuery script in `plate/` that exports a DXF.
+- **Plate:** one laser-cut 3 mm acrylic plate, 100 x 144 mm (`plate/plate.py`, parametric, exports the DXF and
+  checks its own clearances). TFT across the top on 25 mm M3 standoffs (its rear header housings must clear the
+  strap underneath); UNO Q below it turned 90 degrees so the USB-C faces the knee, on 10 mm standoffs; MPU6050
+  breakout right of the UNO Q near the bottom on 5 mm standoffs, pins up, long side along the thigh so its X axis
+  runs down the thigh. Two 27 x 4 mm slits per strap at the left and right edges: each strap enters through the
+  left slit, runs across the FRONT of the plate under the boards (every standoff is kept out of the 25.4 mm strap
+  band), exits through the right slit and buckles behind the thigh.
 - **Rigid IMU is non-negotiable:** screwed, not taped, so peers' data looks like the training data.
 - **Wiring:** TFT as whoop-hr: VCC 5V, LED 3V3, GND, CS D10, DC D9, RST D8, SDI D11, SCK D13, SDO
   unused. MPU6050 on the SDA/SCL header at 3V3 and GND, AD0 to GND (address 0x68). Short jumpers
@@ -59,11 +61,14 @@ Three fast jobs, no thinking. All logic lives in Python on the Linux side, like 
 
 - **IMU sampling.** Own MPU6050 driver in `sketch/src/mpu6050.{h,cpp}` over Wire (no library; the
   board cannot fetch libraries over the cable). Config: accel +-8 g (running peaks must not clip),
-  gyro +-1000 deg/s, internal DLPF 44 Hz, 100 Hz sampling from a Zephyr timer. Sample = 6 x int16 +
-  ms timestamp.
-- **Batching.** Every 100 ms the sketch calls Bridge method `imu` with 10 samples packed as bytes
-  (about 160 bytes, under the ~270-byte Bridge limit hit in whoop-hr). If the IMU is missing or fails
-  it reprobes every 2 s and sends empty batches so Python shows NO IMU instead of freezing.
+  gyro +-1000 deg/s, internal DLPF 44 Hz, 100 Hz into the chip's own FIFO, which loop() drains in one
+  burst each pass, so the sampling clock is the sensor's. Sample = 6 x int16, raw, no timestamp.
+- **Batching.** Every 10 samples (100 ms) the sketch sends `Bridge.notify("imu", bytes)`: header
+  seq, count, FIFO-reset counter, then 120 bytes of samples (123 bytes, under the ~270-byte Bridge limit
+  hit in whoop-hr). The reset counter changes after a FIFO overflow or a reprobe so Python can drop its
+  window instead of mixing two streams. If the IMU is missing or fails it reprobes every 2 s and sends
+  an empty heartbeat batch every 500 ms so Python shows NO IMU instead of freezing. The `tft` and `tfth`
+  providers are registered with `provide_safe` so they run between loop() calls, not on another thread.
 - **TFT.** Reuse `ili9341.*` and `tft_gfx.*` from whoop-hr unchanged. New `tft_ui.*` with one layout:
   big activity word (Model 2) in colour across the top; Model 1's word small beneath it, tinted green
   when the models agree and amber when they disagree; cadence and peak g on the right; a 240-column
