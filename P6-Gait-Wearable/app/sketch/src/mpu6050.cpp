@@ -44,9 +44,10 @@ bool Mpu6050::begin() {
   ok = write(kGyroConfig, 0x10) && ok;  // +-1000 deg/s
   ok = write(kAccelConfig, 0x10) && ok; // +-8 g
   ok = write(kUserCtrl, 0x04) && ok;    // FIFO reset
-  ok = write(kFifoEn, 0x78) && ok;      // gyro x y z + accel x y z into the FIFO (12 bytes per sample)
+  ok = write(kFifoEn, 0x78) && ok;      // accel x y z then gyro x y z into the FIFO (12 bytes per sample)
   ok = write(kUserCtrl, 0x40) && ok;    // FIFO enable
   present_ = ok;
+  if (ok) ++resets_;
   return ok;
 }
 
@@ -59,17 +60,15 @@ int Mpu6050::read(uint8_t* out, int maxSamples) {
   }
   int bytes = (cnt[0] << 8) | cnt[1];
   if ((status & 0x10) || bytes >= kFifoBytes - kBytesPerSample) {  // overflow: the stream is misaligned, start again
-    write(kUserCtrl, 0x04);
-    write(kUserCtrl, 0x40);
-    return 0;
+    present_ = write(kUserCtrl, 0x04) && write(kUserCtrl, 0x40);
+    ++resets_;
+    return present_ ? 0 : -1;
   }
   int n = bytes / kBytesPerSample;
   if (n > maxSamples) n = maxSamples;
-  for (int i = 0; i < n; ++i) {
-    if (!readRegs(kFifoRW, out + i * kBytesPerSample, kBytesPerSample)) {
-      present_ = false;
-      return -1;
-    }
+  if (n > 0 && !readRegs(kFifoRW, out, n * kBytesPerSample)) {  // one burst; the FIFO register auto-advances
+    present_ = false;
+    return -1;
   }
   return n;
 }

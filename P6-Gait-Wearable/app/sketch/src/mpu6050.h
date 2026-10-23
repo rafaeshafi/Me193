@@ -11,14 +11,17 @@ class Mpu6050 {
   static const int kBytesPerSample = 12;
   bool begin();                      // true when WHO_AM_I answered and the FIFO runs; false leaves present() false
   bool present() const { return present_; }
-  // Drains up to maxSamples whole samples into out (kBytesPerSample each). Returns the count, or -1 on a bus error,
-  // after which present() is false and begin() must be called again. Restarts the FIFO after an overflow (returns 0).
+  // Drains up to maxSamples whole samples into out (kBytesPerSample each) in one burst. Returns the count, or -1 on a
+  // bus error, after which present() is false and begin() must be called again. Restarts the FIFO after an overflow
+  // (returns 0). Every restart, including begin(), bumps resets(): samples before and after it are not contiguous.
   int read(uint8_t* out, int maxSamples);
+  uint8_t resets() const { return resets_; }
 
  private:
   bool write(uint8_t reg, uint8_t value);
   bool readRegs(uint8_t reg, uint8_t* buf, int len);
   bool present_ = false;
+  uint8_t resets_ = 0;
 };
 
 }  // namespace gait
