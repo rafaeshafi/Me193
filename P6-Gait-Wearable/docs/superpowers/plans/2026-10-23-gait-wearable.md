@@ -176,7 +176,7 @@ cd ~/ME193 && git add P6-Gait-Wearable && git commit -m "P6-Gait-Wearable: proje
 - Create: `plate/plate.py`
 - Output (gitignored): `plate/out/plate.dxf`, `plate/out/plate.svg`
 
-Uses the existing CAD venv `~/whoop-hr/.venv-cad/bin/python` (cadquery 2.8). Layout, looking at the plate from the front with the hip at the top: TFT (93 x 60, landscape) across the top; UNO Q (68.58 x 53.34) bottom-left; MPU6050 breakout bottom-right beside it with its X axis along the thigh. Boards sit on M3 standoffs (TFT 20 mm so its rear header housings clear, UNO Q 10 mm, MPU 5 mm), and the two elastic straps run on the FRONT face of the plate underneath the boards: each strap comes from behind the thigh, through the left slit to the front, across under the boards, out through the right slit and buckles behind. Four slits, 27 x 4 mm, one per edge per strap.
+Uses the existing CAD venv `~/whoop-hr/.venv-cad/bin/python` (cadquery 2.8). Layout, looking at the plate from the front with the hip at the top: TFT (93 x 60, landscape) across the top; UNO Q (68.58 x 53.34) bottom-left; MPU6050 breakout just right of the UNO Q, long side along the thigh so its X axis runs down the thigh, clear of the right-hand strap slit. Boards sit on M3 standoffs (TFT 20 mm so its rear header housings clear, UNO Q 10 mm, MPU 5 mm), and the two elastic straps run on the FRONT face of the plate underneath the boards: each strap comes from behind the thigh, through the left slit to the front, across under the boards, out through the right slit and buckles behind. Four slits, 27 x 4 mm, one per edge per strap.
 
 - [ ] **Step 1: Write the plate script**
 
@@ -185,7 +185,7 @@ Uses the existing CAD venv `~/whoop-hr/.venv-cad/bin/python` (cadquery 2.8). Lay
 """Laser-cut 3 mm acrylic mounting plate for the P6 gait wearable (UNO Q + 3.2" ILI9341 TFT + MPU6050) on the thigh.
 
 Front view, hip at the top (+Y), origin at the plate centre. The TFT spans the top, the UNO Q sits bottom-left and the
-MPU6050 bottom-right with its X axis along the thigh. Boards stand on M3 standoffs (TFT 20 mm so its rear header housings
+MPU6050 just right of it with its long (header) side along the thigh so its X axis runs down the thigh. Boards stand on M3 standoffs (TFT 20 mm so its rear header housings
 clear, UNO Q 10 mm, MPU 5 mm). Two 25 mm elastic straps run across the FRONT face under the boards: in through a left
 slit, out through a right slit, buckle behind the thigh. Values marked VERIFY want a caliper check before cutting.
 
@@ -220,9 +220,10 @@ class P:
     uno_holes: tuple = ((13.97, 2.54), (15.24, 50.80), (66.04, 7.62), (66.04, 35.56))
     uno_hole_d: float = 3.2
     gap: float = 8.0               # TFT bottom edge to UNO Q top edge
-    # MPU6050 GY-521 breakout, two holes along the long side (VERIFY spacing)
-    mpu_w: float = 21.0
-    mpu_h: float = 16.0
+    # MPU6050 GY-521 breakout mounted with its long (header) side along the thigh, so the printed X arrow runs down the
+    # thigh (VERIFY the arrow on your board); its two holes sit along that long side (VERIFY spacing)
+    mpu_w: float = 16.0            # across the thigh
+    mpu_h: float = 21.0            # along the thigh
     mpu_hole_dx: float = 15.5
     mpu_hole_d: float = 3.2
     # strap slits for 25.4 mm wide, ~1.5 mm thick elastic (VELCRO 90441)
@@ -236,7 +237,7 @@ def layout(p: P = P()) -> dict:
     tft_cy = p.height / 2 - p.margin - p.tft_h / 2
     uno_cx = -p.width / 2 + p.margin + p.uno_w / 2
     uno_cy = tft_cy - p.tft_h / 2 - p.gap - p.uno_h / 2
-    mpu_cx = p.width / 2 - p.margin - p.mpu_w / 2
+    mpu_cx = uno_cx + p.uno_w / 2 + 2.0 + p.mpu_w / 2   # 2 mm clear of the UNO Q, clear of the right slit
     uno_ll = (uno_cx - p.uno_w / 2, uno_cy - p.uno_h / 2)
     slit_x = p.width / 2 - p.slit_inset - p.slit_w / 2
     return {
@@ -245,7 +246,7 @@ def layout(p: P = P()) -> dict:
         "uno": (uno_cx, uno_cy),
         "uno_holes": [(uno_ll[0] + hx, uno_ll[1] + hy) for hx, hy in p.uno_holes],
         "mpu": (mpu_cx, uno_cy),
-        "mpu_holes": [(mpu_cx - p.mpu_hole_dx / 2, uno_cy), (mpu_cx + p.mpu_hole_dx / 2, uno_cy)],
+        "mpu_holes": [(mpu_cx, uno_cy - p.mpu_hole_dx / 2), (mpu_cx, uno_cy + p.mpu_hole_dx / 2)],
         "slits": [(sx * slit_x, y) for sx in (-1, 1) for y in (tft_cy, uno_cy)],
     }
 
@@ -267,6 +268,17 @@ def check(p: P, lay: dict) -> list[str]:
     for x, y in lay["slits"]:
         if abs(x) + p.slit_w / 2 > half_w - 1.5:
             problems.append(f"slit at x={x:.1f} breaks the edge")
+
+    def hits_slit(x, y, half_w_, half_h_):
+        return any(abs(x - sx) < half_w_ + p.slit_w / 2 and abs(y - sy) < half_h_ + p.slit_len / 2
+                   for sx, sy in lay["slits"])
+
+    for name, d in (("tft_holes", p.tft_hole_d), ("uno_holes", p.uno_hole_d), ("mpu_holes", p.mpu_hole_d)):
+        for x, y in lay[name]:
+            if hits_slit(x, y, d / 2 + 1.0, d / 2 + 1.0):
+                problems.append(f"{name} hole at ({x:.1f}, {y:.1f}) runs into a strap slit")
+    if hits_slit(mpu_cx, uno_cy, p.mpu_w / 2, p.mpu_h / 2):
+        problems.append("MPU6050 footprint sits over a strap slit")
     return problems
 
 
@@ -314,7 +326,7 @@ Expected: no `PROBLEM:` lines, a summary line, and `wrote .../plate/out/plate.dx
 ```bash
 qlmanage -t -s 1000 -o /tmp/claude-501 ~/ME193/P6-Gait-Wearable/plate/out/plate.svg && open /tmp/claude-501/plate.svg.png
 ```
-Check: 4 TFT holes in a rectangle across the top, 4 UNO holes bottom-left, 2 MPU holes bottom-right, 4 vertical slits near the left and right edges (two per side).
+Check: 4 TFT holes in a rectangle across the top, 4 UNO holes bottom-left, 2 MPU holes stacked vertically just right of the UNO Q, 4 vertical slits near the left and right edges (two per side).
 
 - [ ] **Step 4: Commit**
 
