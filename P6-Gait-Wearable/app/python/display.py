@@ -1,6 +1,7 @@
 """What the TFT gets: the short key=value payload (provider "tft") and waveform bytes (provider "tfth")."""
 
 WAVE_LO_G, WAVE_HI_G = -4.0, 8.0
+ACTS = ("STAND", "WALK", "RUN", "BIKE")
 
 
 def _safe(text, limit):
@@ -9,10 +10,11 @@ def _safe(text, limit):
 
 def payload(act, m1, cad, pk, prompt="", st=""):
     """Keys: act (Model 2), m1 (Model 1), agree, cad (per minute), pk (peak g), prompt (recording), st (status)."""
+    real = act in ACTS and m1 in ACTS
     pairs = [
         ("act", _safe(act, 7)),
         ("m1", _safe(m1, 7)),
-        ("agree", 1 if act == m1 else 0),
+        ("agree", (1 if act == m1 else 0) if real else "-"),
         ("cad", "--" if cad is None else int(cad)),
         ("pk", "--" if pk is None else "%.1f" % pk),
         ("prompt", _safe(prompt, 20)),

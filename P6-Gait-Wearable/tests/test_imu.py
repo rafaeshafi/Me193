@@ -55,4 +55,5 @@ def test_ring_sequence_wrap_and_clear_keep_counters():
     ring.push(2, [(0,) * 6])
     assert ring.dropped == 1
     ring.clear()
-    assert ring.dropped == 1 and ring.total == 3
+    ring.push(9, [(0,) * 6])
+    assert ring.dropped == 1 and ring.total == 4

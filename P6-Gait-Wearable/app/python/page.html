@@ -56,33 +56,48 @@ const $ = id => document.getElementById(id);
 const canvas = $("wave"), ctx = canvas.getContext("2d");
 function post(path) {
   const who = encodeURIComponent($("who").value.trim());
-  fetch(path + (path.includes("?") ? "&" : "?") + "who=" + who, {method: "POST"}).then(r => r.json()).then(render);
+  fetch(path + (path.includes("?") ? "&" : "?") + "who=" + who, {method: "POST"})
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(render)
+    .catch(e => { $("rec").textContent = "error: " + e.message; });
 }
+function sizeCanvas() {
+  canvas.width = canvas.clientWidth * devicePixelRatio; canvas.height = 160 * devicePixelRatio;
+}
+sizeCanvas(); window.addEventListener("resize", sizeCanvas);
 function drawWave(w) {
   const W = canvas.width, H = canvas.height, lo = -4, hi = 8;
   ctx.fillStyle = "#0a0a0a"; ctx.fillRect(0, 0, W, H);
   const y = g => H - 2 - (g - lo) / (hi - lo) * (H - 4);
   ctx.strokeStyle = "#333"; ctx.beginPath(); ctx.moveTo(0, y(1)); ctx.lineTo(W, y(1)); ctx.stroke();
   if (w.length < 2) return;
-  ctx.strokeStyle = "#00e6e6"; ctx.lineWidth = 2; ctx.beginPath();
+  ctx.strokeStyle = "#00e6e6"; ctx.lineWidth = 2 * devicePixelRatio; ctx.beginPath();
   w.forEach((g, i) => { const x = i / (w.length - 1) * W; i ? ctx.lineTo(x, y(g)) : ctx.moveTo(x, y(g)); });
   ctx.stroke();
 }
 function render(s) {
   const act = $("act"); act.textContent = s.act; act.className = "verdict " + s.act.replace(" ", "");
   $("m1").textContent = s.m1;
-  const same = s.act === s.m1 || s.m1 === "---";
-  $("agree").textContent = s.m1 === "---" ? "" : (same ? "agrees" : "differs"); $("agree").className = same ? "agree" : "differ";
+  const real = !["---", "NO IMU"].includes(s.act) && !["---", "NO IMU"].includes(s.m1);
+  const same = s.act === s.m1 || !real;
+  $("agree").textContent = !real ? "" : (same ? "agrees" : "differs"); $("agree").className = same ? "agree" : "differ";
   $("cad").textContent = s.cad == null ? "--" : s.cad;
   $("pk").textContent = s.pk == null ? "--" : s.pk.toFixed(1);
   drawWave(s.wave || []);
   $("prompt").textContent = s.recorder.prompt || "";
   $("rec").textContent = s.recorder.active ? `recording ${s.recorder.file} (${s.recorder.rows} rows)` : (s.imu ? "" : "no IMU data");
-  $("sessions").innerHTML = (s.sessions || []).slice().reverse().map(n => `<li><a href="/data/${n}">${n}</a></li>`).join("");
+  $("sessions").innerHTML = (s.sessions || []).slice().reverse().map(n => `<li><a href="/data/${encodeURIComponent(n)}">${n}</a></li>`).join("");
   $("features").textContent = Object.entries(s.features || {}).map(([k, v]) => `${k} = ${v}`).join("\n");
 }
-const es = new EventSource("/events");
-es.onmessage = e => render(JSON.parse(e.data));
+let es = null;
+function connect() {
+  if (es) es.close();
+  es = new EventSource("/events");
+  es.onmessage = e => render(JSON.parse(e.data));
+  es.onerror = () => { if (es.readyState === 2) setTimeout(connect, 2000); };
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && (!es || es.readyState === 2)) connect(); });
+connect();
 </script>
 </body>
 </html>

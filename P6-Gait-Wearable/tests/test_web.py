@@ -20,6 +20,7 @@ def server(tmp_path):
     s = serve(g, port=0)
     yield s, g
     s.shutdown()
+    s.server_close()
 
 
 def req(server, method, path, body=None):
@@ -28,6 +29,7 @@ def req(server, method, path, body=None):
     r = c.getresponse()
     data = r.read()
     c.close()
+    req.last_headers = dict(r.getheaders())
     return r.status, r.getheader("Content-Type", ""), data
 
 
@@ -57,6 +59,7 @@ def test_session_download_and_path_safety(server):
     s, g = server
     status, ctype, body = req(s, "GET", "/data/20261023-120000-walk.csv")
     assert status == 200 and "text/csv" in ctype and body.startswith(b"t,label")
+    assert "attachment" in req.last_headers["Content-Disposition"]
     status, _, _ = req(s, "GET", "/data/../app.yaml")
     assert status == 404
     status, _, _ = req(s, "GET", "/nope")
@@ -70,6 +73,8 @@ def test_events_stream_sends_json_frames(server):
     r = c.getresponse()
     assert r.status == 200 and "text/event-stream" in r.getheader("Content-Type")
     line = r.fp.readline()
-    assert line.startswith(b"data: ")
+    while not line.startswith(b"data: "):
+        assert line.strip() in (b"", b"retry: 2000")
+        line = r.fp.readline()
     assert json.loads(line[6:])["act"] == "---"
     c.close()

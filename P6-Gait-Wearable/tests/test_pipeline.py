@@ -97,3 +97,56 @@ def test_snapshot_is_json_friendly(tmp_path):
     snap = json.loads(json.dumps(g.snapshot()))
     assert snap["act"] == "RUN" and snap["recorder"]["active"] is False
     assert len(snap["wave"]) <= 150 and isinstance(snap["features"]["peak_x"], float)
+
+
+def test_votes_clear_after_an_imu_gap(tmp_path):
+    clk = Clock()
+    g = make(tmp_path, clk)
+    feed(g, clk, "WALK", 3.0)
+    assert g.state["act"] == "WALK"
+    clk.t += 2.0                                   # silence: NO IMU, votes dropped
+    g.tick()
+    assert g.state["act"] == "NO IMU"
+    sig = synth("BIKE", seconds=2.5)
+    for i in range(0, len(sig), 10):
+        clk.t += 0.1
+        g.on_batch(to_batch(100 + i // 10, sig[i:i + 10], resets=1))
+        g.tick()
+    assert g.state["act"] == "BIKE"               # the first classified window after the gap wins outright
+
+
+def test_no_imu_after_samples_then_silence(tmp_path):
+    clk = Clock()
+    g = make(tmp_path, clk)
+    feed(g, clk, "STAND", 2.5)
+    assert g.state["act"] == "STAND"
+    clk.t += 1.6
+    g.tick()
+    assert g.state["act"] == "NO IMU" and g.state["features"] == {}
+
+
+def test_on_batch_from_a_thread_while_ticking(tmp_path):
+    import threading
+    clk = Clock()
+    g = make(tmp_path, clk)
+    sig = synth("RUN", seconds=4.0)
+    errors = []
+
+    def feeder():
+        try:
+            for i in range(0, len(sig), 10):
+                clk.t += 0.1
+                g.on_batch(to_batch(i // 10, sig[i:i + 10]))
+        except Exception as e:  # pragma: no cover
+            errors.append(e)
+
+    th = threading.Thread(target=feeder)
+    th.start()
+    while th.is_alive():
+        g.tick()
+        snap = g.snapshot()
+        assert snap["act"] in ("---", "NO IMU", "STAND", "WALK", "RUN", "BIKE")
+    th.join()
+    assert not errors
+    g.tick()
+    assert g.state["act"] == "RUN"

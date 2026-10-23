@@ -23,9 +23,11 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def _send(self, code, ctype, body):
+    def _send(self, code, ctype, body, extra=()):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
+        for k, v in extra:
+            self.send_header(k, v)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -50,26 +52,30 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         url = urlparse(self.path)
         q = parse_qs(url.query)
-        who = clean(q.get("who", [""])[0])
-        rec = self.gait.recorder
-        if url.path == "/guided":
-            rec.start_guided(who=who)
-        elif url.path == "/record":
-            label = q.get("label", [""])[0].upper()
-            if label not in LABELS:
-                return self._json({"error": "label must be one of %s" % ", ".join(LABELS)}, 400)
-            rec.start_single(label, who=who)
-        elif url.path == "/stop":
-            rec.stop()
-        else:
-            return self._send(404, "text/plain", b"not found")
-        self._json(self.gait.snapshot())
+        try:
+            who = clean(q.get("who", [""])[0])
+            rec = self.gait.recorder
+            if url.path == "/guided":
+                rec.start_guided(who=who)
+            elif url.path == "/record":
+                label = q.get("label", [""])[0].upper()
+                if label not in LABELS:
+                    return self._json({"error": "label must be one of %s" % ", ".join(LABELS)}, 400)
+                rec.start_single(label, who=who)
+            elif url.path == "/stop":
+                rec.stop()
+            else:
+                return self._send(404, "text/plain", b"not found")
+            self._json(self.gait.snapshot())
+        except (ValueError, OSError) as e:
+            return self._json({"error": str(e)}, 400)
 
     def _file(self, name):
         path = self.gait.recorder.dir / Path(name).name
         if Path(name).name != name or not path.is_file() or path.suffix != ".csv":
             return self._send(404, "text/plain", b"not found")
-        self._send(200, "text/csv", path.read_bytes())
+        self._send(200, "text/csv", path.read_bytes(),
+                   [("Content-Disposition", 'attachment; filename="%s"' % name)])
 
     def _events(self):
         self.send_response(200)
@@ -77,11 +83,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         try:
+            self.connection.settimeout(5)
+            self.wfile.write(b"retry: 2000\n\n")
             while True:
                 self.wfile.write(("data: %s\n\n" % json.dumps(self.gait.snapshot())).encode())
                 self.wfile.flush()
                 time.sleep(EVENT_PERIOD_S)
-        except (BrokenPipeError, ConnectionResetError):
+        except OSError:  # broken pipe, reset, or a socket timeout
             pass
 
 

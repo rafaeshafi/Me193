@@ -50,8 +50,9 @@ class Ring:
         self.total += len(samples)
 
     def clear(self):
-        """Forget the buffered samples (the sensor stream restarted); counters are kept."""
+        """Forget the buffered samples and the sequence (the sensor stream restarted); counters are kept."""
         self._buf.clear()
+        self._seq = None
 
     def window(self, seconds=2.0):
         """The newest `seconds` of samples as a list, or None until that many have arrived."""

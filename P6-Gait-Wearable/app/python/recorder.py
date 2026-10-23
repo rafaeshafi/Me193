@@ -40,6 +40,7 @@ class Recorder:
         self.dir.mkdir(parents=True, exist_ok=True)
         self._clock = clock
         self._lock = threading.Lock()
+        self._sessions = None  # cached listing, cleared when a session starts or ends
         self._labels = []     # one per step, "" = unlabelled gap
         self._ends = []       # cumulative end time of each step (clock seconds)
         self._t0 = 0.0
@@ -89,6 +90,7 @@ class Recorder:
                 end += seconds
                 self._ends.append(end)
             self.rows = 0
+            self._sessions = None
 
     def _close_session(self):
         if self._file:
@@ -96,6 +98,7 @@ class Recorder:
             self._file = None
             self._writer = None
         self._labels, self._ends = [], []
+        self._sessions = None
 
     def stop(self):
         with self._lock:
@@ -187,9 +190,11 @@ class Recorder:
     def sessions(self):
         """Finished session files (not the rolling logs, not the one being written), oldest first."""
         with self._lock:
-            busy = self.path.name if self._file else None
-            return sorted(p.name for p in self.dir.glob("*.csv")
-                          if not p.name.startswith("rolling-") and p.name != busy)
+            if self._sessions is None:
+                busy = self.path.name if self._file else None
+                self._sessions = sorted(p.name for p in self.dir.glob("*.csv")
+                                        if not p.name.startswith("rolling-") and p.name != busy)
+            return list(self._sessions)
 
     def status(self):
         with self._lock:

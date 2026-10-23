@@ -5,7 +5,8 @@ def test_payload_keys_and_agreement():
     p = payload("BIKE", "STAND", cad=72, pk=1.13, prompt="BIKE 12s", st="REC")
     assert p == "act=BIKE;m1=STAND;agree=0;cad=72;pk=1.1;prompt=BIKE 12s;st=REC"
     assert "agree=1" in payload("WALK", "WALK", cad=110, pk=1.6)
-    assert payload("---", "---", cad=None, pk=None) == "act=---;m1=---;agree=1;cad=--;pk=--;prompt=;st="
+    assert payload("---", "---", cad=None, pk=None) == "act=---;m1=---;agree=-;cad=--;pk=--;prompt=;st="
+    assert "agree=-" in payload("NO IMU", "---", None, None)
 
 
 def test_payload_is_short_and_sanitised():
