@@ -1,0 +1,9 @@
+name: Gait Wearable
+icon: 🦵
+description: Thigh-worn gait identifier (stand / walk / run / bike) from an MPU6050, shown live on a 3.2" TFT. Two decision trees side by side, phone page on port 8080 for live view and labelled recording.
+
+# A list of network ports that the application exposes.
+ports: [8080]
+
+# A list of bricks used by this application.
+bricks: []
