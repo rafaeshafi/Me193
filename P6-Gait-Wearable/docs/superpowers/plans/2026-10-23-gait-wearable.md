@@ -3221,3 +3221,39 @@ cd ~/ME193 && git add P6-Gait-Wearable/docs/notion.md && git commit -m "P6-Gait-
 ```
 
 Then offer to push `main` and to paste the page into Notion through the user's Chrome.
+
+---
+
+## Revision 2 (2026-10-23): the TFT is dropped, the web page is the display
+
+The user scrapped the TFT after Task 14 (it took both power-header pins and most of the plate). Tasks 4 and 9 are
+superseded, Tasks 2, 3, 10, 12 and 15 change as below; the code blocks earlier in this file are re-synced to the
+files after each change, so later tasks read the file tree, not history.
+
+### Task 18: Sketch without the TFT
+- Delete `app/sketch/src/{ili9341,tft_gfx,tft_ui}.{h,cpp}`. `sketch.ino` keeps the MPU6050 FIFO drain, the 3-byte
+  batch header, the reset-counter flush and the 500 ms heartbeat; remove the `tft`/`tfth` providers, the buffers,
+  the mutex, `Bridge.provide` calls and the copy-out in `loop()`. `delay(5)` stays. Compile with `scripts/compile.sh`.
+
+### Task 19: Python without the TFT, longer trace on the page
+- Delete `app/python/display.py` and `tests/test_display.py`.
+- `pipeline.py`: remove `payload()`, `take_wave()`, `_wave`, `WAVE_DECIMATE`, `WAVE_MAX` and the `display` import;
+  `snapshot()["wave"]` becomes the last 4 s of thigh-axis accel (`ring.window(4.0)`), rounded to 3 dp; add
+  `snapshot()["agree"]`: `1`/`0` when both labels are real activities, else `None`. Tests: drop the wave-bytes test,
+  add `snapshot()["agree"]` assertions, keep the rest.
+- `main.py`: remove the Bridge `tft`/`tfth` calls and `_last_payload`/`_last_sent`; the loop ticks, logs every 10 s,
+  sleeps 50 ms.
+- `page.html`: use `s.agree` (null hides the word), label the trace "last 4 s", make the verdict block fill the
+  width on a phone and the page readable on a laptop (max-width 720 px, centred). Nothing else.
+- `web.py` unchanged.
+
+### Task 20: Plate without the TFT
+- `plate/plate.py`: remove every TFT parameter and hole; `height = 109`; UNO Q (turned, USB-C down) at the top under
+  the top margin; MPU6050 right of it at `mpu_y = 14`; straps at the UNO Q's hole-free middle (`uno_strap_y = 40.6`)
+  and in the band below the UNO Q (centre 4 + 12.7 mm below its bottom edge). `check()` unchanged in spirit (edge,
+  slits, strap bands). Re-run, confirm no PROBLEM lines, DXF entities, preview.
+
+### Task 15 (revised): bench
+- Wire only the MPU6050: VCC 3V3, GND, SDA, SCL header pins, AD0 to GND. Deploy; the log must show `act=STAND`
+  with the board still (after ~2.5 s), WALK/RUN when swung like a thigh and bobbed, BIKE when pedalled flat; the
+  page over `adb forward tcp:8080 tcp:8080` shows the same with the trace.

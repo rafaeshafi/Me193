@@ -1,6 +1,6 @@
 # P6 Gait Wearable: design
 
-Date: 2026-10-23. Course: ME 193 project 6. Status: approved in brainstorming, awaiting implementation plan.
+Date: 2026-10-23. Course: ME 193 project 6. Status: implemented; revised the same day to drop the TFT (see Revision 2).
 
 ## Goal
 
@@ -154,3 +154,23 @@ four activities recognised on the user, then on three peers.
 
 Hip or ankle placement, Bluetooth or a second display device, per-user calibration, anything beyond
 the four classes, on-board training.
+
+## Revision 2 (2026-10-23, user decision): no TFT, the web page is the display
+
+The 3.2" TFT is dropped: it took both power-header pins and most of the plate, and the phone page already shows
+everything. What changes:
+
+- **Display = the web page** on port 8080, reached from the phone over the hotspot or from a laptop over
+  `adb forward`. It shows the big Model 2 word coloured per class, the Model 1 word with agrees/differs, cadence,
+  peak g, a 4 s thigh-axis acceleration trace, the recording prompt and controls. It is also what the demo video
+  films.
+- **Sketch:** IMU batching only (`imu` notifications, heartbeat, reprobe). No TFT driver, no `tft`/`tfth` providers,
+  no mutex.
+- **Python:** `display.py` (payload and waveform bytes) is removed; `pipeline.Gait` keeps `on_batch`, `tick`,
+  `snapshot`; `main.py` only ticks and logs. Everything else (features, models, vote, recorder, web) is unchanged.
+- **Hardware:** UNO Q + MPU6050 on the plate; the sensor takes the 3V3 pin (or the Qwiic port). Plate 100 x 109 mm:
+  UNO Q turned 90 degrees at the top (USB-C toward the knee), MPU6050 right of it near its bottom, upper strap
+  through the UNO Q's hole-free middle, lower strap in the empty band below the UNO Q. Standoffs: UNO Q 10 mm,
+  MPU 5 mm.
+- Out of scope now: any on-body display. The UNO Q's LED matrix could later show the activity's initial with the
+  P5 `draw` provider; not built.
