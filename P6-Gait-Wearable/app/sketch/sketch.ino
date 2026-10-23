@@ -20,8 +20,7 @@ const uint32_t kProbeMs = 2000, kHeartbeatMs = 500;
 
 gait::Mpu6050 imu;
 gait::TftUi tft;
-// The providers below are registered with provide_safe, so they run between loop() calls on the same thread and these
-// buffers need no locking.
+// The providers run on the Bridge's own thread; uiLock guards the hand-over of these buffers to loop().
 static char tftPayload[256];
 static bool tftDirty = false;
 static uint8_t wave[64];
@@ -30,18 +29,25 @@ static uint8_t batch[kHeader + kBatch * gait::Mpu6050::kBytesPerSample];
 static int batched = 0;
 static uint8_t seq = 0, sentResets = 0;
 static uint32_t nextProbeMs = 0, nextHeartbeatMs = 0;
+K_MUTEX_DEFINE(uiLock);
 
 bool showTft(MsgPack::str_t payload) {
+  k_mutex_lock(&uiLock, K_FOREVER);
   strncpy(tftPayload, payload.c_str(), sizeof tftPayload - 1);
   tftPayload[sizeof tftPayload - 1] = '\0';
   tftDirty = true;
+  k_mutex_unlock(&uiLock);
   return true;
 }
 
 bool pushWave(std::vector<uint8_t> samples) {
-  int n = samples.size() > sizeof wave ? (int)sizeof wave : (int)samples.size();
-  memcpy(wave, samples.data() + (samples.size() - n), n);
-  waveCount = n;
+  k_mutex_lock(&uiLock, K_FOREVER);
+  int have = waveCount < 0 ? 0 : waveCount;
+  int room = (int)sizeof wave - have;
+  int n = (int)samples.size() < room ? (int)samples.size() : room;
+  memcpy(wave + have, samples.data() + (samples.size() - n), n);
+  waveCount = have + n;
+  k_mutex_unlock(&uiLock);
   return true;
 }
 
@@ -58,8 +64,8 @@ void flush() {
 void setup() {
   tft.begin(kTftCs, kTftDc, kTftRst);
   Bridge.begin();
-  Bridge.provide_safe("tft", showTft);
-  Bridge.provide_safe("tfth", pushWave);
+  Bridge.provide("tft", showTft);
+  Bridge.provide("tfth", pushWave);
 }
 
 void loop() {
@@ -81,15 +87,24 @@ void loop() {
     sentResets = imu.resets();
   }
   if ((int32_t)(now - nextHeartbeatMs) >= 0) flush();  // partial batch, or empty = alive but no IMU
+  static char payloadCopy[sizeof tftPayload];
+  static uint8_t waveCopy[sizeof wave];
+  bool haveText = false;
+  int haveWave = -1;
+  k_mutex_lock(&uiLock, K_FOREVER);
   if (tftDirty) {
     tftDirty = false;
-    tft.setPayload(tftPayload);
+    memcpy(payloadCopy, tftPayload, sizeof payloadCopy);
+    haveText = true;
   }
   if (waveCount >= 0) {
-    int n = waveCount;
+    haveWave = waveCount;
     waveCount = -1;
-    tft.pushWave(wave, n);
+    memcpy(waveCopy, wave, haveWave);
   }
+  k_mutex_unlock(&uiLock);
+  if (haveText) tft.setPayload(payloadCopy);
+  if (haveWave >= 0) tft.pushWave(waveCopy, haveWave);
   tft.render();
   delay(5);
 }
