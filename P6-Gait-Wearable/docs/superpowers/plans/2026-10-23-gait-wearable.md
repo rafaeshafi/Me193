@@ -547,8 +547,7 @@ const uint32_t kProbeMs = 2000, kHeartbeatMs = 500;
 
 gait::Mpu6050 imu;
 gait::TftUi tft;
-// The providers below are registered with provide_safe, so they run between loop() calls on the same thread and these
-// buffers need no locking.
+// The providers run on the Bridge's own thread; uiLock guards the hand-over of these buffers to loop().
 static char tftPayload[256];
 static bool tftDirty = false;
 static uint8_t wave[64];
@@ -557,18 +556,25 @@ static uint8_t batch[kHeader + kBatch * gait::Mpu6050::kBytesPerSample];
 static int batched = 0;
 static uint8_t seq = 0, sentResets = 0;
 static uint32_t nextProbeMs = 0, nextHeartbeatMs = 0;
+K_MUTEX_DEFINE(uiLock);
 
 bool showTft(MsgPack::str_t payload) {
+  k_mutex_lock(&uiLock, K_FOREVER);
   strncpy(tftPayload, payload.c_str(), sizeof tftPayload - 1);
   tftPayload[sizeof tftPayload - 1] = '\0';
   tftDirty = true;
+  k_mutex_unlock(&uiLock);
   return true;
 }
 
 bool pushWave(std::vector<uint8_t> samples) {
-  int n = samples.size() > sizeof wave ? (int)sizeof wave : (int)samples.size();
-  memcpy(wave, samples.data() + (samples.size() - n), n);
-  waveCount = n;
+  k_mutex_lock(&uiLock, K_FOREVER);
+  int have = waveCount < 0 ? 0 : waveCount;
+  int room = (int)sizeof wave - have;
+  int n = (int)samples.size() < room ? (int)samples.size() : room;
+  memcpy(wave + have, samples.data() + (samples.size() - n), n);
+  waveCount = have + n;
+  k_mutex_unlock(&uiLock);
   return true;
 }
 
@@ -585,8 +591,8 @@ void flush() {
 void setup() {
   tft.begin(kTftCs, kTftDc, kTftRst);
   Bridge.begin();
-  Bridge.provide_safe("tft", showTft);
-  Bridge.provide_safe("tfth", pushWave);
+  Bridge.provide("tft", showTft);
+  Bridge.provide("tfth", pushWave);
 }
 
 void loop() {
@@ -608,15 +614,24 @@ void loop() {
     sentResets = imu.resets();
   }
   if ((int32_t)(now - nextHeartbeatMs) >= 0) flush();  // partial batch, or empty = alive but no IMU
+  static char payloadCopy[sizeof tftPayload];
+  static uint8_t waveCopy[sizeof wave];
+  bool haveText = false;
+  int haveWave = -1;
+  k_mutex_lock(&uiLock, K_FOREVER);
   if (tftDirty) {
     tftDirty = false;
-    tft.setPayload(tftPayload);
+    memcpy(payloadCopy, tftPayload, sizeof payloadCopy);
+    haveText = true;
   }
   if (waveCount >= 0) {
-    int n = waveCount;
+    haveWave = waveCount;
     waveCount = -1;
-    tft.pushWave(wave, n);
+    memcpy(waveCopy, wave, haveWave);
   }
+  k_mutex_unlock(&uiLock);
+  if (haveText) tft.setPayload(payloadCopy);
+  if (haveWave >= 0) tft.pushWave(waveCopy, haveWave);
   tft.render();
   delay(5);
 }
@@ -673,7 +688,7 @@ class TftUi {
  private:
   struct Fields {
     char act[8], m1[8], cad[6], pk[6], prompt[24], st[8];
-    bool agree;
+    int agree;  // 1 agree, 0 differ, -1 neutral
   };
   static bool parse(const char* payload, Fields& out);
   static uint16_t colorFor(const char* act);
@@ -714,13 +729,11 @@ const int kOneG = 106;  // (1 g + 4) / 12 * 255
 const int kRightX = 256;
 
 bool take(const char*& p, const char* key, char* out, int cap) {
-  // copies the value of "key=" if the pair at p has that key; always advances p past the pair
-  const char* eq = strchr(p, '=');
+  // copies the value of "key=" if the pair at p has that key; always advances p past the pair, even a malformed one
   const char* end = strchr(p, ';');
-  if (!eq) return false;
   if (!end) end = p + strlen(p);
-  if (eq > end) return false;
-  bool match = (int)strlen(key) == eq - p && strncmp(p, key, eq - p) == 0;
+  const char* eq = (const char*)memchr(p, '=', end - p);
+  bool match = eq && (int)strlen(key) == eq - p && strncmp(p, key, eq - p) == 0;
   if (match && out) {
     int n = (int)(end - (eq + 1));
     if (n > cap - 1) n = cap - 1;
@@ -735,7 +748,7 @@ bool take(const char*& p, const char* key, char* out, int cap) {
 bool TftUi::parse(const char* payload, Fields& f) {
   memset(&f, 0, sizeof f);
   strcpy(f.act, "---"); strcpy(f.m1, "---"); strcpy(f.cad, "--"); strcpy(f.pk, "--");
-  f.agree = true;
+  f.agree = -1;
   const char* p = payload;
   bool any = false;
   char num[8];
@@ -746,12 +759,11 @@ bool TftUi::parse(const char* payload, Fields& f) {
         take((p = start), "prompt", f.prompt, sizeof f.prompt) || take((p = start), "st", f.st, sizeof f.st)) {
       any = true;
     } else if (take((p = start), "agree", num, sizeof num)) {
-      f.agree = atoi(num) != 0;
+      f.agree = (num[0] == '-') ? -1 : (atoi(num) != 0 ? 1 : 0);
       any = true;
     } else {
       p = start;
-      take(p, "", nullptr, 0);  // unknown key: skip the pair
-      if (p == start) break;
+      take(p, "", nullptr, 0);  // unknown or malformed pair: skip it
     }
   }
   return any;
@@ -784,8 +796,14 @@ bool TftUi::setPayload(const char* payload) {
 }
 
 void TftUi::field(int x, int y, int scale, const char* text, int maxChars, uint16_t color) {
-  lcd_.fillRect(x, y, Ili9341::textWidth(maxChars, scale) + scale, Ili9341::textHeight(scale), kBlack);
-  lcd_.drawText(x, y, text, scale, color, kBlack);
+  char buf[32];
+  int n = 0;
+  while (n < maxChars && n < (int)sizeof buf - 1 && text[n]) { buf[n] = text[n]; ++n; }
+  buf[n] = '\0';
+  lcd_.drawText(x, y, buf, scale, color, kBlack);
+  int used = n * (Ili9341::kGlyphW + 1) * scale;  // drawText paints the gap after the last glyph too
+  int box = Ili9341::textWidth(maxChars, scale) + scale;
+  if (box > used) lcd_.fillRect(x + used, y, box - used, Ili9341::textHeight(scale), kBlack);
 }
 
 void TftUi::drawStatic() {
@@ -807,7 +825,6 @@ void TftUi::pushWave(const uint8_t* samples, int count) {
     int x = kWaveX + waveCol_;
     int y = yOf(samples[i]);
     int y0 = waveLast_ < 0 ? y : yOf(waveLast_);
-    lcd_.fillRect(x, kWaveY + 1, 1, kWaveH - 2, kBlack);
     lcd_.fillRect(x, yOf(kOneG), 1, 1, brand::kTrack);
     int top = y < y0 ? y : y0;
     int h = (y > y0 ? y - y0 : y0 - y) + 1;
@@ -830,9 +847,9 @@ void TftUi::render() {
   Fields& s = shown_;
   if (full || strcmp(w.act, s.act) != 0) field(8, 4, 6, w.act, 6, colorFor(w.act));
   if (full || strcmp(w.m1, s.m1) != 0 || w.agree != s.agree) {
-    field(8, 72, 2, w.m1, 6, w.agree ? kGreen : kAmber);
-    lcd_.fillRect(90, 72, 120, 14, kBlack);
-    lcd_.drawText(90, 72, w.agree ? "AGREES" : "DIFFERS", 2, w.agree ? kGreen : kAmber, kBlack);
+    uint16_t c = w.agree < 0 ? kGrey : (w.agree ? kGreen : kAmber);
+    field(8, 72, 2, w.m1, 6, c);
+    field(90, 72, 2, w.agree < 0 ? "" : (w.agree ? "AGREES" : "DIFFERS"), 7, c);
   }
   if (full || strcmp(w.prompt, s.prompt) != 0) field(8, 92, 2, w.prompt, 20, kWhite);
   if (full || strcmp(w.cad, s.cad) != 0) field(kRightX, kWaveY + 12, 3, w.cad, 3, kWhite);
@@ -915,6 +932,18 @@ def test_ring_window_and_dropped_batches():
     assert ring.window(0.5)[-1][0] == 5
     ring.clear()                        # the sketch said the stream restarted
     assert ring.window(0.5) is None and ring.total == 13
+
+
+def test_ring_sequence_wrap_and_clear_keep_counters():
+    ring = Ring(seconds=1.0, rate=10)
+    ring.push(255, [(0,) * 6])
+    ring.push(0, [(0,) * 6])
+    assert ring.dropped == 0
+    ring.push(2, [(0,) * 6])
+    assert ring.dropped == 1
+    ring.clear()
+    ring.push(9, [(0,) * 6])
+    assert ring.dropped == 1 and ring.total == 4
 ```
 
 Run: `.venv/bin/python -m pytest tests/test_imu.py -q`
@@ -959,7 +988,7 @@ def decode(batch):
 
 
 class Ring:
-    """The last `seconds` of samples; counts batches that went missing by their sequence numbers."""
+    """The last `seconds` of samples; counts sequence-number gaps (a batch or more went missing)."""
 
     def __init__(self, seconds=5.0, rate=RATE):
         self.rate = rate
@@ -976,12 +1005,13 @@ class Ring:
         self.total += len(samples)
 
     def clear(self):
-        """Forget the buffered samples (the sensor stream restarted); counters are kept."""
+        """Forget the buffered samples and the sequence (the sensor stream restarted); counters are kept."""
         self._buf.clear()
+        self._seq = None
 
     def window(self, seconds=2.0):
         """The newest `seconds` of samples as a list, or None until that many have arrived."""
-        n = int(seconds * self.rate)
+        n = int(round(seconds * self.rate))
         if len(self._buf) < n:
             return None
         return list(self._buf)[-n:]
@@ -990,7 +1020,7 @@ class Ring:
 - [ ] **Step 3: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/test_imu.py -q`
-Expected: `4 passed`
+Expected: `5 passed`
 
 - [ ] **Step 4: Commit**
 
@@ -1020,7 +1050,8 @@ def synth(kind, seconds=2.0, rate=100, phase=0.0):
     for i in range(int(seconds * rate)):
         t = i / rate + phase
         if kind == "STAND":
-            out.append((1.0, 0.02 * math.sin(7 * t), 0.0, 1.0, -1.0, 0.5))
+            out.append((1.0 + 0.005 * math.sin(37 * t), 0.02 * math.sin(7 * t), 0.003 * math.sin(11 * t),
+                        1.0 + 0.3 * math.sin(23 * t), -1.0, 0.5))  # ~5 mg accel noise, ~1 deg/s gyro bias plus a little jitter
         elif kind == "WALK":   # 1.8 steps/s, heel strikes ~1.6 g, thigh pitching at half the step rate
             out.append((1.0 + 0.6 * math.sin(2 * math.pi * 1.8 * t), 0.1, 0.05,
                         150 * math.sin(2 * math.pi * 0.9 * t), 10.0, 5.0))
@@ -1050,7 +1081,6 @@ def test_feature_sets_and_keys():
     f = compute(synth("WALK"))
     assert MODEL1_FEATURES == ["peak_x"]
     assert set(MODEL1_FEATURES) <= set(f) and set(MODEL2_FEATURES) <= set(f)
-    assert "peak_x" not in MODEL2_FEATURES or True  # Model 2 may see it too; Model 1 sees only it
     assert all(isinstance(v, float) for v in f.values())
 
 
@@ -1064,14 +1094,17 @@ def test_peak_x_orders_stand_walk_run_and_bike_hides_among_them():
 def test_gyro_and_gravity_features_separate_bike():
     f = {k: compute(synth(k)) for k in ("STAND", "WALK", "RUN", "BIKE")}
     assert f["BIKE"]["gyro_ratio"] > 2 * max(f["STAND"]["gyro_ratio"], f["WALK"]["gyro_ratio"], f["RUN"]["gyro_ratio"])
+    assert f["STAND"]["gyro_ratio"] < 0.05
     assert f["BIKE"]["mean_y"] > 0.8 and f["WALK"]["mean_y"] < 0.3
     assert f["STAND"]["gyro_rms"] < 5 < f["WALK"]["gyro_rms"] < f["RUN"]["gyro_rms"]
 
 
-def test_dominant_frequency():
-    assert compute(synth("WALK"))["dom_freq"] == pytest.approx(1.8, abs=0.15)
-    assert compute(synth("RUN"))["dom_freq"] == pytest.approx(2.8, abs=0.15)
+def test_dominant_frequency_is_the_stride_or_pedal_rate():
+    assert compute(synth("WALK"))["dom_freq"] == pytest.approx(0.9, abs=0.15)   # thigh swings once per stride
+    assert compute(synth("RUN"))["dom_freq"] == pytest.approx(1.4, abs=0.15)
+    assert compute(synth("BIKE"))["dom_freq"] == pytest.approx(1.2, abs=0.15)  # once per pedal revolution, not doubled
     assert dominant_frequency([1.0] * 200) == 0.5  # flat signal: the lowest bin, no crash
+    assert dominant_frequency([1.0]) == 0.5        # degenerate window, no crash
 ```
 
 Run: `.venv/bin/python -m pytest tests/test_features.py -q`
@@ -1085,6 +1118,7 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'features'`
 
 Pure Python so the same file runs on the board (no numpy there) and in training on the Mac. X is the thigh axis.
 Model 1 is allowed exactly one feature, peak_x. Model 2 reads MODEL2_FEATURES.
+dom_freq is the thigh swing rate (stride or pedal cycle), not the step rate; cadence in steps/min is 2 x 60 x dom_freq for walk and run.
 """
 import math
 
@@ -1117,10 +1151,23 @@ def _percentile(v, q):
     return s[lo] + (s[hi] - s[lo]) * (k - lo)
 
 
+def _swing_axis(window):
+    """The signed gyro axis with the most movement: the thigh's flexion axis, whichever way the breakout is mounted."""
+    best, best_std = GX, -1.0
+    for axis in (GX, GY, GZ):
+        s = _std([x[axis] for x in window])
+        if s > best_std:
+            best, best_std = axis, s
+    return best
+
+
 def dominant_frequency(signal, rate=RATE):
-    """Frequency in [FREQ_LO, FREQ_HI] Hz with the most power: a direct DFT of the mean-removed, Hann-windowed signal
-    at FREQ_STEP spacing. About 36 x 200 multiply-adds for a 2 s window, a few ms in CPython."""
+    """Frequency in [FREQ_LO, FREQ_HI] Hz with the most power in a SIGNED signal: a direct DFT of the mean-removed,
+    Hann-windowed signal at FREQ_STEP spacing. Use a signed axis, not a magnitude: |x| of an oscillation doubles the
+    frequency. About 36 x 200 multiply-adds for a 2 s window, a few ms in CPython."""
     n = len(signal)
+    if n < 2:
+        return FREQ_LO
     m = _mean(signal)
     w = [(signal[i] - m) * (0.5 - 0.5 * math.cos(2 * math.pi * i / (n - 1))) for i in range(n)]
     best_f, best_p = FREQ_LO, -1.0
@@ -1142,10 +1189,15 @@ def compute(window, rate=RATE):
     ax = [s[X] for s in window]
     ay = [s[Y] for s in window]
     az = [s[Z] for s in window]
+    gx = [s[GX] for s in window]
+    gy = [s[GY] for s in window]
+    gz = [s[GZ] for s in window]
     mag = [math.sqrt(s[X] ** 2 + s[Y] ** 2 + s[Z] ** 2) for s in window]
     gyro = [math.sqrt(s[GX] ** 2 + s[GY] ** 2 + s[GZ] ** 2) for s in window]
     mag_std = _std(mag)
     gyro_rms = _rms(gyro)
+    gyro_dyn = math.sqrt(_std(gx) ** 2 + _std(gy) ** 2 + _std(gz) ** 2)  # rotation without the gyro's static bias
+    swing = [s[_swing_axis(window)] for s in window]
     return {
         "peak_x": _percentile([abs(a) for a in ax], 0.95),
         "mean_x": _mean(ax), "mean_y": _mean(ay), "mean_z": _mean(az),
@@ -1154,16 +1206,17 @@ def compute(window, rate=RATE):
         "mag_peak": max(mag),
         "gyro_rms": gyro_rms,
         "gyro_peak": max(gyro),
-        "dom_freq": dominant_frequency(mag, rate),
-        # rotation per unit of impact: large when the thigh swings without hitting anything, i.e. pedalling
-        "gyro_ratio": gyro_rms / (1000.0 * mag_std + 1.0),
+        "dom_freq": dominant_frequency(swing, rate),  # thigh swing rate: one cycle per stride or pedal revolution
+        # rotation per unit of impact: large when the thigh swings without hitting anything, i.e. pedalling.
+        # 50 mg of regularisation keeps standing (gyro noise over accel noise) near zero on real sensors.
+        "gyro_ratio": gyro_dyn / (1000.0 * mag_std + 50.0),
     }
 ```
 
 - [ ] **Step 4: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/test_features.py -q`
-Expected: `4 passed`. If `test_dominant_frequency` is off for RUN, the half-wave rectified sine puts power at 2.8 Hz and its harmonics; 2.8 must still win. If BIKE's `gyro_ratio` is not twice the others, check the synth gyro amplitudes before touching the formula.
+Expected: `4 passed`. If `dom_freq` is off, remember it is measured on the signed gyro swing axis (0.9 Hz walk, 1.4 run, 1.2 bike in the synth). If BIKE's `gyro_ratio` is not twice the others, check the synth gyro amplitudes before touching the formula.
 
 - [ ] **Step 5: Commit**
 
@@ -1512,6 +1565,7 @@ class Recorder:
         self.dir.mkdir(parents=True, exist_ok=True)
         self._clock = clock
         self._lock = threading.Lock()
+        self._sessions = None  # cached listing, cleared when a session starts or ends
         self._labels = []     # one per step, "" = unlabelled gap
         self._ends = []       # cumulative end time of each step (clock seconds)
         self._t0 = 0.0
@@ -1561,6 +1615,7 @@ class Recorder:
                 end += seconds
                 self._ends.append(end)
             self.rows = 0
+            self._sessions = None
 
     def _close_session(self):
         if self._file:
@@ -1568,6 +1623,7 @@ class Recorder:
             self._file = None
             self._writer = None
         self._labels, self._ends = [], []
+        self._sessions = None
 
     def stop(self):
         with self._lock:
@@ -1621,6 +1677,8 @@ class Recorder:
             rows = []
             for i, s in enumerate(samples):
                 ts = t - (n - 1 - i) / rate
+                if ts < self._t0:
+                    continue  # stamped before the session started
                 cur = self._step(ts)
                 if cur is None:
                     break  # past the end of the script
@@ -1644,27 +1702,34 @@ class Recorder:
     def _rotate_rolling(self, t):
         if self._rolling:
             self._rolling.close()
-        self._rolling = open(self.dir / ("rolling-%s.csv" % time.strftime("%Y%m%d-%H%M%S")), "w", newline="")
+        current = self.dir / ("rolling-%s.csv" % time.strftime("%Y%m%d-%H%M%S"))
+        self._rolling = open(current, "w", newline="")
         self._rolling_writer = csv.writer(self._rolling)
         self._rolling_writer.writerow(HEADER)
         self._rolling_t0 = t
-        for old in sorted(self.dir.glob("rolling-*.csv"))[:-ROLLING_KEEP]:
+        # prune by modification time, never the file just opened: the board's clock can come up earlier after a reboot
+        others = sorted((p for p in self.dir.glob("rolling-*.csv") if p != current), key=lambda p: p.stat().st_mtime)
+        for old in others[:-(ROLLING_KEEP - 1)] if ROLLING_KEEP > 1 else others:
             old.unlink()
 
     def sessions(self):
         """Finished session files (not the rolling logs, not the one being written), oldest first."""
         with self._lock:
-            busy = self.path.name if self._file else None
-        return sorted(p.name for p in self.dir.glob("*.csv") if not p.name.startswith("rolling-") and p.name != busy)
+            if self._sessions is None:
+                busy = self.path.name if self._file else None
+                self._sessions = sorted(p.name for p in self.dir.glob("*.csv")
+                                        if not p.name.startswith("rolling-") and p.name != busy)
+            return list(self._sessions)
 
     def status(self):
         with self._lock:
             cur = self._step(self._clock())
             active = self._file is not None
             name = self.path.name if self.path else None
-        return {"active": active, "file": name, "rows": self.rows,
+            rows, who = self.rows, self.who
+        return {"active": active, "file": name, "rows": rows,
                 "label": cur[0] if cur else None, "remaining_s": round(cur[1], 1) if cur else None,
-                "prompt": self._prompt(cur), "who": self.who}
+                "prompt": self._prompt(cur), "who": who}
 ```
 
 - [ ] **Step 3: Run tests**
@@ -1696,7 +1761,8 @@ def test_payload_keys_and_agreement():
     p = payload("BIKE", "STAND", cad=72, pk=1.13, prompt="BIKE 12s", st="REC")
     assert p == "act=BIKE;m1=STAND;agree=0;cad=72;pk=1.1;prompt=BIKE 12s;st=REC"
     assert "agree=1" in payload("WALK", "WALK", cad=110, pk=1.6)
-    assert payload("---", "---", cad=None, pk=None) == "act=---;m1=---;agree=1;cad=--;pk=--;prompt=;st="
+    assert payload("---", "---", cad=None, pk=None) == "act=---;m1=---;agree=-;cad=--;pk=--;prompt=;st="
+    assert "agree=-" in payload("NO IMU", "---", None, None)
 
 
 def test_payload_is_short_and_sanitised():
@@ -1722,6 +1788,7 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'display'`
 """What the TFT gets: the short key=value payload (provider "tft") and waveform bytes (provider "tfth")."""
 
 WAVE_LO_G, WAVE_HI_G = -4.0, 8.0
+ACTS = ("STAND", "WALK", "RUN", "BIKE")
 
 
 def _safe(text, limit):
@@ -1730,10 +1797,11 @@ def _safe(text, limit):
 
 def payload(act, m1, cad, pk, prompt="", st=""):
     """Keys: act (Model 2), m1 (Model 1), agree, cad (per minute), pk (peak g), prompt (recording), st (status)."""
+    real = act in ACTS and m1 in ACTS
     pairs = [
         ("act", _safe(act, 7)),
         ("m1", _safe(m1, 7)),
-        ("agree", 1 if act == m1 else 0),
+        ("agree", (1 if act == m1 else 0) if real else "-"),
         ("cad", "--" if cad is None else int(cad)),
         ("pk", "--" if pk is None else "%.1f" % pk),
         ("prompt", _safe(prompt, 20)),
@@ -1873,6 +1941,59 @@ def test_snapshot_is_json_friendly(tmp_path):
     snap = json.loads(json.dumps(g.snapshot()))
     assert snap["act"] == "RUN" and snap["recorder"]["active"] is False
     assert len(snap["wave"]) <= 150 and isinstance(snap["features"]["peak_x"], float)
+
+
+def test_votes_clear_after_an_imu_gap(tmp_path):
+    clk = Clock()
+    g = make(tmp_path, clk)
+    feed(g, clk, "WALK", 3.0)
+    assert g.state["act"] == "WALK"
+    clk.t += 2.0                                   # silence: NO IMU, votes dropped
+    g.tick()
+    assert g.state["act"] == "NO IMU"
+    sig = synth("BIKE", seconds=2.5)
+    for i in range(0, len(sig), 10):
+        clk.t += 0.1
+        g.on_batch(to_batch(100 + i // 10, sig[i:i + 10], resets=1))
+        g.tick()
+    assert g.state["act"] == "BIKE"               # the first classified window after the gap wins outright
+
+
+def test_no_imu_after_samples_then_silence(tmp_path):
+    clk = Clock()
+    g = make(tmp_path, clk)
+    feed(g, clk, "STAND", 2.5)
+    assert g.state["act"] == "STAND"
+    clk.t += 1.6
+    g.tick()
+    assert g.state["act"] == "NO IMU" and g.state["features"] == {}
+
+
+def test_on_batch_from_a_thread_while_ticking(tmp_path):
+    import threading
+    clk = Clock()
+    g = make(tmp_path, clk)
+    sig = synth("RUN", seconds=4.0)
+    errors = []
+
+    def feeder():
+        try:
+            for i in range(0, len(sig), 10):
+                clk.t += 0.1
+                g.on_batch(to_batch(i // 10, sig[i:i + 10]))
+        except Exception as e:  # pragma: no cover
+            errors.append(e)
+
+    th = threading.Thread(target=feeder)
+    th.start()
+    while th.is_alive():
+        g.tick()
+        snap = g.snapshot()
+        assert snap["act"] in ("---", "NO IMU", "STAND", "WALK", "RUN", "BIKE")
+    th.join()
+    assert not errors
+    g.tick()
+    assert g.state["act"] == "RUN"
 ```
 
 Run: `.venv/bin/python -m pytest tests/test_pipeline.py -q`
@@ -1894,10 +2015,10 @@ from models import Vote
 WINDOW_S = 2.0
 HOP_S = 0.5
 IMU_TIMEOUT_S = 1.5
+WAVE_MAX = 64  # the sketch's buffer
 WAVE_DECIMATE = 2  # 100 Hz samples -> 50 Hz sweep columns
-# steps (or pedal revolutions) per minute = dominant frequency of |a| x 60 x this. 1.0 assumes both heel strikes show
-# in the thigh's |a| and one bump per pedal revolution; Task 16 checks this against the recordings.
-CADENCE_MULT = {"WALK": 1.0, "RUN": 1.0, "BIKE": 1.0}
+# dom_freq is the thigh swing rate: a stride has two steps, a pedal cycle is one revolution
+CADENCE_MULT = {"WALK": 2.0, "RUN": 2.0, "BIKE": 1.0}
 
 
 class Gait:
@@ -1926,10 +2047,17 @@ class Gait:
             if samples:
                 self._last_sample_t = now
                 self.ring.push(seq, samples)
-                self.recorder.on_samples(now, samples, self.rate)
                 self._wave.extend(wave_byte(s[X]) for s in samples[::WAVE_DECIMATE])
+                del self._wave[:-WAVE_MAX]
             elif self._last_sample_t is None:
                 self._last_sample_t = -1.0  # heard the sketch, it has no IMU
+        if samples:
+            self.recorder.on_samples(now, samples, self.rate)  # the recorder has its own lock
+
+    def _set(self, **kw):
+        new = dict(self.state)
+        new.update(kw)
+        self.state = new  # readers see the old frame or the new one, never half of each
 
     def take_wave(self):
         with self._lock:
@@ -1950,16 +2078,18 @@ class Gait:
             win = self.ring.window(WINDOW_S) if imu_ok else None
             dropped = self.ring.dropped
         if not imu_ok:
-            self.state.update(act="NO IMU" if heard else "---", m1="---", cad=None, pk=None, imu=False)
+            self.vote1, self.vote2 = Vote(3), Vote(3)
+            self._set(act="NO IMU" if heard else "---", m1="---", cad=None, pk=None, features={}, imu=False)
             return True
         if win is None:
-            self.state.update(act="---", m1="---", cad=None, pk=None, imu=True)
+            self.vote1, self.vote2 = Vote(3), Vote(3)
+            self._set(act="---", m1="---", cad=None, pk=None, features={}, imu=True)
             return True
         f = compute(win, self.rate)
         a1 = self.vote1.push(self.m1.predict(f))
         a2 = self.vote2.push(self.m2.predict(f))
         cad = None if a2 == "STAND" else int(round(f["dom_freq"] * 60 * CADENCE_MULT.get(a2, 1.0)))
-        self.state.update(act=a2, m1=a1, cad=cad, pk=f["peak_x"], features=f, dropped=dropped, imu=True)
+        self._set(act=a2, m1=a1, cad=cad, pk=f["peak_x"], features=f, dropped=dropped, imu=True)
         return True
 
     def payload(self):
@@ -1981,7 +2111,7 @@ class Gait:
 - [ ] **Step 3: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/test_pipeline.py -q`
-Expected: `6 passed`. If `test_classifies_walk_then_bike` fails on cadence, print `g.state["features"]["dom_freq"]`; the WALK synth has |a| at 1.8 Hz so cad should be 108.
+Expected: `9 passed`. If `test_classifies_walk_then_bike` fails on cadence, print `g.state["features"]["dom_freq"]`; the WALK synth swings the thigh at 0.9 Hz, so cad should be 108.
 
 - [ ] **Step 4: Commit**
 
@@ -2024,6 +2154,7 @@ def server(tmp_path):
     s = serve(g, port=0)
     yield s, g
     s.shutdown()
+    s.server_close()
 
 
 def req(server, method, path, body=None):
@@ -2032,6 +2163,7 @@ def req(server, method, path, body=None):
     r = c.getresponse()
     data = r.read()
     c.close()
+    req.last_headers = dict(r.getheaders())
     return r.status, r.getheader("Content-Type", ""), data
 
 
@@ -2061,6 +2193,7 @@ def test_session_download_and_path_safety(server):
     s, g = server
     status, ctype, body = req(s, "GET", "/data/20261023-120000-walk.csv")
     assert status == 200 and "text/csv" in ctype and body.startswith(b"t,label")
+    assert "attachment" in req.last_headers["Content-Disposition"]
     status, _, _ = req(s, "GET", "/data/../app.yaml")
     assert status == 404
     status, _, _ = req(s, "GET", "/nope")
@@ -2074,7 +2207,9 @@ def test_events_stream_sends_json_frames(server):
     r = c.getresponse()
     assert r.status == 200 and "text/event-stream" in r.getheader("Content-Type")
     line = r.fp.readline()
-    assert line.startswith(b"data: ")
+    while not line.startswith(b"data: "):
+        assert line.strip() in (b"", b"retry: 2000")
+        line = r.fp.readline()
     assert json.loads(line[6:])["act"] == "---"
     c.close()
 ```
@@ -2144,33 +2279,48 @@ const $ = id => document.getElementById(id);
 const canvas = $("wave"), ctx = canvas.getContext("2d");
 function post(path) {
   const who = encodeURIComponent($("who").value.trim());
-  fetch(path + (path.includes("?") ? "&" : "?") + "who=" + who, {method: "POST"}).then(r => r.json()).then(render);
+  fetch(path + (path.includes("?") ? "&" : "?") + "who=" + who, {method: "POST"})
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(render)
+    .catch(e => { $("rec").textContent = "error: " + e.message; });
 }
+function sizeCanvas() {
+  canvas.width = canvas.clientWidth * devicePixelRatio; canvas.height = 160 * devicePixelRatio;
+}
+sizeCanvas(); window.addEventListener("resize", sizeCanvas);
 function drawWave(w) {
   const W = canvas.width, H = canvas.height, lo = -4, hi = 8;
   ctx.fillStyle = "#0a0a0a"; ctx.fillRect(0, 0, W, H);
   const y = g => H - 2 - (g - lo) / (hi - lo) * (H - 4);
   ctx.strokeStyle = "#333"; ctx.beginPath(); ctx.moveTo(0, y(1)); ctx.lineTo(W, y(1)); ctx.stroke();
   if (w.length < 2) return;
-  ctx.strokeStyle = "#00e6e6"; ctx.lineWidth = 2; ctx.beginPath();
+  ctx.strokeStyle = "#00e6e6"; ctx.lineWidth = 2 * devicePixelRatio; ctx.beginPath();
   w.forEach((g, i) => { const x = i / (w.length - 1) * W; i ? ctx.lineTo(x, y(g)) : ctx.moveTo(x, y(g)); });
   ctx.stroke();
 }
 function render(s) {
   const act = $("act"); act.textContent = s.act; act.className = "verdict " + s.act.replace(" ", "");
   $("m1").textContent = s.m1;
-  const same = s.act === s.m1 || s.m1 === "---";
-  $("agree").textContent = s.m1 === "---" ? "" : (same ? "agrees" : "differs"); $("agree").className = same ? "agree" : "differ";
+  const real = !["---", "NO IMU"].includes(s.act) && !["---", "NO IMU"].includes(s.m1);
+  const same = s.act === s.m1 || !real;
+  $("agree").textContent = !real ? "" : (same ? "agrees" : "differs"); $("agree").className = same ? "agree" : "differ";
   $("cad").textContent = s.cad == null ? "--" : s.cad;
   $("pk").textContent = s.pk == null ? "--" : s.pk.toFixed(1);
   drawWave(s.wave || []);
   $("prompt").textContent = s.recorder.prompt || "";
   $("rec").textContent = s.recorder.active ? `recording ${s.recorder.file} (${s.recorder.rows} rows)` : (s.imu ? "" : "no IMU data");
-  $("sessions").innerHTML = (s.sessions || []).slice().reverse().map(n => `<li><a href="/data/${n}">${n}</a></li>`).join("");
+  $("sessions").innerHTML = (s.sessions || []).slice().reverse().map(n => `<li><a href="/data/${encodeURIComponent(n)}">${n}</a></li>`).join("");
   $("features").textContent = Object.entries(s.features || {}).map(([k, v]) => `${k} = ${v}`).join("\n");
 }
-const es = new EventSource("/events");
-es.onmessage = e => render(JSON.parse(e.data));
+let es = null;
+function connect() {
+  if (es) es.close();
+  es = new EventSource("/events");
+  es.onmessage = e => render(JSON.parse(e.data));
+  es.onerror = () => { if (es.readyState === 2) setTimeout(connect, 2000); };
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && (!es || es.readyState === 2)) connect(); });
+connect();
 </script>
 </body>
 </html>
@@ -2205,9 +2355,11 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def _send(self, code, ctype, body):
+    def _send(self, code, ctype, body, extra=()):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
+        for k, v in extra:
+            self.send_header(k, v)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -2232,26 +2384,30 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         url = urlparse(self.path)
         q = parse_qs(url.query)
-        who = clean(q.get("who", [""])[0])
-        rec = self.gait.recorder
-        if url.path == "/guided":
-            rec.start_guided(who=who)
-        elif url.path == "/record":
-            label = q.get("label", [""])[0].upper()
-            if label not in LABELS:
-                return self._json({"error": "label must be one of %s" % ", ".join(LABELS)}, 400)
-            rec.start_single(label, who=who)
-        elif url.path == "/stop":
-            rec.stop()
-        else:
-            return self._send(404, "text/plain", b"not found")
-        self._json(self.gait.snapshot())
+        try:
+            who = clean(q.get("who", [""])[0])
+            rec = self.gait.recorder
+            if url.path == "/guided":
+                rec.start_guided(who=who)
+            elif url.path == "/record":
+                label = q.get("label", [""])[0].upper()
+                if label not in LABELS:
+                    return self._json({"error": "label must be one of %s" % ", ".join(LABELS)}, 400)
+                rec.start_single(label, who=who)
+            elif url.path == "/stop":
+                rec.stop()
+            else:
+                return self._send(404, "text/plain", b"not found")
+            self._json(self.gait.snapshot())
+        except (ValueError, OSError) as e:
+            return self._json({"error": str(e)}, 400)
 
     def _file(self, name):
         path = self.gait.recorder.dir / Path(name).name
         if Path(name).name != name or not path.is_file() or path.suffix != ".csv":
             return self._send(404, "text/plain", b"not found")
-        self._send(200, "text/csv", path.read_bytes())
+        self._send(200, "text/csv", path.read_bytes(),
+                   [("Content-Disposition", 'attachment; filename="%s"' % name)])
 
     def _events(self):
         self.send_response(200)
@@ -2259,11 +2415,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         try:
+            self.connection.settimeout(5)
+            self.wfile.write(b"retry: 2000\n\n")
             while True:
                 self.wfile.write(("data: %s\n\n" % json.dumps(self.gait.snapshot())).encode())
                 self.wfile.flush()
                 time.sleep(EVENT_PERIOD_S)
-        except (BrokenPipeError, ConnectionResetError):
+        except OSError:  # broken pipe, reset, or a socket timeout
             pass
 
 
@@ -2446,7 +2604,7 @@ Tests: `.venv/bin/python -m pytest tests -q`.
 - [ ] **Step 5: Full test run, then commit**
 
 Run: `.venv/bin/python -m pytest tests -q`
-Expected: all green (30 tests so far).
+Expected: all green (36 tests so far).
 
 ```bash
 cd ~/ME193 && git add P6-Gait-Wearable && git commit -m "P6-Gait-Wearable: main.py wires Bridge, pipeline and web; adb deploy (keeps data/, sets default app) and pull_data scripts; README"
@@ -2472,10 +2630,11 @@ import numpy as np
 from features import MODEL1_FEATURES, MODEL2_FEATURES, compute
 from models import Tree
 from synth import synth
-from train import LABELS, dataset, export_tree, fit, person_of, windows
+from train import LABELS, dataset, export_tree, fit, matrix, person_of, windows
 
 
 def write_session(path, kinds, seconds=6.0, who=""):
+    random.seed(0)
     rows = []
     t = 0.0
     for kind in kinds:
@@ -2496,6 +2655,7 @@ def test_windows_skip_mixed_and_unlabelled_chunks(tmp_path):
     write_session(p, ["WALK", "BIKE"], seconds=4.0)
     labels = [lab for lab, _ in windows(p)]
     assert set(labels) == {"WALK", "BIKE"}
+    # 400 labelled rows at a 50-row hop give (400 - 200) / 50 + 1 = 5 windows; the BIKE block starts at row 500, a hop multiple
     assert labels.count("WALK") == 5 and labels.count("BIKE") == 5   # 4 s at 2 s windows / 0.5 s hop = 5 whole windows
 
 
@@ -2510,16 +2670,31 @@ def test_export_matches_sklearn_and_round_trips(tmp_path):
         write_session(tmp_path / ("20261023-1200%02d-%s.csv" % (LABELS.index(kind), kind.lower())), [kind], seconds=8.0)
     feats, y, groups, persons = dataset(sorted(tmp_path.glob("*.csv")))
     assert set(y) == set(LABELS) and len(feats) == len(y) == len(groups) == len(persons)
-    for names, depth in ((MODEL1_FEATURES, 3), (MODEL2_FEATURES, 5)):
-        clf, X = fit(feats, y, names, depth=depth, leaf=1)
+    jittered = [{k: v * (1 + 1e-3 * ((i % 7) - 3)) for k, v in f.items()} for i, f in enumerate(feats)]
+    for names, depth, leaf in ((MODEL1_FEATURES, 3, 1), (MODEL2_FEATURES, 5, 1), (MODEL1_FEATURES, 3, 5), (MODEL2_FEATURES, 5, 5)):
+        clf, X = fit(feats, y, names, depth=depth, leaf=leaf)
         tree = Tree(export_tree(clf, names))
-        ours = [tree.predict(f) for f in feats]
-        assert ours == list(clf.predict(X))
+        for rows in (feats, jittered):
+            ours = [tree.predict(f) for f in rows]
+            assert ours == list(clf.predict(matrix(rows, names)))
         spec = json.loads(json.dumps(export_tree(clf, names)))
-        assert spec["features"] == names and set(spec["classes"]) <= set(LABELS)
+        assert spec["features"] == names and spec["classes"] == list(clf.classes_)
     # Model 2 must separate all four synthetic activities perfectly; Model 1 is allowed to miss BIKE
     clf2, X2 = fit(feats, y, MODEL2_FEATURES, depth=5, leaf=1)
     assert (clf2.predict(X2) == np.array(y)).all()
+
+
+def test_windows_do_not_straddle_a_time_gap(tmp_path):
+    p = tmp_path / "20261023-120000-walk.csv"
+    write_session(p, ["WALK"], seconds=6.0)
+    with open(p) as f:
+        lines = list(csv.reader(f))
+    for row in lines[1 + 300:]:
+        row[0] = "%.3f" % (float(row[0]) + 1.0)          # FIFO reset: t jumps 1.0 s after 3 s
+    with open(p, "w", newline="") as f:
+        csv.writer(f).writerows(lines)
+    labels = [lab for lab, _ in windows(p)]
+    assert len(labels) == 6                                # 2 x ((300 - 200) / 50 + 1)
 ```
 
 Run: `.venv/bin/python -m pytest tests/test_train.py -q`
@@ -2547,7 +2722,7 @@ from pathlib import Path
 
 import numpy as np
 from sklearn.metrics import accuracy_score, confusion_matrix
-from sklearn.model_selection import GroupShuffleSplit
+from sklearn.model_selection import LeaveOneGroupOut, cross_val_predict
 from sklearn.tree import DecisionTreeClassifier
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -2560,32 +2735,44 @@ MODELS = {"model1": (MODEL1_FEATURES, 3, 5), "model2": (MODEL2_FEATURES, 5, 5)} 
 
 
 def load_session(path):
-    """-> [(label, (ax, ay, az, gx, gy, gz)), ...] in file order."""
+    """-> [(t, label, (ax, ay, az, gx, gy, gz)), ...] in file order."""
     rows = []
     with open(path) as f:
         for r in csv.DictReader(f):
-            rows.append((r["label"], tuple(float(r[k]) for k in ("ax", "ay", "az", "gx", "gy", "gz"))))
+            rows.append((float(r["t"]), r["label"], tuple(float(r[k]) for k in ("ax", "ay", "az", "gx", "gy", "gz"))))
     return rows
+
+
+def runs(rows):
+    """Split rows wherever t is not contiguous (the board clears its buffer on a FIFO reset, which shows as a jump)."""
+    run = []
+    for row in rows:
+        if run and not (0 <= row[0] - run[-1][0] <= 0.15):
+            yield run
+            run = []
+        run.append(row)
+    if run:
+        yield run
 
 
 def windows(path, rate=RATE):
     """Yield (label, features) for every 2 s window (0.5 s hop) whose rows all carry one real label."""
-    rows = load_session(path)
     n, hop = int(WINDOW_S * rate), int(HOP_S * rate)
-    for start in range(0, len(rows) - n + 1, hop):
-        chunk = rows[start:start + n]
-        labels = {lab for lab, _ in chunk}
-        if len(labels) != 1:
-            continue
-        label = labels.pop()
-        if label not in LABELS:
-            continue
-        yield label, compute([s for _, s in chunk], rate)
+    for rows in runs(load_session(path)):
+        for start in range(0, len(rows) - n + 1, hop):
+            chunk = rows[start:start + n]
+            labels = {lab for _, lab, _ in chunk}
+            if len(labels) != 1:
+                continue
+            label = labels.pop()
+            if label not in LABELS:
+                continue
+            yield label, compute([s for _, _, s in chunk], rate)
 
 
 def person_of(name):
     """<stamp>-<kind>[-<who>].csv -> who, or 'me' when there is no suffix."""
-    parts = Path(name).stem.split("-")
+    parts = Path(name).stem.split("-", 3)
     return parts[3] if len(parts) >= 4 else "me"
 
 
@@ -2622,12 +2809,20 @@ def export_tree(clf, names):
     return {"features": list(names), "classes": [str(c) for c in clf.classes_], "root": node(0)}
 
 
+def heldout_predictions(X, y, groups, depth, leaf):
+    """Every window predicted by a tree that never saw its own session (leave-one-session-out), pooled."""
+    clf = DecisionTreeClassifier(max_depth=depth, min_samples_leaf=leaf, random_state=0)
+    return cross_val_predict(clf, X, y, groups=groups, cv=LeaveOneGroupOut())
+
+
 def report(title, y_true, y_pred):
     print("\n%s: accuracy %.1f%% on %d windows" % (title, 100 * accuracy_score(y_true, y_pred), len(y_true)))
     cm = confusion_matrix(y_true, y_pred, labels=LABELS)
     print("true \\ pred  " + "".join("%7s" % l for l in LABELS))
     for lab, row in zip(LABELS, cm):
         print("%-12s" % lab + "".join("%7d" % v for v in row))
+    recall = cm.diagonal() / np.maximum(cm.sum(1), 1)
+    print("recall  " + "  ".join("%s %.2f" % (l, r) for l, r in zip(LABELS, recall)))
 
 
 def main():
@@ -2635,23 +2830,34 @@ def main():
     ap.add_argument("--data", default=str(ROOT / "data"))
     ap.add_argument("--out", default=str(ROOT / "models"))
     ap.add_argument("--peer", action="store_true", help="also score leave-one-person-out")
+    ap.add_argument("--force", action="store_true", help="export even when some activities are missing")
     args = ap.parse_args()
     paths = sorted(p for p in Path(args.data).glob("*.csv") if not p.name.startswith("rolling-"))
     if not paths:
         print("no recordings in", args.data, "(run scripts/pull_data.sh first)")
         return 1
     feats, y, groups, persons = dataset(paths)
+    if len(y) == 0:
+        print("no labelled windows")
+        return 1
     print("%d windows from %d sessions: %s" % (len(y), len(paths), dict(Counter(y))))
     if len(set(y)) < 4:
         print("WARNING: not all four activities are recorded yet")
+        if not args.force:
+            print("refusing to overwrite the deployed models; pass --force")
+            return 1
+    Path(args.out).mkdir(parents=True, exist_ok=True)
 
     for name, (names, depth, leaf) in MODELS.items():
         X = matrix(feats, names)
         y_arr = np.array(y)
         if len(set(groups)) >= 2:
-            tr, te = next(GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=0).split(X, y_arr, groups))
-            clf = DecisionTreeClassifier(max_depth=depth, min_samples_leaf=leaf, random_state=0).fit(X[tr], y_arr[tr])
-            report("%s held-out sessions" % name, y_arr[te], clf.predict(X[te]))
+            pred = heldout_predictions(X, y_arr, groups, depth, leaf)
+            report("%s leave-one-session-out" % name, y_arr, pred)
+            heldout = accuracy_score(y_arr, pred)
+        else:
+            print("only one session: no held-out estimate")
+            heldout = None
         if args.peer and len(set(persons)) >= 2:
             ppl = np.array(persons)
             for who in sorted(set(persons)):
@@ -2662,6 +2868,7 @@ def main():
         spec = export_tree(clf, names)
         spec["trained_on_windows"] = len(y)
         spec["train_accuracy"] = round(float(accuracy_score(y, clf.predict(X))), 4)
+        spec["heldout_accuracy"] = None if heldout is None else round(float(heldout), 4)
         out = Path(args.out) / ("%s.json" % name)
         out.write_text(json.dumps(spec, indent=1))
         print("wrote", out, "(depth %d, %d leaves)" % (clf.get_depth(), clf.get_n_leaves()))
@@ -2675,7 +2882,7 @@ if __name__ == "__main__":
 - [ ] **Step 3: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/test_train.py -q`
-Expected: `3 passed`
+Expected: `4 passed`
 
 - [ ] **Step 4: Commit**
 
@@ -2729,12 +2936,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from sklearn.metrics import confusion_matrix  # noqa: E402
-from sklearn.model_selection import GroupShuffleSplit  # noqa: E402
 from sklearn.tree import DecisionTreeClassifier, plot_tree  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "train"))
-from train import LABELS, MODELS, dataset, fit, matrix  # noqa: E402
+sys.path.insert(0, str(ROOT / "app" / "python"))
+from features import MODEL2_FEATURES  # noqa: E402
+from train import LABELS, MODELS, dataset, fit, heldout_predictions, matrix  # noqa: E402
 
 COLORS = {"STAND": "#888888", "WALK": "#16a806", "RUN": "#ff7800", "BIKE": "#0093e7"}
 
@@ -2749,10 +2957,13 @@ def make_figures(paths, out_dir):
     # 1 + 2: the trees, fit on everything (what the board runs)
     for name, (names, depth, leaf) in MODELS.items():
         clf, _ = fit(feats, y, names, depth, leaf)
-        fig, ax = plt.subplots(figsize=(14 if name == "model2" else 8, 6))
+        if name == "model2":
+            clf2 = clf
+        fig, ax = plt.subplots(figsize=(max(14, 1.3 * clf.get_n_leaves()), 2 + 1.8 * clf.get_depth()))
         plot_tree(clf, feature_names=names, class_names=list(clf.classes_), filled=True, rounded=True,
-                  impurity=False, proportion=True, fontsize=9, ax=ax)
-        ax.set_title("%s: %s" % (name, "peak thigh-axis g only" if name == "model1" else "all six IMU channels"))
+                  impurity=False, proportion=False, fontsize=7, ax=ax)
+        ax.set_title("%s (tree deployed: fit on all sessions)" % name)
+        fig.text(0.01, 0.01, "class order in the boxes: " + ", ".join(clf.classes_), fontsize=7)
         p = out_dir / ("tree_%s.png" % name)
         fig.savefig(p, dpi=150, bbox_inches="tight")
         plt.close(fig)
@@ -2763,21 +2974,25 @@ def make_figures(paths, out_dir):
     for ax, (name, (names, depth, leaf)) in zip(axes, MODELS.items()):
         X = matrix(feats, names)
         if len(set(groups)) >= 2:
-            tr, te = next(GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=0).split(X, y_arr, groups))
+            pred = heldout_predictions(X, y_arr, groups, depth, leaf)
+            suffix = "leave-one-session-out"
         else:
-            tr = te = np.arange(len(y_arr))
-        clf = DecisionTreeClassifier(max_depth=depth, min_samples_leaf=leaf, random_state=0).fit(X[tr], y_arr[tr])
-        cm = confusion_matrix(y_arr[te], clf.predict(X[te]), labels=LABELS)
-        ax.imshow(cm, cmap="Blues")
+            clf = DecisionTreeClassifier(max_depth=depth, min_samples_leaf=leaf, random_state=0).fit(X, y_arr)
+            pred = clf.predict(X)
+            suffix = "(training data, one session only)"
+        cm = confusion_matrix(y_arr, pred, labels=LABELS)
+        norm = cm / np.maximum(cm.sum(1, keepdims=True), 1)
+        ax.imshow(norm, cmap="Blues", vmin=0, vmax=1)
         for i in range(4):
             for j in range(4):
-                ax.text(j, i, str(cm[i, j]), ha="center", va="center", color="black" if cm[i, j] < cm.max() / 2 else "white")
+                ax.text(j, i, "%d\n%.0f%%" % (cm[i, j], 100 * norm[i, j]), ha="center", va="center",
+                        color="black" if norm[i, j] < 0.5 else "white")
         ax.set_xticks(range(4), LABELS)
         ax.set_yticks(range(4), LABELS)
         ax.set_xlabel("predicted")
         ax.set_ylabel("true")
         acc = np.trace(cm) / max(1, cm.sum())
-        ax.set_title("%s: %.0f%% on held-out windows" % (name, 100 * acc))
+        ax.set_title("%s: %.0f%% %s" % (name, 100 * acc, suffix))
     fig.tight_layout()
     p = out_dir / "confusion.png"
     fig.savefig(p, dpi=150)
@@ -2787,20 +3002,21 @@ def make_figures(paths, out_dir):
     # 4: feature space. Left: peak_x alone (all Model 1 ever sees). Right: peak_x against gyro RMS.
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
     rng = np.random.default_rng(0)
+    root = MODEL2_FEATURES[clf2.tree_.feature[0]]
     for lab in LABELS:
         m = y_arr == lab
         px = np.array([f["peak_x"] for f, keep in zip(feats, m) if keep])
-        gr = np.array([f["gyro_rms"] for f, keep in zip(feats, m) if keep])
+        gr = np.array([f[root] for f, keep in zip(feats, m) if keep])
         if len(px) == 0:
             continue
         axes[0].scatter(px, rng.uniform(-0.3, 0.3, len(px)) + LABELS.index(lab), s=12, c=COLORS[lab], label=lab)
         axes[1].scatter(px, gr, s=12, c=COLORS[lab], label=lab)
     axes[0].set_yticks(range(4), LABELS)
     axes[0].set_xlabel("peak thigh-axis acceleration (g)")
-    axes[0].set_title("Model 1 sees only this axis")
+    axes[0].set_title("Model 1 sees only peak thigh-axis g")
     axes[1].set_xlabel("peak thigh-axis acceleration (g)")
-    axes[1].set_ylabel("gyro RMS (deg/s)")
-    axes[1].set_title("Model 2 also sees rotation: biking separates")
+    axes[1].set_ylabel(root)
+    axes[1].set_title("Model 2 also sees %s" % root)
     axes[1].legend()
     fig.tight_layout()
     p = out_dir / "features.png"
