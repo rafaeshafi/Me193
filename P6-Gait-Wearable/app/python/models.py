@@ -11,6 +11,16 @@ class Tree:
         self.features = list(spec["features"])
         self.classes = list(spec["classes"])
         self.root = spec["root"]
+        self._check(self.root)
+
+    def _check(self, node):
+        """A bad export fails at load time, not on the first window."""
+        if "label" in node:
+            return
+        if node["f"] not in self.features:
+            raise ValueError("tree splits on %r, which is not in its feature list" % node["f"])
+        self._check(node["l"])
+        self._check(node["r"])
 
     @classmethod
     def load(cls, path):

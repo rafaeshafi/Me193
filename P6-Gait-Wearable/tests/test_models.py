@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from features import compute
 from models import Tree, Vote
 from synth import synth
@@ -39,6 +41,13 @@ def test_seed_models_classify_the_synthetic_signals():
         if kind != "BIKE":
             assert m1.predict(f) == kind
     assert m1.predict(compute(synth("BIKE"))) in ("STAND", "WALK")  # the honest limitation of one feature
+
+
+def test_tree_rejects_a_split_on_an_unlisted_feature():
+    bad = {"features": ["peak_x"], "classes": ["STAND", "WALK"],
+           "root": {"f": "gyro_rms", "t": 1.0, "l": {"label": "STAND"}, "r": {"label": "WALK"}}}
+    with pytest.raises(ValueError):
+        Tree(bad)
 
 
 def test_vote_majority_and_recent_tiebreak():
