@@ -38,7 +38,7 @@ bool take(const char*& p, const char* key, char* out, int cap) {
 bool TftUi::parse(const char* payload, Fields& f) {
   memset(&f, 0, sizeof f);
   strcpy(f.act, "---"); strcpy(f.m1, "---"); strcpy(f.cad, "--"); strcpy(f.pk, "--");
-  f.agree = true;
+  f.agree = -1;
   const char* p = payload;
   bool any = false;
   char num[8];
@@ -49,7 +49,7 @@ bool TftUi::parse(const char* payload, Fields& f) {
         take((p = start), "prompt", f.prompt, sizeof f.prompt) || take((p = start), "st", f.st, sizeof f.st)) {
       any = true;
     } else if (take((p = start), "agree", num, sizeof num)) {
-      f.agree = atoi(num) != 0;
+      f.agree = (num[0] == '-') ? -1 : (atoi(num) != 0 ? 1 : 0);
       any = true;
     } else {
       p = start;
@@ -137,8 +137,9 @@ void TftUi::render() {
   Fields& s = shown_;
   if (full || strcmp(w.act, s.act) != 0) field(8, 4, 6, w.act, 6, colorFor(w.act));
   if (full || strcmp(w.m1, s.m1) != 0 || w.agree != s.agree) {
-    field(8, 72, 2, w.m1, 6, w.agree ? kGreen : kAmber);
-    field(90, 72, 2, w.agree ? "AGREES" : "DIFFERS", 7, w.agree ? kGreen : kAmber);
+    uint16_t c = w.agree < 0 ? kGrey : (w.agree ? kGreen : kAmber);
+    field(8, 72, 2, w.m1, 6, c);
+    field(90, 72, 2, w.agree < 0 ? "" : (w.agree ? "AGREES" : "DIFFERS"), 7, c);
   }
   if (full || strcmp(w.prompt, s.prompt) != 0) field(8, 92, 2, w.prompt, 20, kWhite);
   if (full || strcmp(w.cad, s.cad) != 0) field(kRightX, kWaveY + 12, 3, w.cad, 3, kWhite);

@@ -22,7 +22,7 @@ class TftUi {
  private:
   struct Fields {
     char act[8], m1[8], cad[6], pk[6], prompt[24], st[8];
-    bool agree;
+    int agree;  // 1 agree, 0 differ, -1 neutral
   };
   static bool parse(const char* payload, Fields& out);
   static uint16_t colorFor(const char* act);
