@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gait Wearable</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 16px; font-family: -apple-system, system-ui, sans-serif; background: #000; color: #eee; }
+  h1 { font-size: 18px; margin: 0 0 12px; color: #999; font-weight: 500; }
+  .verdict { font-size: 56px; font-weight: 800; letter-spacing: 2px; line-height: 1; }
+  .STAND { color: #fff; } .WALK { color: #16ec06; } .RUN { color: #ff7800; } .BIKE { color: #0093e7; } .NOIMU { color: #ff0026; }
+  .row { display: flex; gap: 16px; margin: 10px 0; flex-wrap: wrap; }
+  .card { background: #111; border-radius: 10px; padding: 10px 14px; flex: 1; min-width: 120px; }
+  .card small { display: block; color: #888; font-size: 12px; text-transform: uppercase; }
+  .card b { font-size: 24px; }
+  .agree { color: #16ec06; } .differ { color: #ffde00; }
+  canvas { width: 100%; height: 160px; background: #0a0a0a; border-radius: 10px; display: block; }
+  button { font-size: 16px; padding: 12px 14px; border: 0; border-radius: 10px; background: #0093e7; color: #fff; margin: 4px 4px 4px 0; }
+  button.stop { background: #ff0026; } button.sec { background: #333; }
+  input { font-size: 16px; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #111; color: #eee; width: 120px; }
+  #prompt { font-size: 28px; color: #fff; min-height: 34px; }
+  ul { padding-left: 18px; } a { color: #0093e7; }
+  .muted { color: #777; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Gait Wearable</h1>
+<div id="act" class="verdict">---</div>
+<div class="muted">Model 2: all six IMU channels</div>
+<div class="row">
+  <div class="card"><small>Model 1 (peak g only)</small><b id="m1">---</b> <span id="agree"></span></div>
+  <div class="card"><small>Cadence</small><b id="cad">--</b></div>
+  <div class="card"><small>Peak g</small><b id="pk">--</b></div>
+</div>
+<canvas id="wave" width="640" height="160"></canvas>
+<div class="muted">thigh-axis acceleration, last 1.5 s; line = 1 g</div>
+<div id="prompt"></div>
+<div class="row">
+  <input id="who" placeholder="who (optional)">
+  <button onclick="post('/guided')">Start guided session</button>
+</div>
+<div class="row">
+  <button class="sec" onclick="post('/record?label=STAND')">Stand</button>
+  <button class="sec" onclick="post('/record?label=WALK')">Walk</button>
+  <button class="sec" onclick="post('/record?label=RUN')">Run</button>
+  <button class="sec" onclick="post('/record?label=BIKE')">Bike</button>
+  <button class="stop" onclick="post('/stop')">Stop</button>
+</div>
+<div id="rec" class="muted"></div>
+<h1>Sessions</h1>
+<ul id="sessions"></ul>
+<details><summary class="muted">features</summary><pre id="features" class="muted"></pre></details>
+<script>
+const $ = id => document.getElementById(id);
+const canvas = $("wave"), ctx = canvas.getContext("2d");
+function post(path) {
+  const who = encodeURIComponent($("who").value.trim());
+  fetch(path + (path.includes("?") ? "&" : "?") + "who=" + who, {method: "POST"}).then(r => r.json()).then(render);
+}
+function drawWave(w) {
+  const W = canvas.width, H = canvas.height, lo = -4, hi = 8;
+  ctx.fillStyle = "#0a0a0a"; ctx.fillRect(0, 0, W, H);
+  const y = g => H - 2 - (g - lo) / (hi - lo) * (H - 4);
+  ctx.strokeStyle = "#333"; ctx.beginPath(); ctx.moveTo(0, y(1)); ctx.lineTo(W, y(1)); ctx.stroke();
+  if (w.length < 2) return;
+  ctx.strokeStyle = "#00e6e6"; ctx.lineWidth = 2; ctx.beginPath();
+  w.forEach((g, i) => { const x = i / (w.length - 1) * W; i ? ctx.lineTo(x, y(g)) : ctx.moveTo(x, y(g)); });
+  ctx.stroke();
+}
+function render(s) {
+  const act = $("act"); act.textContent = s.act; act.className = "verdict " + s.act.replace(" ", "");
+  $("m1").textContent = s.m1;
+  const same = s.act === s.m1 || s.m1 === "---";
+  $("agree").textContent = s.m1 === "---" ? "" : (same ? "agrees" : "differs"); $("agree").className = same ? "agree" : "differ";
+  $("cad").textContent = s.cad == null ? "--" : s.cad;
+  $("pk").textContent = s.pk == null ? "--" : s.pk.toFixed(1);
+  drawWave(s.wave || []);
+  $("prompt").textContent = s.recorder.prompt || "";
+  $("rec").textContent = s.recorder.active ? `recording ${s.recorder.file} (${s.recorder.rows} rows)` : (s.imu ? "" : "no IMU data");
+  $("sessions").innerHTML = (s.sessions || []).slice().reverse().map(n => `<li><a href="/data/${n}">${n}</a></li>`).join("");
+  $("features").textContent = Object.entries(s.features || {}).map(([k, v]) => `${k} = ${v}`).join("\n");
+}
+const es = new EventSource("/events");
+es.onmessage = e => render(JSON.parse(e.data));
+</script>
+</body>
+</html>
