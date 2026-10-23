@@ -1,5 +1,6 @@
 import csv
 import json
+import math
 import random
 
 import numpy as np
@@ -40,6 +41,8 @@ def test_person_of_filename():
     assert person_of("20261023-120000-guided-ann.csv") == "ann"
     assert person_of("20261023-120000-walk.csv") == "me"
     assert person_of("20261023-120000-guided.csv") == "me"
+    assert person_of("20261023-120000-walk-ann-2.csv") == "ann"
+    assert person_of("20261023-120000-walk-2.csv") == "me"
 
 
 def test_export_matches_sklearn_and_round_trips(tmp_path):
@@ -72,3 +75,17 @@ def test_windows_do_not_straddle_a_time_gap(tmp_path):
         csv.writer(f).writerows(lines)
     labels = [lab for lab, _ in windows(p)]
     assert len(labels) == 6                                # 2 x ((300 - 200) / 50 + 1)
+
+
+def test_windows_survive_arrival_jitter(tmp_path):
+    p = tmp_path / "20261023-120000-walk.csv"
+    write_session(p, ["WALK"], seconds=30.0)
+    clean = len(list(windows(p)))
+    with open(p) as f:
+        lines = list(csv.reader(f))
+    for i, row in enumerate(lines[1:]):
+        row[0] = "%.3f" % (float(row[0]) + 0.03 * math.sin(i // 10))   # one shift per 10-row batch
+    with open(p, "w", newline="") as f:
+        csv.writer(f).writerows(lines)
+    assert clean == 57                                     # (3000 - 200) / 50 + 1
+    assert len(list(windows(p))) == clean

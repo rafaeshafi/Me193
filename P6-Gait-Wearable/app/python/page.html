@@ -86,7 +86,8 @@ function render(s) {
   drawWave(s.wave || []);
   $("prompt").textContent = s.recorder.prompt || "";
   $("rec").textContent = s.recorder.active ? `recording ${s.recorder.file} (${s.recorder.rows} rows)` : (s.imu ? "" : "no IMU data");
-  $("sessions").innerHTML = (s.sessions || []).slice().reverse().map(n => `<li><a href="/data/${encodeURIComponent(n)}">${n}</a></li>`).join("");
+  const sessionsHtml = (s.sessions || []).slice().reverse().map(n => `<li><a href="/data/${encodeURIComponent(n)}">${n}</a></li>`).join("");
+  if ($("sessions").innerHTML !== sessionsHtml) $("sessions").innerHTML = sessionsHtml;   // keep the links stable so a tap lands
   $("features").textContent = Object.entries(s.features || {}).map(([k, v]) => `${k} = ${v}`).join("\n");
 }
 let es = null;

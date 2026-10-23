@@ -10,6 +10,7 @@ tree never sees windows from the session it is scored on; the exported trees are
 import argparse
 import csv
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -38,10 +39,10 @@ def load_session(path):
 
 
 def runs(rows):
-    """Split rows wherever t is not contiguous (the board clears its buffer on a FIFO reset, which shows as a jump)."""
+    """Split rows at a real break in t (FIFO overflow or re-probe, 0.8 s or more). Batches are stamped on arrival, so ordinary jitter makes t step back a few ms; that must not split."""
     run = []
     for row in rows:
-        if run and not (0 <= row[0] - run[-1][0] <= 0.15):
+        if run and not (-0.3 <= row[0] - run[-1][0] <= 0.3):
             yield run
             run = []
         run.append(row)
@@ -66,7 +67,8 @@ def windows(path, rate=RATE):
 
 def person_of(name):
     """<stamp>-<kind>[-<who>].csv -> who, or 'me' when there is no suffix."""
-    parts = Path(name).stem.split("-", 3)
+    stem = re.sub(r"-2$", "", Path(name).stem)      # a second take in the same second gets a -2 suffix
+    parts = stem.split("-", 3)
     return parts[3] if len(parts) >= 4 else "me"
 
 

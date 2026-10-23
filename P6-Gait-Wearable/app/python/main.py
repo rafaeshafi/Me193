@@ -23,17 +23,19 @@ serve(gait, port=8080)
 log.info("models loaded (depth %d and %d), web on 8080, data in %s", gait.m1.depth(), gait.m2.depth(), DATA)
 
 _last_payload = None
+_last_sent = 0.0
 _last_log = 0.0
 
 
 def loop():
-    global _last_payload, _last_log
+    global _last_payload, _last_sent, _last_log
     gait.tick()
     p = gait.payload()
-    if p != _last_payload:
-        _last_payload = p
+    if p != _last_payload or time.monotonic() - _last_sent > 5:   # resend so a reset MCU gets the screen back
         try:
             Bridge.call("tft", p, timeout=2)
+            _last_payload = p
+            _last_sent = time.monotonic()
         except Exception as e:  # the sketch may still be compiling or resetting; keep going
             log.warning("tft: %s", e)
     wave = gait.take_wave()

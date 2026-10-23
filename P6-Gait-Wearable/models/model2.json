@@ -3,7 +3,7 @@
   "classes": ["BIKE", "RUN", "STAND", "WALK"],
   "note": "seed thresholds from the spec, replaced by train/train.py",
   "root": {
-    "f": "gyro_rms", "t": 15.0,
+    "f": "gyro_rms", "t": 40.0,
     "l": {"label": "STAND"},
     "r": {
       "f": "gyro_ratio", "t": 0.6,
