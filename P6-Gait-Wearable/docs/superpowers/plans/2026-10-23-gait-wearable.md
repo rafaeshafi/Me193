@@ -1187,6 +1187,8 @@ JSON format: `{"features": [...], "classes": [...], "root": node}`; an inner nod
 import json
 from pathlib import Path
 
+import pytest
+
 from features import compute
 from models import Tree, Vote
 from synth import synth
@@ -1227,6 +1229,13 @@ def test_seed_models_classify_the_synthetic_signals():
     assert m1.predict(compute(synth("BIKE"))) in ("STAND", "WALK")  # the honest limitation of one feature
 
 
+def test_tree_rejects_a_split_on_an_unlisted_feature():
+    bad = {"features": ["peak_x"], "classes": ["STAND", "WALK"],
+           "root": {"f": "gyro_rms", "t": 1.0, "l": {"label": "STAND"}, "r": {"label": "WALK"}}}
+    with pytest.raises(ValueError):
+        Tree(bad)
+
+
 def test_vote_majority_and_recent_tiebreak():
     v = Vote(3)
     assert v.push("WALK") == "WALK"
@@ -1256,6 +1265,16 @@ class Tree:
         self.features = list(spec["features"])
         self.classes = list(spec["classes"])
         self.root = spec["root"]
+        self._check(self.root)
+
+    def _check(self, node):
+        """A bad export fails at load time, not on the first window."""
+        if "label" in node:
+            return
+        if node["f"] not in self.features:
+            raise ValueError("tree splits on %r, which is not in its feature list" % node["f"])
+        self._check(node["l"])
+        self._check(node["r"])
 
     @classmethod
     def load(cls, path):
@@ -1326,7 +1345,7 @@ class Vote:
 - [ ] **Step 4: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/test_models.py -q`
-Expected: `4 passed`. If the seed Model 2 misfires on a synthetic signal, print `compute(synth(kind))` and move the seed threshold; do not change the features.
+Expected: `5 passed`. If the seed Model 2 misfires on a synthetic signal, print `compute(synth(kind))` and move the seed threshold; do not change the features.
 
 - [ ] **Step 5: Commit**
 
@@ -1363,7 +1382,10 @@ def read(path):
         return list(csv.reader(f))
 
 
-def test_guided_script_prompts_labels_and_finishes(tmp_path):
+SAMPLE = (1.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+
+def test_guided_script_prompts_and_finishes_on_the_last_batch(tmp_path):
     clk = Clock()
     r = Recorder(tmp_path, clock=clk, rolling=False)
     assert not r.active and r.prompt() == ""
@@ -1378,7 +1400,9 @@ def test_guided_script_prompts_labels_and_finishes(tmp_path):
     assert r.prompt().startswith("WALK")
     total = sum(GAP_S + s for _, s in SCRIPT)
     clk.t = 1000.0 + total + 0.1
-    assert r.prompt() == "" and not r.active   # script over: file closed
+    assert r.prompt() == "" and r.active       # script over, but the file waits for the last batch
+    r.on_samples(clk.t, [SAMPLE] * 10, rate=100)
+    assert not r.active
 
 
 def test_samples_get_the_label_of_their_own_time(tmp_path):
@@ -1387,14 +1411,27 @@ def test_samples_get_the_label_of_their_own_time(tmp_path):
     r.start_single("WALK", seconds=10)
     # a 10-sample batch ending 45 ms after the gap ends: samples at -45..-5 ms are in the gap, 5..45 ms are WALK
     clk.t += GAP_S + 0.045
-    r.on_samples(clk.t, [(1.0, 0, 0, 0, 0, 0)] * 10, rate=100)
+    r.on_samples(clk.t, [SAMPLE] * 10, rate=100)
     rows = read(r.path)
     assert rows[0] == HEADER
     labels = [row[1] for row in rows[1:]]
-    assert labels.count("") == 5 and labels.count("WALK") == 5
-    assert labels[:5] == [""] * 5 and labels[5:] == ["WALK"] * 5
+    assert labels == [""] * 5 + ["WALK"] * 5
     assert float(rows[-1][0]) > float(rows[1][0])
     assert r.rows == 10
+
+
+def test_status_ahead_of_the_samples_does_not_move_the_labels(tmp_path):
+    clk = Clock()
+    r = Recorder(tmp_path, clock=clk, rolling=False)
+    r.start_single("WALK", seconds=10)
+    clk.t += GAP_S + 0.05                          # the clock is 50 ms into WALK
+    assert r.status()["label"] == "WALK"           # the phone page asks first...
+    r.on_samples(clk.t - 0.1, [SAMPLE] * 10, rate=100)   # ...then the batch that ended inside the gap arrives
+    assert [row[1] for row in read(r.path)[1:]] == [""] * 10
+    clk.t = 1000.0 + GAP_S + 10 + 1.0              # a second past the end
+    assert r.prompt() == "" and r.status()["active"] and r.active
+    r.on_samples(clk.t, [SAMPLE] * 10, rate=100)   # nothing to write, closes the file
+    assert not r.active and r.rows == 10 and r.sessions() == [r.path.name]
 
 
 def test_single_rejects_unknown_label_and_stop_closes(tmp_path):
@@ -1405,21 +1442,25 @@ def test_single_rejects_unknown_label_and_stop_closes(tmp_path):
     except ValueError:
         pass
     r.start_single("RUN")
-    assert r.active
+    assert r.active and r.sessions() == []           # the file being written is not offered
     r.stop()
     assert not r.active and r.sessions() == [r.path.name]
 
 
-def test_rolling_log_always_writes_unlabelled_rows(tmp_path):
+def test_rolling_log_runs_only_while_idle(tmp_path):
     clk = Clock()
     r = Recorder(tmp_path, clock=clk, rolling=True)
-    r.on_samples(clk.t, [(1.0, 0, 0, 0, 0, 0)] * 3, rate=100)
+    r.on_samples(clk.t, [SAMPLE] * 3, rate=100)
     files = list(tmp_path.glob("rolling-*.csv"))
     assert len(files) == 1
+    r.start_single("STAND")
+    clk.t += 1.0
+    r.on_samples(clk.t, [SAMPLE] * 3, rate=100)      # goes to the session, not the rolling log
+    r.stop()
     r.close()
     rows = read(files[0])
     assert len(rows) == 4 and rows[1][1] == "-"
-    assert r.sessions() == []                  # rolling logs are not sessions
+    assert r.sessions() == [r.path.name]             # rolling logs are not sessions
 ```
 
 Run: `.venv/bin/python -m pytest tests/test_recorder.py -q`
@@ -1429,15 +1470,23 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'recorder'`
 
 `app/python/recorder.py`:
 ```python
-"""Labelled CSV recording on the board: the guided script, single-activity takes, and an always-on unlabelled rolling log.
+"""Labelled CSV recording on the board: the guided script, single-activity takes, and an unlabelled rolling log.
 
 Rows are raw 100 Hz samples, not features, so features can change later without re-recording.
 CSV columns: t (seconds since the session started), label ("" during a get-ready gap, "-" in the rolling log),
 ax ay az (g), gx gy gz (deg/s). Files: <YYYYmmdd-HHMMSS>-guided[-who].csv, <stamp>-walk[-who].csv, rolling-<stamp>.csv.
+
+Threads: on_samples() runs on the Bridge thread at 10 Hz; start/stop/status come from the web and main threads, so
+every public method takes the lock. The script's position is a pure function of time (bisect over the step ends):
+asking for the prompt never moves it, and only on_samples() closes a finished session, after writing its last rows.
+`t` values are seconds on the same monotonic clock the samples are stamped with. The rolling log runs only while no
+session is active, starts a new file every hour and keeps the last two.
 """
+import bisect
 import csv
 import math
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -1445,11 +1494,16 @@ LABELS = ("STAND", "WALK", "RUN", "BIKE")
 SCRIPT = [("STAND", 20), ("WALK", 30), ("RUN", 30), ("BIKE", 30)]
 GAP_S = 5
 HEADER = ["t", "label", "ax", "ay", "az", "gx", "gy", "gz"]
-ROLLING_MAX_S = 3600  # the rolling log stops after an hour so a forgotten board does not fill the disk
+ROLLING_ROTATE_S = 3600
+ROLLING_KEEP = 2
 
 
 def clean(who):
     return re.sub(r"[^A-Za-z0-9_-]", "", who or "")[:16]
+
+
+def _row(t, label, sample):
+    return ["%.3f" % t, label] + ["%.4f" % v for v in sample]
 
 
 class Recorder:
@@ -1457,22 +1511,19 @@ class Recorder:
         self.dir = Path(data_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self._clock = clock
-        self._steps = []          # [(label, seconds)], label "" = unlabelled gap
+        self._lock = threading.Lock()
+        self._labels = []     # one per step, "" = unlabelled gap
+        self._ends = []       # cumulative end time of each step (clock seconds)
         self._t0 = 0.0
-        self._step_end = 0.0
         self._file = None
         self._writer = None
         self.path = None
         self.rows = 0
         self.who = ""
+        self._rolling_on = rolling
         self._rolling = None
-        self._rolling_t0 = self._clock()
-        if rolling:
-            stamp = time.strftime("%Y%m%d-%H%M%S")
-            self._rolling_path = self.dir / ("rolling-%s.csv" % stamp)
-            self._rolling = open(self._rolling_path, "w", newline="")
-            self._rolling_writer = csv.writer(self._rolling)
-            self._rolling_writer.writerow(HEADER)
+        self._rolling_writer = None
+        self._rolling_t0 = 0.0
 
     # --- starting and stopping ---------------------------------------------------------------------------
     def start_guided(self, who=""):
@@ -1488,54 +1539,71 @@ class Recorder:
         self._start([("", GAP_S), (label, seconds)], who, label.lower())
 
     def _start(self, steps, who, kind):
-        self.stop()
-        self.who = clean(who)
-        stamp = time.strftime("%Y%m%d-%H%M%S")
-        name = "%s-%s%s.csv" % (stamp, kind, "-" + self.who if self.who else "")
-        self.path = self.dir / name
-        self._file = open(self.path, "w", newline="")
-        self._writer = csv.writer(self._file)
-        self._writer.writerow(HEADER)
-        self._steps = list(steps)
-        self._t0 = self._clock()
-        self._step_end = self._t0 + self._steps[0][1]
-        self.rows = 0
+        with self._lock:
+            self._close_session()
+            self.who = clean(who)
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            base = "%s-%s%s" % (stamp, kind, "-" + self.who if self.who else "")
+            path = self.dir / (base + ".csv")
+            try:
+                f = open(path, "x", newline="")
+            except FileExistsError:  # two takes within one second
+                path = self.dir / (base + "-2.csv")
+                f = open(path, "x", newline="")
+            self._file, self.path = f, path
+            self._writer = csv.writer(f)
+            self._writer.writerow(HEADER)
+            self._t0 = self._clock()
+            self._labels = [label for label, _ in steps]
+            self._ends = []
+            end = self._t0
+            for _, seconds in steps:
+                end += seconds
+                self._ends.append(end)
+            self.rows = 0
 
-    def stop(self):
+    def _close_session(self):
         if self._file:
             self._file.close()
             self._file = None
             self._writer = None
-        self._steps = []
+        self._labels, self._ends = [], []
+
+    def stop(self):
+        with self._lock:
+            self._close_session()
 
     def close(self):
         """Stop everything, including the rolling log (shutdown)."""
-        self.stop()
-        if self._rolling:
-            self._rolling.close()
-            self._rolling = None
+        with self._lock:
+            self._close_session()
+            if self._rolling:
+                self._rolling.close()
+                self._rolling = None
 
     @property
     def active(self):
         return self._file is not None
 
-    # --- the script ----------------------------------------------------------------------------------------
+    # --- the script, read-only -----------------------------------------------------------------------------
+    def _step(self, now):
+        """-> (label, remaining_s) of the step active at `now`, or None when idle or past the end. Never mutates."""
+        if not self._ends:
+            return None
+        i = bisect.bisect_right(self._ends, now)
+        if i >= len(self._ends):
+            return None
+        return self._labels[i], self._ends[i] - now
+
     def current(self, now=None):
-        """-> (label, remaining_s) of the step active at `now`, or None when idle. Advances the script."""
-        if not self.active:
-            return None
-        now = self._clock() if now is None else now
-        while self._steps and now >= self._step_end:
-            self._steps.pop(0)
-            if self._steps:
-                self._step_end += self._steps[0][1]
-        if not self._steps:
-            self.stop()
-            return None
-        return self._steps[0][0], self._step_end - now
+        with self._lock:
+            return self._step(self._clock() if now is None else now)
 
     def prompt(self, now=None):
-        cur = self.current(now)
+        return self._prompt(self.current(now))
+
+    @staticmethod
+    def _prompt(cur):
         if cur is None:
             return ""
         label, remaining = cur
@@ -1543,42 +1611,66 @@ class Recorder:
 
     # --- data ------------------------------------------------------------------------------------------------
     def on_samples(self, t, samples, rate=100):
-        """Write a batch; `t` is the clock time of the LAST sample, earlier ones are spaced 1/rate before it."""
+        """Write a batch; `t` is the clock time of the LAST sample, earlier ones are spaced 1/rate before it.
+        Closes the session once the batch reaches the end of the script; feeds the rolling log while idle."""
         n = len(samples)
-        if self._rolling:
-            if t - self._rolling_t0 > ROLLING_MAX_S:
-                self._rolling.close()
-                self._rolling = None
-            else:
-                for i, s in enumerate(samples):
-                    ts = t - (n - 1 - i) / rate
-                    self._rolling_writer.writerow(["%.3f" % (ts - self._rolling_t0), "-"] + ["%.4f" % v for v in s])
-        if not self.active:
-            return
-        for i, s in enumerate(samples):
-            ts = t - (n - 1 - i) / rate
-            cur = self.current(ts)
-            if cur is None:
+        with self._lock:
+            if self._file is None:
+                self._rolling_write(t, samples, rate)
                 return
-            self._writer.writerow(["%.3f" % (ts - self._t0), cur[0]] + ["%.4f" % v for v in s])
-            self.rows += 1
-        self._file.flush()
+            rows = []
+            for i, s in enumerate(samples):
+                ts = t - (n - 1 - i) / rate
+                cur = self._step(ts)
+                if cur is None:
+                    break  # past the end of the script
+                rows.append(_row(ts - self._t0, cur[0], s))
+            self._writer.writerows(rows)
+            self.rows += len(rows)
+            self._file.flush()
+            if t >= self._ends[-1]:
+                self._close_session()
+
+    def _rolling_write(self, t, samples, rate):
+        if not self._rolling_on:
+            return
+        if self._rolling is None or t - self._rolling_t0 > ROLLING_ROTATE_S:
+            self._rotate_rolling(t)
+        n = len(samples)
+        self._rolling_writer.writerows(_row(t - (n - 1 - i) / rate - self._rolling_t0, "-", s)
+                                       for i, s in enumerate(samples))
+        self._rolling.flush()
+
+    def _rotate_rolling(self, t):
+        if self._rolling:
+            self._rolling.close()
+        self._rolling = open(self.dir / ("rolling-%s.csv" % time.strftime("%Y%m%d-%H%M%S")), "w", newline="")
+        self._rolling_writer = csv.writer(self._rolling)
+        self._rolling_writer.writerow(HEADER)
+        self._rolling_t0 = t
+        for old in sorted(self.dir.glob("rolling-*.csv"))[:-ROLLING_KEEP]:
+            old.unlink()
 
     def sessions(self):
-        """Recorded session files (not the rolling logs), oldest first."""
-        return sorted(p.name for p in self.dir.glob("*.csv") if not p.name.startswith("rolling-"))
+        """Finished session files (not the rolling logs, not the one being written), oldest first."""
+        with self._lock:
+            busy = self.path.name if self._file else None
+        return sorted(p.name for p in self.dir.glob("*.csv") if not p.name.startswith("rolling-") and p.name != busy)
 
     def status(self):
-        cur = self.current()
-        return {"active": self.active, "file": self.path.name if self.path else None, "rows": self.rows,
+        with self._lock:
+            cur = self._step(self._clock())
+            active = self._file is not None
+            name = self.path.name if self.path else None
+        return {"active": active, "file": name, "rows": self.rows,
                 "label": cur[0] if cur else None, "remaining_s": round(cur[1], 1) if cur else None,
-                "prompt": self.prompt(), "who": self.who}
+                "prompt": self._prompt(cur), "who": self.who}
 ```
 
 - [ ] **Step 3: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/test_recorder.py -q`
-Expected: `4 passed`
+Expected: `5 passed`
 
 - [ ] **Step 4: Commit**
 
