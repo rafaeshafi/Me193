@@ -1,0 +1,6 @@
+data/
+my_env/
+.venv/
+__pycache__/
+.pytest_cache/
+plate/out/
