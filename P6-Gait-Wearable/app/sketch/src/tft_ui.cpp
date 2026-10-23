@@ -19,13 +19,11 @@ const int kOneG = 106;  // (1 g + 4) / 12 * 255
 const int kRightX = 256;
 
 bool take(const char*& p, const char* key, char* out, int cap) {
-  // copies the value of "key=" if the pair at p has that key; always advances p past the pair
-  const char* eq = strchr(p, '=');
+  // copies the value of "key=" if the pair at p has that key; always advances p past the pair, even a malformed one
   const char* end = strchr(p, ';');
-  if (!eq) return false;
   if (!end) end = p + strlen(p);
-  if (eq > end) return false;
-  bool match = (int)strlen(key) == eq - p && strncmp(p, key, eq - p) == 0;
+  const char* eq = (const char*)memchr(p, '=', end - p);
+  bool match = eq && (int)strlen(key) == eq - p && strncmp(p, key, eq - p) == 0;
   if (match && out) {
     int n = (int)(end - (eq + 1));
     if (n > cap - 1) n = cap - 1;
@@ -55,8 +53,7 @@ bool TftUi::parse(const char* payload, Fields& f) {
       any = true;
     } else {
       p = start;
-      take(p, "", nullptr, 0);  // unknown key: skip the pair
-      if (p == start) break;
+      take(p, "", nullptr, 0);  // unknown or malformed pair: skip it
     }
   }
   return any;
@@ -89,8 +86,14 @@ bool TftUi::setPayload(const char* payload) {
 }
 
 void TftUi::field(int x, int y, int scale, const char* text, int maxChars, uint16_t color) {
-  lcd_.fillRect(x, y, Ili9341::textWidth(maxChars, scale) + scale, Ili9341::textHeight(scale), kBlack);
-  lcd_.drawText(x, y, text, scale, color, kBlack);
+  char buf[32];
+  int n = 0;
+  while (n < maxChars && n < (int)sizeof buf - 1 && text[n]) { buf[n] = text[n]; ++n; }
+  buf[n] = '\0';
+  lcd_.drawText(x, y, buf, scale, color, kBlack);
+  int used = n * (Ili9341::kGlyphW + 1) * scale;  // drawText paints the gap after the last glyph too
+  int box = Ili9341::textWidth(maxChars, scale) + scale;
+  if (box > used) lcd_.fillRect(x + used, y, box - used, Ili9341::textHeight(scale), kBlack);
 }
 
 void TftUi::drawStatic() {
@@ -112,7 +115,6 @@ void TftUi::pushWave(const uint8_t* samples, int count) {
     int x = kWaveX + waveCol_;
     int y = yOf(samples[i]);
     int y0 = waveLast_ < 0 ? y : yOf(waveLast_);
-    lcd_.fillRect(x, kWaveY + 1, 1, kWaveH - 2, kBlack);
     lcd_.fillRect(x, yOf(kOneG), 1, 1, brand::kTrack);
     int top = y < y0 ? y : y0;
     int h = (y > y0 ? y - y0 : y0 - y) + 1;
@@ -136,8 +138,7 @@ void TftUi::render() {
   if (full || strcmp(w.act, s.act) != 0) field(8, 4, 6, w.act, 6, colorFor(w.act));
   if (full || strcmp(w.m1, s.m1) != 0 || w.agree != s.agree) {
     field(8, 72, 2, w.m1, 6, w.agree ? kGreen : kAmber);
-    lcd_.fillRect(90, 72, 120, 14, kBlack);
-    lcd_.drawText(90, 72, w.agree ? "AGREES" : "DIFFERS", 2, w.agree ? kGreen : kAmber, kBlack);
+    field(90, 72, 2, w.agree ? "AGREES" : "DIFFERS", 7, w.agree ? kGreen : kAmber);
   }
   if (full || strcmp(w.prompt, s.prompt) != 0) field(8, 92, 2, w.prompt, 20, kWhite);
   if (full || strcmp(w.cad, s.cad) != 0) field(kRightX, kWaveY + 12, 3, w.cad, 3, kWhite);
