@@ -149,6 +149,8 @@ class Recorder:
             rows = []
             for i, s in enumerate(samples):
                 ts = t - (n - 1 - i) / rate
+                if ts < self._t0:
+                    continue  # stamped before the session started
                 cur = self._step(ts)
                 if cur is None:
                     break  # past the end of the script
@@ -172,24 +174,29 @@ class Recorder:
     def _rotate_rolling(self, t):
         if self._rolling:
             self._rolling.close()
-        self._rolling = open(self.dir / ("rolling-%s.csv" % time.strftime("%Y%m%d-%H%M%S")), "w", newline="")
+        current = self.dir / ("rolling-%s.csv" % time.strftime("%Y%m%d-%H%M%S"))
+        self._rolling = open(current, "w", newline="")
         self._rolling_writer = csv.writer(self._rolling)
         self._rolling_writer.writerow(HEADER)
         self._rolling_t0 = t
-        for old in sorted(self.dir.glob("rolling-*.csv"))[:-ROLLING_KEEP]:
+        # prune by modification time, never the file just opened: the board's clock can come up earlier after a reboot
+        others = sorted((p for p in self.dir.glob("rolling-*.csv") if p != current), key=lambda p: p.stat().st_mtime)
+        for old in others[:-(ROLLING_KEEP - 1)] if ROLLING_KEEP > 1 else others:
             old.unlink()
 
     def sessions(self):
         """Finished session files (not the rolling logs, not the one being written), oldest first."""
         with self._lock:
             busy = self.path.name if self._file else None
-        return sorted(p.name for p in self.dir.glob("*.csv") if not p.name.startswith("rolling-") and p.name != busy)
+            return sorted(p.name for p in self.dir.glob("*.csv")
+                          if not p.name.startswith("rolling-") and p.name != busy)
 
     def status(self):
         with self._lock:
             cur = self._step(self._clock())
             active = self._file is not None
             name = self.path.name if self.path else None
-        return {"active": active, "file": name, "rows": self.rows,
+            rows, who = self.rows, self.who
+        return {"active": active, "file": name, "rows": rows,
                 "label": cur[0] if cur else None, "remaining_s": round(cur[1], 1) if cur else None,
-                "prompt": self._prompt(cur), "who": self.who}
+                "prompt": self._prompt(cur), "who": who}
