@@ -7,6 +7,7 @@
 <style>
   :root { color-scheme: dark; }
   body { margin: 0; padding: 16px; font-family: -apple-system, system-ui, sans-serif; background: #000; color: #eee; }
+  main { max-width: 720px; margin: 0 auto; }
   h1 { font-size: 18px; margin: 0 0 12px; color: #999; font-weight: 500; }
   .verdict { font-size: 56px; font-weight: 800; letter-spacing: 2px; line-height: 1; }
   .STAND { color: #fff; } .WALK { color: #16ec06; } .RUN { color: #ff7800; } .BIKE { color: #0093e7; } .NOIMU { color: #ff0026; }
@@ -25,6 +26,7 @@
 </style>
 </head>
 <body>
+<main>
 <h1>Gait Wearable</h1>
 <div id="act" class="verdict">---</div>
 <div class="muted">Model 2: all six IMU channels</div>
@@ -34,7 +36,7 @@
   <div class="card"><small>Peak g</small><b id="pk">--</b></div>
 </div>
 <canvas id="wave" width="640" height="160"></canvas>
-<div class="muted">thigh-axis acceleration, last 1.5 s; line = 1 g</div>
+<div class="muted">thigh-axis acceleration, last 4 s; line = 1 g</div>
 <div id="prompt"></div>
 <div class="row">
   <input id="who" placeholder="who (optional)">
@@ -78,9 +80,7 @@ function drawWave(w) {
 function render(s) {
   const act = $("act"); act.textContent = s.act; act.className = "verdict " + s.act.replace(" ", "");
   $("m1").textContent = s.m1;
-  const real = !["---", "NO IMU"].includes(s.act) && !["---", "NO IMU"].includes(s.m1);
-  const same = s.act === s.m1 || !real;
-  $("agree").textContent = !real ? "" : (same ? "agrees" : "differs"); $("agree").className = same ? "agree" : "differ";
+  $("agree").textContent = s.agree == null ? "" : (s.agree ? "agrees" : "differs"); $("agree").className = s.agree ? "agree" : "differ";
   $("cad").textContent = s.cad == null ? "--" : s.cad;
   $("pk").textContent = s.pk == null ? "--" : s.pk.toFixed(1);
   drawWave(s.wave || []);
@@ -100,5 +100,6 @@ function connect() {
 document.addEventListener("visibilitychange", () => { if (!document.hidden && (!es || es.readyState === 2)) connect(); });
 connect();
 </script>
+</main>
 </body>
 </html>

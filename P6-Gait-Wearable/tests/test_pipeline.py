@@ -47,7 +47,7 @@ def test_no_imu_until_samples_arrive(tmp_path):
     g.on_batch(to_batch(0, []))                                  # heartbeat, empty: the sketch has no IMU
     g.tick()
     assert g.state["act"] == "NO IMU"
-    assert "act=NO IMU" in g.payload()
+    assert g.snapshot()["agree"] is None
 
 
 def test_classifies_walk_then_bike_with_seed_models(tmp_path):
@@ -58,7 +58,7 @@ def test_classifies_walk_then_bike_with_seed_models(tmp_path):
     assert 90 < g.state["cad"] < 130                              # 1.8 Hz steps -> 108 per minute
     feed(g, clk, "BIKE", 3.5)
     assert g.state["act"] == "BIKE" and g.state["m1"] in ("STAND", "WALK")
-    assert "agree=0" in g.payload()
+    assert g.snapshot()["agree"] == 0
 
 
 def test_fifo_reset_clears_the_window(tmp_path):
@@ -71,22 +71,14 @@ def test_fifo_reset_clears_the_window(tmp_path):
     assert g.ring.window(2.0) is None and g.ring.window(0.1) is not None
 
 
-def test_wave_bytes_are_downsampled_to_50_hz(tmp_path):
-    clk = Clock()
-    g = make(tmp_path, clk)
-    g.on_batch(to_batch(0, synth("STAND", seconds=0.1)))          # 10 samples
-    w = g.take_wave()
-    assert len(w) == 5 and g.take_wave() == b""
-
-
-def test_recorder_gets_every_sample_and_prompt_reaches_payload(tmp_path):
+def test_recorder_gets_every_sample_and_prompt_reaches_snapshot(tmp_path):
     clk = Clock()
     g = make(tmp_path, clk)
     g.recorder.start_single("STAND", seconds=5)
     clk.t += 6.0
     g.on_batch(to_batch(0, synth("STAND", seconds=0.1)))
     assert g.recorder.rows == 10
-    assert "prompt=STAND" in g.payload()
+    assert g.snapshot()["recorder"]["prompt"].startswith("STAND")
 
 
 def test_snapshot_is_json_friendly(tmp_path):
@@ -96,7 +88,7 @@ def test_snapshot_is_json_friendly(tmp_path):
     feed(g, clk, "RUN", 2.5)
     snap = json.loads(json.dumps(g.snapshot()))
     assert snap["act"] == "RUN" and snap["recorder"]["active"] is False
-    assert len(snap["wave"]) <= 150 and isinstance(snap["features"]["peak_x"], float)
+    assert len(snap["wave"]) <= 400 and snap["agree"] in (0, 1) and isinstance(snap["features"]["peak_x"], float)
 
 
 def test_votes_clear_after_an_imu_gap(tmp_path):

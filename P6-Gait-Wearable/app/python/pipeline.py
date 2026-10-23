@@ -2,7 +2,6 @@
 import threading
 import time
 
-from display import payload as tft_payload, wave_byte
 from features import X, compute
 from imu import RATE, Ring, decode
 from models import Vote
@@ -10,8 +9,6 @@ from models import Vote
 WINDOW_S = 2.0
 HOP_S = 0.5
 IMU_TIMEOUT_S = 1.5
-WAVE_MAX = 64  # the sketch's buffer
-WAVE_DECIMATE = 2  # 100 Hz samples -> 50 Hz sweep columns
 # dom_freq is the thigh swing rate: a stride has two steps, a pedal cycle is one revolution
 CADENCE_MULT = {"WALK": 2.0, "RUN": 2.0, "BIKE": 1.0}
 
@@ -22,7 +19,6 @@ class Gait:
         self.ring = Ring(5.0, rate)
         self.vote1, self.vote2 = Vote(3), Vote(3)
         self._lock = threading.Lock()
-        self._wave = bytearray()
         self._last_sample_t = None
         self._resets = None
         self._next_tick = 0.0
@@ -42,8 +38,6 @@ class Gait:
             if samples:
                 self._last_sample_t = now
                 self.ring.push(seq, samples)
-                self._wave.extend(wave_byte(s[X]) for s in samples[::WAVE_DECIMATE])
-                del self._wave[:-WAVE_MAX]
             elif self._last_sample_t is None:
                 self._last_sample_t = -1.0  # heard the sketch, it has no IMU
         if samples:
@@ -54,15 +48,9 @@ class Gait:
         new.update(kw)
         self.state = new  # readers see the old frame or the new one, never half of each
 
-    def take_wave(self):
-        with self._lock:
-            out = bytes(self._wave)
-            self._wave.clear()
-        return out
-
     # --- from the main loop -------------------------------------------------------------------------------------
     def tick(self, now=None):
-        """Every HOP_S: classify the newest window. Returns True when it ran (the payload may have changed)."""
+        """Every HOP_S: classify the newest window. Returns True when it ran."""
         now = self._clock() if now is None else now
         if now < self._next_tick:
             return False
@@ -87,17 +75,14 @@ class Gait:
         self._set(act=a2, m1=a1, cad=cad, pk=f["peak_x"], features=f, dropped=dropped, imu=True)
         return True
 
-    def payload(self):
-        s = self.state
-        return tft_payload(s["act"], s["m1"], s["cad"], s["pk"], prompt=self.recorder.prompt(),
-                       st="REC" if self.recorder.active else "")
-
     def snapshot(self):
         """Everything the phone page shows, as plain JSON-able types."""
         with self._lock:
-            recent = self.ring.window(1.5) or []
+            recent = self.ring.window(4.0) or []
         s = self.state
-        return {"act": s["act"], "m1": s["m1"], "cad": s["cad"], "pk": s["pk"], "imu": s["imu"], "dropped": s["dropped"],
+        real = ("---", "NO IMU")
+        agree = None if s["act"] in real or s["m1"] in real else int(s["act"] == s["m1"])
+        return {"act": s["act"], "m1": s["m1"], "cad": s["cad"], "pk": s["pk"], "imu": s["imu"], "agree": agree, "dropped": s["dropped"],
                 "features": {k: round(v, 4) for k, v in s["features"].items()},
                 "wave": [round(r[X], 3) for r in recent],
                 "recorder": self.recorder.status(), "sessions": self.recorder.sessions()}
