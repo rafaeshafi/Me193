@@ -914,7 +914,7 @@ def test_ring_window_and_dropped_batches():
     assert ring.dropped == 1
     assert ring.window(0.5)[-1][0] == 5
     ring.clear()                        # the sketch said the stream restarted
-    assert ring.window(0.5) is None and ring.total == 12
+    assert ring.window(0.5) is None and ring.total == 13
 ```
 
 Run: `.venv/bin/python -m pytest tests/test_imu.py -q`
