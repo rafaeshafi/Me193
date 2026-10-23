@@ -33,7 +33,7 @@ def decode(batch):
 
 
 class Ring:
-    """The last `seconds` of samples; counts batches that went missing by their sequence numbers."""
+    """The last `seconds` of samples; counts sequence-number gaps (a batch or more went missing)."""
 
     def __init__(self, seconds=5.0, rate=RATE):
         self.rate = rate
@@ -55,7 +55,7 @@ class Ring:
 
     def window(self, seconds=2.0):
         """The newest `seconds` of samples as a list, or None until that many have arrived."""
-        n = int(seconds * self.rate)
+        n = int(round(seconds * self.rate))
         if len(self._buf) < n:
             return None
         return list(self._buf)[-n:]

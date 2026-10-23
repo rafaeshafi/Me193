@@ -45,3 +45,14 @@ def test_ring_window_and_dropped_batches():
     assert ring.window(0.5)[-1][0] == 5
     ring.clear()                        # the sketch said the stream restarted
     assert ring.window(0.5) is None and ring.total == 13
+
+
+def test_ring_sequence_wrap_and_clear_keep_counters():
+    ring = Ring(seconds=1.0, rate=10)
+    ring.push(255, [(0,) * 6])
+    ring.push(0, [(0,) * 6])
+    assert ring.dropped == 0
+    ring.push(2, [(0,) * 6])
+    assert ring.dropped == 1
+    ring.clear()
+    assert ring.dropped == 1 and ring.total == 3

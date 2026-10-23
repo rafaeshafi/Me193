@@ -11,9 +11,8 @@ WINDOW_S = 2.0
 HOP_S = 0.5
 IMU_TIMEOUT_S = 1.5
 WAVE_DECIMATE = 2  # 100 Hz samples -> 50 Hz sweep columns
-# steps (or pedal revolutions) per minute = dominant frequency of |a| x 60 x this. 1.0 assumes both heel strikes show
-# in the thigh's |a| and one bump per pedal revolution; Task 16 checks this against the recordings.
-CADENCE_MULT = {"WALK": 1.0, "RUN": 1.0, "BIKE": 1.0}
+# dom_freq is the thigh swing rate: a stride has two steps, a pedal cycle is one revolution
+CADENCE_MULT = {"WALK": 2.0, "RUN": 2.0, "BIKE": 1.0}
 
 
 class Gait:

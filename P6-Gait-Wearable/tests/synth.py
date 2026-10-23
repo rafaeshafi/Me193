@@ -7,7 +7,8 @@ def synth(kind, seconds=2.0, rate=100, phase=0.0):
     for i in range(int(seconds * rate)):
         t = i / rate + phase
         if kind == "STAND":
-            out.append((1.0, 0.02 * math.sin(7 * t), 0.0, 1.0, -1.0, 0.5))
+            out.append((1.0 + 0.005 * math.sin(37 * t), 0.02 * math.sin(7 * t), 0.003 * math.sin(11 * t),
+                        1.0 + 0.3 * math.sin(23 * t), -1.0, 0.5))  # ~5 mg accel noise, ~1 deg/s gyro bias plus a little jitter
         elif kind == "WALK":   # 1.8 steps/s, heel strikes ~1.6 g, thigh pitching at half the step rate
             out.append((1.0 + 0.6 * math.sin(2 * math.pi * 1.8 * t), 0.1, 0.05,
                         150 * math.sin(2 * math.pi * 0.9 * t), 10.0, 5.0))
