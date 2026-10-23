@@ -1,0 +1,14 @@
+{
+  "features": ["mean_x", "mean_y", "mean_z", "std_x", "std_y", "std_z", "mag_std", "mag_peak", "gyro_rms", "gyro_peak", "dom_freq", "gyro_ratio"],
+  "classes": ["BIKE", "RUN", "STAND", "WALK"],
+  "note": "seed thresholds from the spec, replaced by train/train.py",
+  "root": {
+    "f": "gyro_rms", "t": 15.0,
+    "l": {"label": "STAND"},
+    "r": {
+      "f": "gyro_ratio", "t": 0.6,
+      "l": {"f": "mag_peak", "t": 2.2, "l": {"label": "WALK"}, "r": {"label": "RUN"}},
+      "r": {"label": "BIKE"}
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "features": ["peak_x"],
+  "classes": ["RUN", "STAND", "WALK"],
+  "note": "seed thresholds from the spec, replaced by train/train.py",
+  "root": {
+    "f": "peak_x", "t": 1.15,
+    "l": {"label": "STAND"},
+    "r": {"f": "peak_x", "t": 2.2, "l": {"label": "WALK"}, "r": {"label": "RUN"}}
+  }
+}
