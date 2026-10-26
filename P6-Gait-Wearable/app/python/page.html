@@ -24,7 +24,7 @@
   ul { padding-left: 18px; } a { color: #0093e7; }
   .muted { color: #777; font-size: 13px; }
   .race { background: #0d0d0d; border: 1px solid #222; border-radius: 12px; padding: 12px 14px; margin-bottom: 18px; }
-  .track { height: 360px; width: 100%; display: block; background: #161616; border-radius: 8px; margin: 10px 0 4px; }
+  .track { height: 300px; width: 100%; display: block; background: #9fd0ea; border-radius: 8px; margin: 10px 0 4px; }
   .countdown { font-size: 64px; font-weight: 800; text-align: center; color: #fff; min-height: 0; }
   .result { display: none; margin-top: 8px; }
   .board { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
@@ -127,86 +127,103 @@ function renderRace(r, speedKmh) {
   if ($("rBoard").dataset.html !== board) { $("rBoard").innerHTML = board; $("rBoard").dataset.html = board; }
 }
 const ordinal = n => n + ({1: "st", 2: "nd", 3: "rd"}[n] || "th");
-// ---- first-person Olympic final ----
+// ---- London 2012 doodle-style side view ----
 const rc = $("raceCanvas"), rctx = rc.getContext("2d");
 let raceSnap = null, raceSnapAt = 0;
-const LANES = 5, YOU_LANE = 2, VIEW_M = 80, K = 14;
-const runnerColor = {Jogger: "#16ec06", Runner: "#ffde00", Sprinter: "#ff0026", Champion: "#0093e7"};
-const crowd = Array.from({length: 400}, (_, i) => [Math.random(), Math.random(), ["#c33", "#36c", "#eee", "#fc3", "#3a3"][i % 5]]);
-function fitRace() { rc.width = rc.clientWidth * devicePixelRatio; rc.height = 360 * devicePixelRatio; }
+const SCENE_H = 300, PX_PER_M = 16, YOU_X = 0.32;
+const KIT = {YOU: "#d62f2a", Jogger: "#2e9e4f", Runner: "#e8b526", Sprinter: "#2d6fd1", Champion: "#f2f2f2"};
+const clouds = Array.from({length: 5}, (_, i) => ({x: i * 260 + (i % 2) * 90, y: 22 + (i % 3) * 14, s: 0.55 + (i % 3) * 0.2}));
+const trees = Array.from({length: 60}, (_, i) => ({x: i * 46 + (i * 37) % 23, h: 24 + (i * 13) % 20, w: 16 + (i * 7) % 12}));
+function fitRace() { rc.width = rc.clientWidth * devicePixelRatio; rc.height = SCENE_H * devicePixelRatio; }
 window.addEventListener("resize", fitRace); fitRace();
-function runnerFigure(ctx, x, y, s, color, phase) {   // feet at (x, y), height ~ 60 * s px
-  const h = 60 * s;
-  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = Math.max(1, 5 * s); ctx.lineCap = "round";
-  const swing = Math.sin(phase) * 0.6;
-  ctx.beginPath(); ctx.moveTo(x, y - h * 0.5); ctx.lineTo(x + Math.sin(swing) * h * 0.3, y - h * 0.1); ctx.stroke();           // leg 1
-  ctx.beginPath(); ctx.moveTo(x, y - h * 0.5); ctx.lineTo(x - Math.sin(swing) * h * 0.3, y - h * 0.1); ctx.stroke();           // leg 2
-  ctx.beginPath(); ctx.moveTo(x, y - h * 0.5); ctx.lineTo(x, y - h * 0.85); ctx.stroke();                                       // torso
-  ctx.beginPath(); ctx.moveTo(x - Math.sin(swing) * h * 0.25, y - h * 0.5); ctx.lineTo(x, y - h * 0.8); ctx.lineTo(x + Math.sin(swing) * h * 0.25, y - h * 0.5); ctx.stroke(); // arms
-  ctx.beginPath(); ctx.arc(x, y - h * 0.95, h * 0.1, 0, 7); ctx.fill();                                                          // head
+function cloud(ctx, x, y, s) {
+  ctx.fillStyle = "#ffffff";
+  for (const [dx, dy, r] of [[0, 0, 16], [18, -6, 20], [38, 0, 15], [20, 8, 14]]) { ctx.beginPath(); ctx.arc(x + dx * s, y + dy * s, r * s, 0, 7); ctx.fill(); }
+}
+function runner(ctx, x, y, s, kit, phase, number) {   // side view, feet at (x, y), facing right, height ~ 60 * s
+  const L = Math.sin(phase), A = Math.sin(phase + Math.PI);
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  // back leg, back arm (darker)
+  ctx.strokeStyle = "#4a2a1a"; ctx.lineWidth = 5 * s;
+  ctx.beginPath(); ctx.moveTo(x, y - 28 * s); ctx.lineTo(x - 10 * L * s - 2 * s, y - 14 * s); ctx.lineTo(x - 16 * L * s - 4 * s, y - 2 * s); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + 2 * s, y - 44 * s); ctx.lineTo(x - 10 * A * s, y - 34 * s); ctx.stroke();
+  // body: shorts and singlet
+  ctx.fillStyle = kit; ctx.fillRect(x - 6 * s, y - 32 * s, 13 * s, 8 * s);                       // shorts
+  ctx.beginPath(); ctx.moveTo(x - 6 * s, y - 50 * s); ctx.lineTo(x + 8 * s, y - 50 * s); ctx.lineTo(x + 7 * s, y - 31 * s); ctx.lineTo(x - 6 * s, y - 31 * s); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.font = `bold ${9 * s}px system-ui`; ctx.textAlign = "center"; ctx.fillText(number, x + 1 * s, y - 38 * s);
+  // front leg, front arm
+  ctx.strokeStyle = "#6b3e26"; ctx.lineWidth = 5 * s;
+  ctx.beginPath(); ctx.moveTo(x + 1 * s, y - 28 * s); ctx.lineTo(x + 10 * L * s + 3 * s, y - 14 * s); ctx.lineTo(x + 14 * L * s + 6 * s, y - 2 * s); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + 3 * s, y - 44 * s); ctx.lineTo(x + 12 * A * s + 4 * s, y - 36 * s); ctx.stroke();
+  // shoes
+  ctx.fillStyle = "#fff"; ctx.fillRect(x + 14 * L * s + 2 * s, y - 4 * s, 9 * s, 4 * s); ctx.fillRect(x - 16 * L * s - 8 * s, y - 4 * s, 9 * s, 4 * s);
+  // head and hair
+  ctx.fillStyle = "#6b3e26"; ctx.beginPath(); ctx.arc(x + 4 * s, y - 56 * s, 7 * s, 0, 7); ctx.fill();
+  ctx.fillStyle = "#1a1a1a"; ctx.beginPath(); ctx.arc(x + 2 * s, y - 59 * s, 7 * s, Math.PI, 2 * Math.PI); ctx.fill();
+}
+function pill(ctx, x, y, w, h, text, align) {
+  ctx.fillStyle = "rgba(255,255,255,0.92)"; ctx.beginPath(); ctx.roundRect(x, y, w, h, h / 2); ctx.fill();
+  ctx.fillStyle = "#222"; ctx.font = `bold ${h * 0.55}px system-ui`; ctx.textAlign = align || "center"; ctx.textBaseline = "middle";
+  ctx.fillText(text, align === "left" ? x + 12 : x + w / 2, y + h / 2 + 1); ctx.textBaseline = "alphabetic";
 }
 function drawRace() {
   requestAnimationFrame(drawRace);
   const r = raceSnap; if (!r || rc.width === 0) return;
-  const ctx = rctx, W = rc.width, H = rc.height, dpr = devicePixelRatio;
+  const ctx = rctx, dpr = devicePixelRatio, W = rc.width / dpr, H = SCENE_H;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const dt = r.phase === "running" ? (performance.now() - raceSnapAt) / 1000 : 0;
   const you = Math.min(r.distance, r.dist + r.speed_kmh / 3.6 * dt);
-  const horizon = H * 0.38, vx = W / 2;
-  const laneX = i => W * (0.02 + 0.96 * i / LANES);
-  const proj = (xb, d) => { d = Math.max(0, d); const t = d / (d + K); return [xb + (vx - xb) * t, H - (H - horizon) * t, 1 - t]; };
-  // sky, crowd, track
-  ctx.fillStyle = "#0b1020"; ctx.fillRect(0, 0, W, horizon);
-  for (const [cx, cy, c] of crowd) { ctx.fillStyle = c; ctx.fillRect(cx * W, horizon * (0.45 + 0.55 * cy), 3 * dpr, 3 * dpr); }
-  ctx.fillStyle = "#8b2f1f"; ctx.fillRect(0, horizon, W, H - horizon);
-  ctx.strokeStyle = "#f4f4f4"; ctx.lineWidth = 2 * dpr;
-  for (let i = 0; i <= LANES; i++) { const [x1, y1] = proj(laneX(i), 0), [x2, y2] = proj(laneX(i), VIEW_M); ctx.beginPath(); ctx.moveTo(laneX(i), H); ctx.lineTo(x2, y2); ctx.stroke(); }
-  // 10 m marks scrolling towards you
-  ctx.font = `${12 * dpr}px system-ui`; ctx.fillStyle = "#ddd"; ctx.textAlign = "left";
-  for (let m = Math.floor(you / 10) * 10; m <= you + VIEW_M; m += 10) {
-    const d = m - you; if (d < 0) continue;
-    const [xl, y] = proj(laneX(0), d), [xr] = proj(laneX(LANES), d);
-    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = dpr; ctx.beginPath(); ctx.moveTo(xl, y); ctx.lineTo(xr, y); ctx.stroke();
-    if (m % 50 === 0) ctx.fillText(m + " m", xr + 4 * dpr, y);
+  const youX = W * YOU_X, sx = m => youX + (m - you) * PX_PER_M;
+  // sky, clouds, trees, grass
+  const sky = ctx.createLinearGradient(0, 0, 0, 170); sky.addColorStop(0, "#9fd0ea"); sky.addColorStop(1, "#d6eef8");
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, 175);
+  for (const c of clouds) { const x = ((c.x - you * PX_PER_M * 0.08) % (W + 220) + W + 220) % (W + 220) - 110; cloud(ctx, x, c.y, c.s); }
+  ctx.fillStyle = "#2f6b3a"; ctx.fillRect(0, 150, W, 40);
+  for (const t of trees) { const x = ((t.x - you * PX_PER_M * 0.35) % (W + 120) + W + 120) % (W + 120) - 60; ctx.fillStyle = "#245a2e"; ctx.beginPath(); ctx.arc(x, 162 - t.h / 2, t.w / 2 + t.h / 4, 0, 7); ctx.fill(); ctx.fillStyle = "#3a2a1a"; ctx.fillRect(x - 1.5, 160, 3, 10); }
+  ctx.fillStyle = "#5cb463"; ctx.fillRect(0, 186, W, 14);
+  // track: five lanes, front lane at the bottom; 10 m ticks and the finish line scroll with you
+  ctx.fillStyle = "#cd4a3a"; ctx.fillRect(0, 200, W, 100);
+  ctx.fillStyle = "#b8402f"; for (let i = 0; i < 60; i++) ctx.fillRect(((i * 97 - you * PX_PER_M) % (W + 40) + W + 40) % (W + 40) - 20, 205 + (i * 31) % 90, 6, 2);
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+  for (let l = 0; l <= 5; l++) { ctx.beginPath(); ctx.moveTo(0, 200 + l * 20); ctx.lineTo(W, 200 + l * 20); ctx.stroke(); }
+  ctx.fillStyle = "#fff"; ctx.font = "bold 10px system-ui"; ctx.textAlign = "center";
+  for (let m = Math.floor((you - 30) / 10) * 10; m <= you + W / PX_PER_M; m += 10) { const x = sx(m); if (x < -20 || x > W + 20 || m < 0) continue; ctx.fillRect(x - 1, 200, 2, 100); if (m % 50 === 0) ctx.fillText(m + " m", x, 196); }
+  const fx = sx(r.distance);
+  if (fx > -40 && fx < W + 40) { ctx.fillStyle = "#fff"; ctx.fillRect(fx - 3, 196, 6, 104); for (let i = 0; i < 26; i++) { ctx.fillStyle = i % 2 ? "#111" : "#fff"; ctx.fillRect(fx - 3, 196 + i * 4, 6, 4); } ctx.fillStyle = "#111"; ctx.font = "bold 13px system-ui"; ctx.fillText("FINISH", fx, 190); }
+  // competitors behind you in lanes 1-4 (further back = higher, a little smaller), you in the front lane
+  const t = performance.now() / 1000;
+  const ghosts = r.ghosts.map((g, i) => ({name: g.name, who: g.who, kmh: g.kmh, dist: Math.min(r.distance, g.dist + g.kmh / 3.6 * dt), lane: 4 - i}));
+  for (const g of ghosts) {
+    const x = sx(g.dist) + (4 - g.lane) * 26, feetY = 200 + g.lane * 20 + 18, s = 0.6 + g.lane * 0.08, kit = KIT[g.name] || "#888";   // staggered lanes
+    const label = g.name === "Champion" ? "Champion " + (g.who || "") : g.name;
+    if (x < 12 || x > W - 12) {           // off screen: an arrow at the edge with the gap
+      const left = x < 12, ex = left ? 8 : W - 8; ctx.fillStyle = kit; ctx.font = "bold 11px system-ui"; ctx.textAlign = left ? "left" : "right";
+      ctx.fillText((left ? "◀ " : "") + label + " " + (g.dist - you > 0 ? "+" : "") + Math.round(g.dist - you) + " m" + (left ? "" : " ▶"), ex, feetY - 30);
+      continue;
+    }
+    runner(ctx, x, feetY, s, kit, t * Math.PI * 2 * (g.kmh / 3.6 / 1.3), g.name[0]);
+    ctx.fillStyle = "#222"; ctx.font = "bold 10px system-ui"; ctx.textAlign = "center"; ctx.fillText(label, x, feetY - 66 * s);
   }
-  // finish line
-  const df = r.distance - you;
-  if (df >= 0 && df <= VIEW_M) {
-    const [xl, y, s] = proj(laneX(0), df), [xr] = proj(laneX(LANES), df);
-    ctx.lineWidth = Math.max(2, 10 * s) * dpr; ctx.strokeStyle = "#fff"; ctx.setLineDash([8 * s * dpr, 8 * s * dpr]);
-    ctx.beginPath(); ctx.moveTo(xl, y); ctx.lineTo(xr, y); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = `bold ${Math.max(10, 28 * s) * dpr}px system-ui`; ctx.fillText("FINISH", vx, y - 14 * s * dpr);
+  const cad = raceSnap.cadence || 0;
+  runner(ctx, youX, 298, 1.0, KIT.YOU, t * Math.PI * 2 * (cad / 120), "1");
+  // HUD: doodle-style white pills
+  pill(ctx, 10, 10, 92, 30, (r.elapsed + dt).toFixed(1) + " s", "left");
+  pill(ctx, W - 150, 10, 140, 30, Math.round(you) + " / " + r.distance + " m");
+  pill(ctx, W - 150, 46, 140, 24, r.speed_kmh.toFixed(1) + " km/h");
+  ctx.textAlign = "left"; ctx.font = "bold 11px system-ui";
+  [{name: "YOU", dist: you}].concat(ghosts).sort((a, b) => b.dist - a.dist).forEach((o, i) => { ctx.fillStyle = o.name === "YOU" ? "#222" : (KIT[o.name] || "#444"); ctx.fillText((i + 1) + ". " + (o.name === "Champion" ? "Champion " + (o.who || "") : o.name) + "  " + Math.round(o.dist) + " m", W - 148, 86 + i * 13); });
+  // centre messages
+  ctx.textAlign = "center";
+  const big = r.phase === "countdown" ? String(Math.ceil(r.countdown)) : (r.phase === "running" && r.elapsed + dt < 1.2 ? "GO!" : "");
+  if (big) { ctx.font = "bold 72px system-ui"; ctx.lineWidth = 8; ctx.strokeStyle = "#fff"; ctx.strokeText(big, W / 2, 130); ctx.fillStyle = "#d62f2a"; ctx.fillText(big, W / 2, 130); }
+  if (r.phase === "idle") { pill(ctx, 10, 48, 250, 30, "run on the spot to race: press Start", "left"); }
+  if (r.phase === "finished" && r.result) {
+    const stars = r.result.record ? 3 : (r.result.beat.includes("Runner") ? 2 : 1);
+    ctx.fillStyle = "rgba(255,255,255,0.94)"; ctx.beginPath(); ctx.roundRect(W / 2 - 150, 70, 300, 88, 12); ctx.fill();
+    ctx.fillStyle = "#f5c518"; ctx.font = "32px system-ui"; ctx.fillText("★".repeat(stars) + "☆".repeat(3 - stars), W / 2, 104);
+    ctx.fillStyle = "#222"; ctx.font = "bold 18px system-ui"; ctx.fillText(r.result.time.toFixed(2) + " s   " + ordinal(r.result.place) + " of " + r.field, W / 2, 130);
+    ctx.font = "12px system-ui"; ctx.fillStyle = r.result.record ? "#d62f2a" : "#555"; ctx.fillText(r.result.record ? "NEW RECORD: you are the Champion ghost" : "beat " + (r.result.beat.length ? r.result.beat.join(", ") : "nobody"), W / 2, 150);
   }
-  // competitors in the other lanes, drawn far to near
-  const lanes = [0, 1, 3, 4];
-  const runners = r.ghosts.map((g, i) => ({name: g.name, who: g.who, lane: lanes[i % lanes.length], dist: Math.min(r.distance, g.dist + g.kmh / 3.6 * dt), kmh: g.kmh}));
-  runners.sort((a, b) => b.dist - a.dist);
-  for (const g of runners) {
-    const gap = g.dist - you;
-    if (gap < -2 || gap > VIEW_M) continue;
-    const xb = (laneX(g.lane) + laneX(g.lane + 1)) / 2, [x, y, s] = proj(xb, gap);
-    runnerFigure(ctx, x, y, s * dpr, runnerColor[g.name] || "#aaa", performance.now() / 1000 * g.kmh / 3.6 * 3);
-    ctx.fillStyle = runnerColor[g.name] || "#aaa"; ctx.textAlign = "center"; ctx.font = `${Math.max(9, 12 * s) * dpr}px system-ui`;
-    ctx.fillText(g.name === "Champion" ? "Champion " + (g.who || "") : g.name, x, y - 66 * s * dpr);
-  }
-  // you, bottom centre, legs driven by cadence
-  const cad = (raceSnap.cadence || 0);
-  runnerFigure(ctx, vx, H - 6 * dpr, 1.15 * dpr, "#fff", performance.now() / 1000 * Math.PI * 2 * (cad / 60));
-  // HUD on translucent panels so it reads over the crowd
-  ctx.fillStyle = "rgba(0,0,0,0.55)";
-  ctx.fillRect(0, 0, 200 * dpr, (48 + 16 * (r.ghosts.length + 1)) * dpr);
-  ctx.fillRect(W - 120 * dpr, 0, 120 * dpr, 54 * dpr);
-  ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = `bold ${14 * dpr}px system-ui`;
-  ctx.fillText(`OLYMPIC FINAL  ${r.distance} m`, 10 * dpr, 20 * dpr);
-  const order = [{name: "YOU", dist: you}].concat(runners).sort((a, b) => b.dist - a.dist);
-  ctx.font = `${12 * dpr}px system-ui`;
-  order.forEach((o, i) => { ctx.fillStyle = o.name === "YOU" ? "#fff" : (runnerColor[o.name] || "#aaa"); ctx.fillText(`${i + 1}. ${o.name === "Champion" ? "Champion " + (o.who || "") : o.name}  ${Math.round(o.dist)} m`, 10 * dpr, (40 + 16 * i) * dpr); });
-  ctx.textAlign = "right"; ctx.fillStyle = "#fff"; ctx.font = `bold ${22 * dpr}px system-ui`;
-  ctx.fillText((r.elapsed + dt).toFixed(1) + " s", W - 10 * dpr, 26 * dpr);
-  ctx.font = `${14 * dpr}px system-ui`; ctx.fillText(r.speed_kmh.toFixed(1) + " km/h", W - 10 * dpr, 46 * dpr);
-  // countdown / go / finish
-  const big = r.phase === "countdown" ? String(Math.ceil(r.countdown)) : (r.phase === "running" && r.elapsed + dt < 1.5 ? "GO!" : (r.phase === "finished" ? "FINISH" : (r.phase === "idle" ? "" : "")));
-  if (big) { ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.font = `bold ${72 * dpr}px system-ui`; ctx.fillText(big, vx, H * 0.6); }
-  if (r.phase === "idle") { ctx.textAlign = "center"; ctx.fillStyle = "#ddd"; ctx.font = `${16 * dpr}px system-ui`; ctx.fillText("pick a distance and press Start", vx, H * 0.6); }
 }
 drawRace();
 function render(s) {
