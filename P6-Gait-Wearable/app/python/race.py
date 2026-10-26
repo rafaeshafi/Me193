@@ -8,6 +8,7 @@ profile for that distance. ResultStore keeps every finish in a JSON file and ser
 """
 import json
 import math
+import os
 import threading
 import time
 from pathlib import Path
@@ -19,6 +20,7 @@ COUNTDOWN_S = 3.0
 DISTANCES = (100, 400, 1000)
 GHOSTS = (("Jogger", 9.0), ("Runner", 13.0), ("Sprinter", 22.0))   # name, km/h
 LEADERBOARD_N = 10
+PROFILE_STEP_S = 0.5
 
 
 def stride_m(peak_g):
@@ -67,10 +69,22 @@ class ResultStore:
     def __init__(self, path):
         self.path = Path(path)
         self._lock = threading.Lock()
-        try:
-            self._entries = json.loads(self.path.read_text()) if self.path.exists() else []
-        except (ValueError, OSError):
-            self._entries = []
+        self._boards = {}
+        self._entries = []
+        if self.path.exists():
+            try:
+                data = json.loads(self.path.read_text())
+                ok = isinstance(data, list) and all(
+                    isinstance(e, dict) and "distance" in e and "time" in e and "who" in e for e in data)
+            except (ValueError, OSError):
+                ok = False
+            if ok:
+                self._entries = data
+            else:
+                try:
+                    self.path.rename(self.path.with_name(self.path.name + ".bad-" + time.strftime("%Y%m%d-%H%M%S")))
+                except OSError:
+                    pass
 
     def save(self, distance, who, seconds, profile):
         entry = {"who": who or "anon", "distance": int(distance), "time": round(float(seconds), 2),
@@ -79,18 +93,26 @@ class ResultStore:
         with self._lock:
             self._entries.append(entry)
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(self._entries))
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._entries))
+            os.replace(str(tmp), str(self.path))
+            self._boards = {}
             rank = 1 + sum(1 for e in self._entries if e["distance"] == entry["distance"] and e["time"] < entry["time"])
         return dict(entry, rank=rank)
 
     def leaderboard(self, distance, n=LEADERBOARD_N):
         with self._lock:
-            rows = sorted((e for e in self._entries if e["distance"] == distance), key=lambda e: e["time"])[:n]
-        return [{k: e[k] for k in ("who", "time", "avg_kmh", "when")} for e in rows]
+            key = (distance, n)
+            if key not in self._boards:
+                rows = sorted((e for e in self._entries if e["distance"] == distance), key=lambda e: e["time"])[:n]
+                self._boards[key] = [{k: e[k] for k in ("who", "time", "avg_kmh", "when")} for e in rows]
+            return [dict(r) for r in self._boards[key]]
 
     def best(self, distance, who):
+        if not who or who == "anon":
+            return None
         with self._lock:
-            mine = [e for e in self._entries if e["distance"] == distance and e["who"] == (who or "anon")]
+            mine = [e for e in self._entries if e["distance"] == distance and e["who"] == who]
         return min(mine, key=lambda e: e["time"]) if mine else None
 
 
@@ -101,9 +123,12 @@ class Race:
         self.store = store
         self._clock = clock
         self.distance = DISTANCES[1]
+        self._lock = threading.RLock()
+        self._gen = 0
         self._reset()
 
     def _reset(self):
+        self._gen += 1
         self.phase = "idle"
         self.who = ""
         self.t0 = None
@@ -116,42 +141,61 @@ class Race:
         self._last = None
 
     def start(self, distance, who=""):
-        if distance not in DISTANCES:
-            raise ValueError("distance must be one of %s" % (DISTANCES,))
-        self._reset()
-        self.distance = int(distance)
-        self.who = who or "anon"
-        self.best = self.store.best(self.distance, self.who)
-        self.t0 = self._clock() + COUNTDOWN_S
-        self.phase = "countdown"
+        with self._lock:
+            try:
+                distance = int(distance)
+            except (TypeError, ValueError):
+                raise ValueError("distance must be one of %s" % (DISTANCES,))
+            if distance not in DISTANCES:
+                raise ValueError("distance must be one of %s" % (DISTANCES,))
+            self._reset()
+            self.distance = distance
+            self.who = who or "anon"
+            self.best = self.store.best(self.distance, self.who)
+            self.t0 = self._clock() + COUNTDOWN_S
+            self.phase = "countdown"
 
     def abort(self):
-        self._reset()
+        with self._lock:
+            self._reset()
 
     def tick(self, speed, now):
         """Advance with the current smoothed speed (m/s); call every loop pass."""
-        self.speed = speed
-        if self.phase == "countdown":
-            if now >= self.t0:
-                self.phase = "running"
-                self._last = self.t0
-                self.tick(speed, now)
-        elif self.phase == "running":
-            dt = max(0.0, now - self._last)
-            self._last = now
-            self.dist += speed * dt
-            self.elapsed = now - self.t0
-            self.profile.append((round(self.elapsed, 2), round(speed, 3)))
-            if self.dist >= self.distance:
-                if speed > 0:
-                    self.elapsed -= (self.dist - self.distance) / speed
-                self.dist = float(self.distance)
-                self.phase = "finished"
-                saved = self.store.save(self.distance, self.who, self.elapsed, self.profile)
-                beat = [n for n, kmh in GHOSTS if self.distance / (kmh / 3.6) > self.elapsed]
-                self.result = {"time": saved["time"], "avg_kmh": saved["avg_kmh"], "rank": saved["rank"], "beat": beat}
+        pending = None
+        with self._lock:
+            self.speed = speed
+            if self.phase == "countdown":
+                if now >= self.t0:
+                    self.phase = "running"
+                    self._last = self.t0
+                    self.tick(speed, now)
+            elif self.phase == "running":
+                dt = max(0.0, now - self._last)
+                self._last = now
+                self.dist += speed * dt
+                self.elapsed = now - self.t0
+                if self.dist >= self.distance:
+                    if speed > 0:
+                        self.elapsed -= (self.dist - self.distance) / speed
+                    self.dist = float(self.distance)
+                    self.phase = "finished"
+                    self.profile.append((round(self.elapsed, 2), round(speed, 3)))
+                    pending = (self._gen, self.distance, self.who, self.elapsed, list(self.profile))
+                elif not self.profile or self.elapsed - self.profile[-1][0] >= PROFILE_STEP_S:
+                    self.profile.append((round(self.elapsed, 2), round(speed, 3)))
+        if pending:
+            gen, distance, who, elapsed, profile = pending
+            saved = self.store.save(distance, who, elapsed, profile)
+            with self._lock:
+                if self._gen == gen:
+                    beat = [n for n, kmh in GHOSTS if distance / (kmh / 3.6) > elapsed]
+                    self.result = {"time": saved["time"], "avg_kmh": saved["avg_kmh"], "rank": saved["rank"], "beat": beat}
 
     def ghosts(self):
+        with self._lock:
+            return self._ghosts()
+
+    def _ghosts(self):
         t = max(0.0, self.elapsed) if self.phase in ("running", "finished") else 0.0
         out = [{"name": n, "kmh": k, "dist": min(float(self.distance), k / 3.6 * t)} for n, k in GHOSTS]
         if self.best:
@@ -160,8 +204,12 @@ class Race:
         return out
 
     def snapshot(self):
+        with self._lock:
+            return self._snapshot()
+
+    def _snapshot(self):
         now = self._clock()
         return {"phase": self.phase, "distance": self.distance, "who": self.who,
-                "countdown": max(0.0, self.t0 - now) if self.phase == "countdown" else None,
+                "countdown": round(max(0.0, self.t0 - now), 1) if self.phase == "countdown" else None,
                 "elapsed": round(self.elapsed, 2), "dist": round(self.dist, 1), "speed_kmh": round(self.speed * 3.6, 1),
-                "ghosts": self.ghosts(), "result": self.result, "leaderboard": self.store.leaderboard(self.distance)}
+                "ghosts": self._ghosts(), "result": self.result, "leaderboard": self.store.leaderboard(self.distance)}

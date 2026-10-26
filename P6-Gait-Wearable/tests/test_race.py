@@ -91,7 +91,7 @@ def test_second_race_gets_the_best_ghost_and_abort_resets(tmp_path):
     clk.t += COUNTDOWN_S + 2.0
     r.tick(4.0, clk.t)
     best = next(g for g in r.snapshot()["ghosts"] if g["name"] == "Your best")
-    assert 0 < best["dist"] <= 100
+    assert best["dist"] == pytest.approx(8.0)
     r.abort()
     assert r.snapshot()["phase"] == "idle" and len(store.leaderboard(100)) == 1
     r.start(400, "bob")                       # another distance: no best yet, only the fixed ghosts
@@ -109,3 +109,81 @@ def test_result_store_persists_and_ranks(tmp_path):
     assert [e["who"] for e in board] == ["bob", "ann"] and board[0]["avg_kmh"] == pytest.approx(16.0)
     assert s2.best(400, "ann")["time"] == 120.0 and s2.best(1000, "ann") is None
     assert DISTANCES == (100, 400, 1000)
+
+
+def test_no_distance_during_countdown_and_handoff_counts_from_t0(tmp_path):
+    clk = Clock()
+    r = Race(ResultStore(tmp_path / "races.json"), clock=clk)
+    r.start(100, "ann")
+    t0 = clk.t + COUNTDOWN_S
+    r.tick(5.0, t0 - 1.0)
+    assert r.snapshot()["dist"] == 0.0
+    r.tick(5.0, t0 + 0.4)
+    assert r.snapshot()["dist"] == pytest.approx(2.0)
+
+
+def test_profile_is_decimated_to_half_seconds(tmp_path):
+    clk = Clock()
+    store = ResultStore(tmp_path / "races.json")
+    r = Race(store, clock=clk)
+    r.start(100, "ann")
+    t0 = clk.t + COUNTDOWN_S
+    i = 0
+    while r.snapshot()["phase"] != "finished":
+        i += 1
+        r.tick(5.0, t0 + i * 0.05)
+    entry = json.loads((tmp_path / "races.json").read_text())[0]
+    assert 38 <= len(entry["profile"]) <= 44
+    assert entry["profile"][-1][0] == pytest.approx(entry["time"], abs=0.01)
+
+
+def test_start_during_save_does_not_leak_the_result(tmp_path):
+    clk = Clock()
+    store = ResultStore(tmp_path / "races.json")
+    r = Race(store, clock=clk)
+    orig = store.save
+
+    def save(*a, **k):
+        out = orig(*a, **k)
+        r.start(100, "bob")
+        return out
+
+    store.save = save
+    r.start(100, "ann")
+    clk.t += COUNTDOWN_S
+    r.tick(50.0, clk.t)
+    clk.t += 5.0
+    r.tick(50.0, clk.t)
+    s = r.snapshot()
+    assert s["phase"] == "countdown" and s["result"] is None
+
+
+def test_corrupt_results_file_is_kept_aside(tmp_path):
+    p = tmp_path / "races.json"
+    p.write_text("{not json")
+    store = ResultStore(p)
+    assert store.leaderboard(100) == []
+    bad = list(tmp_path.glob("races.json.bad-*"))
+    assert len(bad) == 1 and bad[0].read_text() == "{not json"
+    store.save(100, "ann", 20.0, [(0.5, 5.0)])
+    assert json.loads(p.read_text())[0]["who"] == "ann"
+
+
+def test_anon_has_no_personal_ghost(tmp_path):
+    clk = Clock()
+    r = Race(ResultStore(tmp_path / "races.json"), clock=clk)
+    r.start(100, "")
+    clk.t += COUNTDOWN_S
+    r.tick(4.0, clk.t)
+    for _ in range(25):
+        clk.t += 1.0
+        r.tick(4.0, clk.t)
+    assert r.snapshot()["phase"] == "finished"
+    r.start(100, "")
+    assert [g["name"] for g in r.snapshot()["ghosts"]] == [n for n, _ in GHOSTS]
+
+
+def test_start_accepts_a_string_distance(tmp_path):
+    r = Race(ResultStore(tmp_path / "races.json"), clock=Clock())
+    r.start("400", "ann")
+    assert r.snapshot()["distance"] == 400
