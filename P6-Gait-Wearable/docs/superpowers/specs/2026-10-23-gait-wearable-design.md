@@ -193,3 +193,24 @@ tilt flipped sign between sessions, so raw gravity components did not transfer (
   thigh horizontal BIKE -> else WALK.
 - Tests carry their own seed trees (`tests/seed_models.py`); the files in `models/` are the trained ones and a test
   only checks them against the feature contract and the gate.
+
+## Revision 4 (2026-10-26): racing on the spot
+
+A race mode on the page: the runner runs on the spot, the gait drives a runner along a track against ghosts.
+
+- **Speed from the gait.** stride_m = clamp(0.6 + 0.5 x (peak_g - 1), 0.5, 2.2); speed = cadence/60 x stride_m.
+  The classifier gates it: STAND, BIKE, NO IMU and `---` give 0, WALK is capped at 7 km/h, RUN is uncapped. The
+  speed is smoothed with a 1 s exponential average. (From the recordings: walk 4.9 km/h, jog 11.5 km/h, a 200 spm
+  sprint with 4 g peaks 25 km/h.)
+- **Race.** Distances 100, 400, 1000 m. Start -> 3 s countdown -> running (distance integrates speed every loop
+  pass, ~50 ms) -> finished when the line is crossed (finish time interpolated inside the last step). Abort returns to
+  idle without saving. Ghosts at fixed paces: Jogger 9, Runner 13, Sprinter 22 km/h, plus "Your best", a replay of the
+  runner's best speed profile at that distance when one exists.
+- **Results.** `data/races.json` keeps every finished race: who, distance, time, average km/h, when, and the speed
+  profile (one sample per classification tick). The page shows a leaderboard per distance (top 10 by time) and, on
+  finishing, the time, average speed, which ghosts were beaten and the rank.
+- **Page.** A Race panel above the gait view: distance buttons, Start/Abort, a horizontal track with one dot per
+  runner, live speed, distance and time, a countdown overlay, the finish card and the leaderboard; the speed formula
+  printed under the track. The gait view keeps working during a race. Web routes: `POST /race/start?distance=&who=`,
+  `POST /race/abort`; the race state rides in the existing snapshot/SSE stream.
+- No sketch change. Code: `app/python/race.py` (SpeedModel, ResultStore, Race) driven from `Gait.tick`.

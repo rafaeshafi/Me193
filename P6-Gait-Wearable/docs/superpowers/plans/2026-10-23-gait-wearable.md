@@ -3257,3 +3257,488 @@ files after each change, so later tasks read the file tree, not history.
 - Wire only the MPU6050: VCC 3V3, GND, SDA, SCL header pins, AD0 to GND. Deploy; the log must show `act=STAND`
   with the board still (after ~2.5 s), WALK/RUN when swung like a thigh and bobbed, BIKE when pedalled flat; the
   page over `adb forward tcp:8080 tcp:8080` shows the same with the trace.
+
+---
+
+## Revision 4 (2026-10-26): racing on the spot (spec Revision 4)
+
+### Task 21: `race.py`: speed model, result store, race state machine
+
+**Files:**
+- Create: `app/python/race.py`, `tests/test_race.py`
+
+- [ ] **Step 1: Failing tests**
+
+`tests/test_race.py`:
+```python
+import json
+
+import pytest
+
+from race import COUNTDOWN_S, DISTANCES, GHOSTS, WALK_CAP, Race, ResultStore, SpeedModel, raw_speed, replay_distance, stride_m
+
+
+class Clock:
+    def __init__(self):
+        self.t = 50.0
+
+    def __call__(self):
+        return self.t
+
+
+def test_stride_and_raw_speed_from_the_recordings():
+    assert stride_m(1.0) == pytest.approx(0.6)
+    assert stride_m(2.2) == pytest.approx(1.2)
+    assert stride_m(10.0) == 2.2 and stride_m(0.0) == 0.5          # clamped
+    assert raw_speed("WALK", 108, 1.3) == pytest.approx(108 / 60 * 0.75)   # 1.35 m/s = 4.9 km/h
+    assert raw_speed("RUN", 160, 2.2) == pytest.approx(3.2)                 # 11.5 km/h
+    assert raw_speed("RUN", 200, 4.0) == pytest.approx(200 / 60 * 2.1)      # 25 km/h
+    assert raw_speed("WALK", 200, 4.0) == pytest.approx(WALK_CAP)           # walking is capped
+    for act in ("STAND", "BIKE", "NO IMU", "---"):
+        assert raw_speed(act, 160, 2.2) == 0.0
+    assert raw_speed("RUN", None, 2.2) == 0.0 and raw_speed("RUN", 160, None) == 0.0
+
+
+def test_speed_model_smooths_towards_the_target():
+    m = SpeedModel()
+    assert m.update("RUN", 160, 2.2, now=0.0) == pytest.approx(3.2)   # first sample lands at once
+    v = m.update("STAND", None, None, now=0.5)
+    assert 0 < v < 3.2                                                 # decays, does not drop to zero at once
+    for i in range(1, 12):
+        v = m.update("STAND", None, None, now=0.5 + i * 0.5)
+    assert v < 0.02                                                    # gone after a few seconds
+
+
+def test_replay_distance_integrates_a_profile():
+    prof = [(0.5, 2.0), (1.0, 2.0), (1.5, 4.0)]         # (elapsed s, speed m/s) samples
+    assert replay_distance(prof, 0.0) == 0.0
+    assert replay_distance(prof, 1.0) == pytest.approx(2.0)
+    assert replay_distance(prof, 1.5) == pytest.approx(4.0)
+    assert replay_distance(prof, 9.0) == pytest.approx(4.0)   # holds the last sample
+
+
+def test_race_runs_countdown_distance_finish_and_saves(tmp_path):
+    clk = Clock()
+    store = ResultStore(tmp_path / "races.json")
+    r = Race(store, clock=clk)
+    assert r.snapshot()["phase"] == "idle" and r.snapshot()["leaderboard"] == []
+    with pytest.raises(ValueError):
+        r.start(123, "ann")
+    r.start(100, "ann")
+    s = r.snapshot()
+    assert s["phase"] == "countdown" and s["countdown"] == pytest.approx(COUNTDOWN_S) and s["distance"] == 100
+    clk.t += COUNTDOWN_S
+    r.tick(5.0, clk.t)
+    assert r.snapshot()["phase"] == "running"
+    for _ in range(19):                        # 19 x 1 s at 5 m/s = 95 m
+        clk.t += 1.0
+        r.tick(5.0, clk.t)
+    s = r.snapshot()
+    assert s["phase"] == "running" and s["dist"] == pytest.approx(95.0) and s["elapsed"] == pytest.approx(19.0)
+    ghosts = {g["name"]: g["dist"] for g in s["ghosts"]}
+    assert ghosts["Jogger"] == pytest.approx(9 / 3.6 * 19) and ghosts["Sprinter"] == 100   # sprinter already home
+    clk.t += 2.0                               # 10 m in 2 s: crosses the line after 1 s of it
+    r.tick(5.0, clk.t)
+    s = r.snapshot()
+    assert s["phase"] == "finished" and s["dist"] == 100
+    assert s["result"]["time"] == pytest.approx(20.0) and s["result"]["avg_kmh"] == pytest.approx(18.0)
+    assert s["result"]["beat"] == ["Jogger", "Runner"] and s["result"]["rank"] == 1
+    assert store.leaderboard(100)[0]["who"] == "ann"
+    assert json.loads((tmp_path / "races.json").read_text())[0]["distance"] == 100
+
+
+def test_second_race_gets_the_best_ghost_and_abort_resets(tmp_path):
+    clk = Clock()
+    store = ResultStore(tmp_path / "races.json")
+    r = Race(store, clock=clk)
+    r.start(100, "ann")
+    clk.t += COUNTDOWN_S
+    r.tick(4.0, clk.t)
+    for _ in range(25):
+        clk.t += 1.0
+        r.tick(4.0, clk.t)
+    assert r.snapshot()["phase"] == "finished"
+    r.start(100, "ann")
+    names = [g["name"] for g in r.snapshot()["ghosts"]]
+    assert names == [n for n, _ in GHOSTS] + ["Your best"]
+    clk.t += COUNTDOWN_S + 2.0
+    r.tick(4.0, clk.t)
+    best = next(g for g in r.snapshot()["ghosts"] if g["name"] == "Your best")
+    assert 0 < best["dist"] <= 100
+    r.abort()
+    assert r.snapshot()["phase"] == "idle" and len(store.leaderboard(100)) == 1
+    r.start(400, "bob")                       # another distance: no best yet, only the fixed ghosts
+    assert [g["name"] for g in r.snapshot()["ghosts"]] == [n for n, _ in GHOSTS]
+
+
+def test_result_store_persists_and_ranks(tmp_path):
+    p = tmp_path / "races.json"
+    s1 = ResultStore(p)
+    s1.save(400, "ann", 120.0, [(0.5, 3.3)])
+    s1.save(400, "bob", 90.0, [(0.5, 4.4)])
+    s1.save(100, "bob", 20.0, [(0.5, 5.0)])
+    s2 = ResultStore(p)                        # re-read from disk
+    board = s2.leaderboard(400)
+    assert [e["who"] for e in board] == ["bob", "ann"] and board[0]["avg_kmh"] == pytest.approx(16.0)
+    assert s2.best(400, "ann")["time"] == 120.0 and s2.best(1000, "ann") is None
+    assert DISTANCES == (100, 400, 1000)
+```
+
+Run: `.venv/bin/python -m pytest tests/test_race.py -q`
+Expected: FAIL, `ModuleNotFoundError: No module named 'race'`
+
+- [ ] **Step 2: Implementation**
+
+`app/python/race.py`:
+```python
+"""Racing on the spot: a speed from the gait, and a race against ghost runners.
+
+speed = cadence/60 x stride, stride_m = clamp(0.6 + 0.5 x (peak_g - 1), 0.5, 2.2). The classifier gates it: STAND, BIKE
+and no data give 0, WALK is capped at 7 km/h, RUN is uncapped. SpeedModel smooths it with a 1 s exponential average.
+Race: start -> 3 s countdown -> running (distance integrates the smoothed speed every tick) -> finished when the line is
+crossed (finish time interpolated inside the last step). Ghosts run at fixed paces, plus a replay of the runner's best
+profile for that distance. ResultStore keeps every finish in a JSON file and serves leaderboards.
+"""
+import json
+import math
+import threading
+import time
+from pathlib import Path
+
+STRIDE_AT_1G, STRIDE_PER_G, STRIDE_MIN, STRIDE_MAX = 0.6, 0.5, 0.5, 2.2
+WALK_CAP = 7.0 / 3.6          # m/s
+SMOOTH_TAU = 1.0              # s
+COUNTDOWN_S = 3.0
+DISTANCES = (100, 400, 1000)
+GHOSTS = (("Jogger", 9.0), ("Runner", 13.0), ("Sprinter", 22.0))   # name, km/h
+LEADERBOARD_N = 10
+
+
+def stride_m(peak_g):
+    return max(STRIDE_MIN, min(STRIDE_MAX, STRIDE_AT_1G + STRIDE_PER_G * (peak_g - 1.0)))
+
+
+def raw_speed(act, cad, pk):
+    """m/s from one classified window, before smoothing."""
+    if act not in ("WALK", "RUN") or not cad or pk is None:
+        return 0.0
+    v = cad / 60.0 * stride_m(pk)
+    return min(v, WALK_CAP) if act == "WALK" else v
+
+
+def replay_distance(profile, t):
+    """Distance (m) a recorded (elapsed_s, speed_m_s) profile has covered after t seconds."""
+    dist, last_t = 0.0, 0.0
+    for elapsed, speed in profile:
+        if elapsed >= t:
+            dist += speed * (t - last_t)
+            return dist
+        dist += speed * (elapsed - last_t)
+        last_t = elapsed
+    return dist
+
+
+class SpeedModel:
+    def __init__(self):
+        self.speed = 0.0
+        self._t = None
+
+    def update(self, act, cad, pk, now):
+        target = raw_speed(act, cad, pk)
+        if self._t is None:
+            self.speed = target
+        else:
+            a = 1.0 - math.exp(-max(0.0, now - self._t) / SMOOTH_TAU)
+            self.speed += a * (target - self.speed)
+        self._t = now
+        return self.speed
+
+
+class ResultStore:
+    """Every finished race, in a JSON list on disk."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self._lock = threading.Lock()
+        try:
+            self._entries = json.loads(self.path.read_text()) if self.path.exists() else []
+        except (ValueError, OSError):
+            self._entries = []
+
+    def save(self, distance, who, seconds, profile):
+        entry = {"who": who or "anon", "distance": int(distance), "time": round(float(seconds), 2),
+                 "avg_kmh": round(distance / seconds * 3.6, 2) if seconds > 0 else 0.0,
+                 "when": time.strftime("%Y-%m-%d %H:%M:%S"), "profile": [list(p) for p in profile]}
+        with self._lock:
+            self._entries.append(entry)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(self._entries))
+            rank = 1 + sum(1 for e in self._entries if e["distance"] == entry["distance"] and e["time"] < entry["time"])
+        return dict(entry, rank=rank)
+
+    def leaderboard(self, distance, n=LEADERBOARD_N):
+        with self._lock:
+            rows = sorted((e for e in self._entries if e["distance"] == distance), key=lambda e: e["time"])[:n]
+        return [{k: e[k] for k in ("who", "time", "avg_kmh", "when")} for e in rows]
+
+    def best(self, distance, who):
+        with self._lock:
+            mine = [e for e in self._entries if e["distance"] == distance and e["who"] == (who or "anon")]
+        return min(mine, key=lambda e: e["time"]) if mine else None
+
+
+class Race:
+    """idle -> countdown -> running -> finished; abort() returns to idle without saving."""
+
+    def __init__(self, store, clock=time.monotonic):
+        self.store = store
+        self._clock = clock
+        self.distance = DISTANCES[1]
+        self._reset()
+
+    def _reset(self):
+        self.phase = "idle"
+        self.who = ""
+        self.t0 = None
+        self.dist = 0.0
+        self.elapsed = 0.0
+        self.speed = 0.0
+        self.profile = []
+        self.result = None
+        self.best = None
+        self._last = None
+
+    def start(self, distance, who=""):
+        if distance not in DISTANCES:
+            raise ValueError("distance must be one of %s" % (DISTANCES,))
+        self._reset()
+        self.distance = int(distance)
+        self.who = who or "anon"
+        self.best = self.store.best(self.distance, self.who)
+        self.t0 = self._clock() + COUNTDOWN_S
+        self.phase = "countdown"
+
+    def abort(self):
+        self._reset()
+
+    def tick(self, speed, now):
+        """Advance with the current smoothed speed (m/s); call every loop pass."""
+        self.speed = speed
+        if self.phase == "countdown":
+            if now >= self.t0:
+                self.phase = "running"
+                self._last = self.t0
+                self.tick(speed, now)
+        elif self.phase == "running":
+            dt = max(0.0, now - self._last)
+            self._last = now
+            self.dist += speed * dt
+            self.elapsed = now - self.t0
+            self.profile.append((round(self.elapsed, 2), round(speed, 3)))
+            if self.dist >= self.distance:
+                if speed > 0:
+                    self.elapsed -= (self.dist - self.distance) / speed
+                self.dist = float(self.distance)
+                self.phase = "finished"
+                saved = self.store.save(self.distance, self.who, self.elapsed, self.profile)
+                beat = [n for n, kmh in GHOSTS if self.distance / (kmh / 3.6) > self.elapsed]
+                self.result = {"time": saved["time"], "avg_kmh": saved["avg_kmh"], "rank": saved["rank"], "beat": beat}
+
+    def ghosts(self):
+        t = max(0.0, self.elapsed) if self.phase in ("running", "finished") else 0.0
+        out = [{"name": n, "kmh": k, "dist": min(float(self.distance), k / 3.6 * t)} for n, k in GHOSTS]
+        if self.best:
+            out.append({"name": "Your best", "kmh": self.best["avg_kmh"],
+                        "dist": min(float(self.distance), replay_distance(self.best["profile"], t))})
+        return out
+
+    def snapshot(self):
+        now = self._clock()
+        return {"phase": self.phase, "distance": self.distance, "who": self.who,
+                "countdown": max(0.0, self.t0 - now) if self.phase == "countdown" else None,
+                "elapsed": round(self.elapsed, 2), "dist": round(self.dist, 1), "speed_kmh": round(self.speed * 3.6, 1),
+                "ghosts": self.ghosts(), "result": self.result, "leaderboard": self.store.leaderboard(self.distance)}
+```
+
+- [ ] **Step 3: Run tests**
+
+Run: `.venv/bin/python -m pytest tests/test_race.py -q`
+Expected: `6 passed`
+
+- [ ] **Step 4: Commit**
+
+```bash
+cd ~/ME193 && git add P6-Gait-Wearable/app/python/race.py P6-Gait-Wearable/tests/test_race.py && git commit -m "P6-Gait-Wearable: race.py: speed from cadence and stride-from-impact gated by the classifier, smoothed; race state machine with countdown, ghosts and a best-run replay; JSON result store with leaderboards"
+```
+
+### Task 22: race in the pipeline, web routes, race panel on the page
+
+**Files:**
+- Modify: `app/python/pipeline.py`, `app/python/main.py`, `app/python/web.py`, `app/python/page.html`, `tests/test_pipeline.py`, `tests/test_web.py`
+
+- [ ] **Step 1: Failing tests**
+
+Append to `tests/test_pipeline.py`:
+```python
+def test_race_runs_on_the_gait(tmp_path):
+    clk = Clock()
+    g = make(tmp_path, clk)
+    assert g.snapshot()["race"]["phase"] == "idle" and g.snapshot()["speed_kmh"] == 0.0
+    g.race.start(100, "ann")
+    feed(g, clk, "RUN", 6.0)                       # 2.8 Hz synth run: ~168 spm x stride(3.5 g) 1.85 m = ~5 m/s
+    snap = g.snapshot()
+    assert snap["speed_kmh"] > 10
+    assert snap["race"]["phase"] in ("running", "finished") and snap["race"]["dist"] > 0
+    assert len(snap["race"]["ghosts"]) == 3
+    g.race.abort()
+    assert g.snapshot()["race"]["phase"] == "idle"
+
+
+def test_race_distance_does_not_grow_while_standing(tmp_path):
+    clk = Clock()
+    g = make(tmp_path, clk)
+    g.race.start(100, "ann")
+    feed(g, clk, "STAND", 6.0)
+    snap = g.snapshot()
+    assert snap["race"]["phase"] == "running" and snap["race"]["dist"] == 0.0 and snap["speed_kmh"] == 0.0
+```
+
+Append to `tests/test_web.py`:
+```python
+def test_race_routes(server):
+    s, g = server
+    status, _, body = req(s, "POST", "/race/start?distance=400&who=ann")
+    snap = json.loads(body)
+    assert status == 200 and snap["race"]["phase"] == "countdown" and snap["race"]["distance"] == 400
+    assert g.race.who == "ann"
+    status, _, body = req(s, "POST", "/race/start?distance=123")
+    assert status == 400
+    status, _, body = req(s, "POST", "/race/abort")
+    assert status == 200 and json.loads(body)["race"]["phase"] == "idle"
+```
+
+Run: `.venv/bin/python -m pytest tests/test_pipeline.py tests/test_web.py -q`
+Expected: FAIL on the three new tests (`AttributeError: 'Gait' object has no attribute 'race'`, 404s).
+
+- [ ] **Step 2: pipeline.py**
+
+- Import: `from race import Race, ResultStore, SpeedModel`.
+- `Gait.__init__` gains a keyword `races_path=None`; after the recorder is stored: `self.speed = SpeedModel()` and
+  `self.race = Race(ResultStore(races_path or (Path(recorder.dir) / "races.json")), clock=clock)` (import `Path`).
+- `tick()`: the race advances on EVERY call, the classification only every HOP_S. Restructure the top:
+```python
+    def tick(self, now=None):
+        """Advance the race every call; every HOP_S also classify the newest window. Returns True when it classified."""
+        now = self._clock() if now is None else now
+        self.race.tick(self.speed.speed, now)
+        if now < self._next_tick:
+            return False
+        self._next_tick = now + HOP_S
+        ...
+```
+  and after each state change at the end of the classification path (all three branches), update the speed model:
+  `self.speed.update(self.state["act"], self.state["cad"], self.state["pk"], now)` (the two early-return branches
+  pass `act` with `cad=None`, which gives 0). Simplest: compute `self._set(...)` as now, then one line before each
+  `return True`: `self.speed.update(self.state["act"], self.state["cad"], self.state["pk"], now)`.
+- `snapshot()`: add `"speed_kmh": round(self.speed.speed * 3.6, 1)` and `"race": self.race.snapshot()`.
+
+- [ ] **Step 3: web.py**
+
+In `do_POST`, before the `else` 404:
+```python
+        elif url.path == "/race/start":
+            try:
+                self.gait.race.start(int(q.get("distance", ["400"])[0]), who)
+            except ValueError as e:
+                return self._json({"error": str(e)}, 400)
+        elif url.path == "/race/abort":
+            self.gait.race.abort()
+```
+(`who` is already cleaned above.) Update the module docstring's route list.
+
+- [ ] **Step 4: page.html**
+
+Insert a Race panel between the `<h1>` and the gait verdict, and the JS to drive it. Markup (inside `<main>`):
+```html
+<section id="race" class="race">
+  <div class="row" style="align-items:center">
+    <h1 style="margin:0">Race</h1>
+    <span class="muted">run on the spot</span>
+    <span style="flex:1"></span>
+    <button class="sec dist" data-d="100">100 m</button>
+    <button class="sec dist" data-d="400">400 m</button>
+    <button class="sec dist" data-d="1000">1 km</button>
+    <button id="raceStart" onclick="raceStart()">Start</button>
+    <button id="raceAbort" class="stop" onclick="post('/race/abort')">Abort</button>
+  </div>
+  <div class="track" id="track"></div>
+  <div class="muted">speed = cadence x stride, stride = 0.6 m + 0.5 m per g of impact above 1 g; WALK capped at 7 km/h, STAND and BIKE do not move</div>
+  <div class="row">
+    <div class="card"><small>Speed</small><b id="rSpeed">0.0</b> km/h</div>
+    <div class="card"><small>Distance</small><b id="rDist">0</b> m</div>
+    <div class="card"><small>Time</small><b id="rTime">0.0</b> s</div>
+  </div>
+  <div id="rCountdown" class="countdown"></div>
+  <div id="rResult" class="card result"></div>
+  <table id="rBoard" class="board"></table>
+</section>
+```
+CSS additions:
+```css
+  .race { background: #0d0d0d; border: 1px solid #222; border-radius: 12px; padding: 12px 14px; margin-bottom: 18px; }
+  .track { position: relative; height: 150px; background: #161616; border-radius: 8px; margin: 10px 0 4px; overflow: hidden; }
+  .lane { position: absolute; left: 0; right: 0; height: 28px; border-bottom: 1px dashed #2a2a2a; }
+  .lane .name { position: absolute; left: 8px; top: 6px; font-size: 12px; color: #999; }
+  .lane .dot { position: absolute; top: 6px; width: 16px; height: 16px; border-radius: 50%; margin-left: -8px; transition: left 0.1s linear; }
+  .lane .time { position: absolute; right: 8px; top: 6px; font-size: 12px; color: #bbb; }
+  .finish { position: absolute; top: 0; bottom: 0; right: 6%; width: 2px; background: repeating-linear-gradient(#fff 0 4px, #000 4px 8px); }
+  .countdown { font-size: 64px; font-weight: 800; text-align: center; color: #fff; min-height: 0; }
+  .result { display: none; margin-top: 8px; }
+  .board { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
+  .board td, .board th { padding: 4px 6px; text-align: left; border-bottom: 1px solid #222; color: #ccc; }
+  .board th { color: #888; font-weight: 500; text-transform: uppercase; font-size: 11px; }
+  .dist.on { background: #0093e7; }
+```
+JS additions (keep the existing functions):
+```js
+let raceDistance = 400;
+document.querySelectorAll(".dist").forEach(b => b.onclick = () => { raceDistance = +b.dataset.d; document.querySelectorAll(".dist").forEach(x => x.classList.toggle("on", x === b)); });
+document.querySelector('.dist[data-d="400"]').classList.add("on");
+function raceStart() { post("/race/start?distance=" + raceDistance); }
+const ghostColor = {Jogger: "#16ec06", Runner: "#ffde00", Sprinter: "#ff0026", "Your best": "#0093e7"};
+function renderRace(r, speedKmh) {
+  $("rSpeed").textContent = speedKmh.toFixed(1);
+  $("rDist").textContent = Math.round(r.dist);
+  $("rTime").textContent = r.elapsed.toFixed(1);
+  $("rCountdown").textContent = r.phase === "countdown" ? Math.ceil(r.countdown) : (r.phase === "running" ? "GO" : "");
+  $("raceStart").style.display = r.phase === "idle" || r.phase === "finished" ? "" : "none";
+  $("raceAbort").style.display = r.phase === "countdown" || r.phase === "running" ? "" : "none";
+  const lanes = [{name: "You", dist: r.dist, color: "#fff"}].concat(r.ghosts.map(g => ({name: g.name + " " + g.kmh + " km/h", dist: g.dist, color: ghostColor[g.name] || "#888"})));
+  const html = '<div class="finish"></div>' + lanes.map((l, i) => `<div class="lane" style="top:${i * 29}px"><span class="name">${l.name}</span><span class="dot" style="left:${8 + 86 * Math.min(1, l.dist / r.distance)}%;background:${l.color}"></span><span class="time">${Math.round(l.dist)} m</span></div>`).join("");
+  if ($("track").dataset.html !== html) { $("track").innerHTML = html; $("track").dataset.html = html; }
+  $("track").style.height = (lanes.length * 29 + 4) + "px";
+  if (r.result && r.phase === "finished") {
+    $("rResult").style.display = "block";
+    $("rResult").innerHTML = `<small>${r.who}, ${r.distance} m</small><b>${r.result.time.toFixed(2)} s</b> &nbsp; ${r.result.avg_kmh.toFixed(1)} km/h &nbsp; rank #${r.result.rank}` + (r.result.beat.length ? `<div class="muted">beat ${r.result.beat.join(", ")}</div>` : `<div class="muted">beat nobody this time</div>`);
+  } else { $("rResult").style.display = "none"; }
+  const rows = r.leaderboard.map((e, i) => `<tr><td>${i + 1}</td><td>${e.who}</td><td>${e.time.toFixed(2)} s</td><td>${e.avg_kmh.toFixed(1)} km/h</td><td class="muted">${e.when}</td></tr>`).join("");
+  const board = rows ? `<tr><th>#</th><th>who</th><th>${r.distance} m</th><th>avg</th><th>when</th></tr>` + rows : "";
+  if ($("rBoard").dataset.html !== board) { $("rBoard").innerHTML = board; $("rBoard").dataset.html = board; }
+}
+```
+and in `render(s)`: `renderRace(s.race, s.speed_kmh);` as the first line. Session links and the rest unchanged.
+
+- [ ] **Step 5: main.py**
+
+No change needed (`Gait(...)` default `races_path` lands in `data/races.json`). Just confirm `py_compile`.
+
+- [ ] **Step 6: Run everything**
+
+Run: `.venv/bin/python -m pytest tests -q`
+Expected: all green (41 + 6 race + 2 pipeline + 1 web = 50).
+
+- [ ] **Step 7: Commit**
+
+```bash
+cd ~/ME193 && git add P6-Gait-Wearable/app/python P6-Gait-Wearable/tests && git commit -m "P6-Gait-Wearable: race mode: the pipeline runs a speed model and the race every loop pass, web routes start/abort a race, the page gets a Race panel with distance buttons, lanes with ghosts, countdown, finish card and leaderboard"
+```
