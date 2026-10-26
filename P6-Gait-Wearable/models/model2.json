@@ -1,14 +1,49 @@
 {
-  "features": ["mean_x", "mean_y", "mean_z", "std_x", "std_y", "std_z", "mag_std", "mag_peak", "gyro_rms", "gyro_peak", "dom_freq", "gyro_ratio"],
-  "classes": ["BIKE", "RUN", "STAND", "WALK"],
-  "note": "seed thresholds from the spec, replaced by train/train.py",
-  "root": {
-    "f": "gyro_rms", "t": 40.0,
-    "l": {"label": "STAND"},
+ "features": [
+  "mean_x",
+  "mean_y",
+  "mean_z",
+  "std_x",
+  "std_y",
+  "std_z",
+  "mag_std",
+  "mag_peak",
+  "gyro_rms",
+  "gyro_peak",
+  "dom_freq",
+  "gyro_ratio"
+ ],
+ "classes": [
+  "BIKE",
+  "RUN",
+  "STAND",
+  "WALK"
+ ],
+ "root": {
+  "f": "mean_y",
+  "t": -0.06223200261592865,
+  "l": {
+   "label": "BIKE"
+  },
+  "r": {
+   "f": "gyro_rms",
+   "t": 131.63369750976562,
+   "l": {
+    "f": "std_z",
+    "t": 0.06946303509175777,
+    "l": {
+     "label": "STAND"
+    },
     "r": {
-      "f": "gyro_ratio", "t": 0.6,
-      "l": {"f": "mag_peak", "t": 2.2, "l": {"label": "WALK"}, "r": {"label": "RUN"}},
-      "r": {"label": "BIKE"}
+     "label": "WALK"
     }
+   },
+   "r": {
+    "label": "RUN"
+   }
   }
+ },
+ "trained_on_windows": 204,
+ "train_accuracy": 1.0,
+ "heldout_accuracy": null
 }

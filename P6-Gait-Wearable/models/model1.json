@@ -1,10 +1,38 @@
 {
-  "features": ["peak_x"],
-  "classes": ["RUN", "STAND", "WALK"],
-  "note": "seed thresholds from the spec, replaced by train/train.py",
-  "root": {
-    "f": "peak_x", "t": 1.15,
-    "l": {"label": "STAND"},
-    "r": {"f": "peak_x", "t": 2.2, "l": {"label": "WALK"}, "r": {"label": "RUN"}}
+ "features": [
+  "peak_x"
+ ],
+ "classes": [
+  "BIKE",
+  "RUN",
+  "STAND",
+  "WALK"
+ ],
+ "root": {
+  "f": "peak_x",
+  "t": 1.6824074983596802,
+  "l": {
+   "f": "peak_x",
+   "t": 0.861739993095398,
+   "l": {
+    "label": "STAND"
+   },
+   "r": {
+    "f": "peak_x",
+    "t": 1.4502325057983398,
+    "l": {
+     "label": "BIKE"
+    },
+    "r": {
+     "label": "WALK"
+    }
+   }
+  },
+  "r": {
+   "label": "RUN"
   }
+ },
+ "trained_on_windows": 204,
+ "train_accuracy": 0.7647,
+ "heldout_accuracy": null
 }
