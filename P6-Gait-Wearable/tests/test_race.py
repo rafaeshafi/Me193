@@ -70,32 +70,66 @@ def test_race_runs_countdown_distance_finish_and_saves(tmp_path):
     assert s["phase"] == "finished" and s["dist"] == 100
     assert s["result"]["time"] == pytest.approx(20.0) and s["result"]["avg_kmh"] == pytest.approx(18.0)
     assert s["result"]["beat"] == ["Jogger", "Runner"] and s["result"]["rank"] == 1
+    assert s["result"]["place"] == 2 and s["result"]["record"] is True
+    assert s["champion"]["who"] == "ann"
     assert store.leaderboard(100)[0]["who"] == "ann"
     assert json.loads((tmp_path / "races.json").read_text())[0]["distance"] == 100
 
 
-def test_second_race_gets_the_best_ghost_and_abort_resets(tmp_path):
+def _finish(r, clk, speed):
+    clk.t += COUNTDOWN_S
+    r.tick(speed, clk.t)
+    while r.snapshot()["phase"] == "running":
+        clk.t += 1.0
+        r.tick(speed, clk.t)
+
+
+def test_champion_ghost_is_the_fastest_of_anyone(tmp_path):
     clk = Clock()
     store = ResultStore(tmp_path / "races.json")
     r = Race(store, clock=clk)
     r.start(100, "ann")
-    clk.t += COUNTDOWN_S
-    r.tick(4.0, clk.t)
-    for _ in range(25):
-        clk.t += 1.0
-        r.tick(4.0, clk.t)
+    _finish(r, clk, 4.0)
     assert r.snapshot()["phase"] == "finished"
-    r.start(100, "ann")
-    names = [g["name"] for g in r.snapshot()["ghosts"]]
-    assert names == [n for n, _ in GHOSTS] + ["Your best"]
+    r.start(100, "bob")
+    gh = r.snapshot()["ghosts"]
+    assert [g["name"] for g in gh] == [n for n, _ in GHOSTS] + ["Champion"] and gh[-1]["who"] == "ann"
     clk.t += COUNTDOWN_S + 2.0
-    r.tick(4.0, clk.t)
-    best = next(g for g in r.snapshot()["ghosts"] if g["name"] == "Your best")
-    assert best["dist"] == pytest.approx(8.0)
+    r.tick(5.0, clk.t)
+    champ = next(g for g in r.snapshot()["ghosts"] if g["name"] == "Champion")
+    assert champ["dist"] == pytest.approx(8.0)
+    while r.snapshot()["phase"] == "running":
+        clk.t += 1.0
+        r.tick(5.0, clk.t)
+    res = r.snapshot()["result"]
+    assert res["record"] is True and "Champion" in res["beat"]
+    r.start(100, "ann")
+    assert r.snapshot()["ghosts"][-1]["who"] == "bob"
     r.abort()
-    assert r.snapshot()["phase"] == "idle" and len(store.leaderboard(100)) == 1
-    r.start(400, "bob")                       # another distance: no best yet, only the fixed ghosts
+    assert r.snapshot()["phase"] == "idle"
+    r.start(400, "bob")
     assert [g["name"] for g in r.snapshot()["ghosts"]] == [n for n, _ in GHOSTS]
+
+
+def test_anon_can_hold_the_record(tmp_path):
+    clk = Clock()
+    r = Race(ResultStore(tmp_path / "races.json"), clock=clk)
+    r.start(100, "")
+    _finish(r, clk, 4.0)
+    assert r.snapshot()["phase"] == "finished"
+    r.start(100, "")
+    assert r.snapshot()["ghosts"][-1]["who"] == "anon"
+
+
+def test_slower_than_the_champion_is_no_record(tmp_path):
+    clk = Clock()
+    r = Race(ResultStore(tmp_path / "races.json"), clock=clk)
+    r.start(100, "ann")
+    _finish(r, clk, 5.0)
+    r.start(100, "bob")
+    _finish(r, clk, 4.0)
+    res = r.snapshot()["result"]
+    assert res["record"] is False and "Champion" not in res["beat"] and res["place"] == 3
 
 
 def test_result_store_persists_and_ranks(tmp_path):
@@ -107,7 +141,7 @@ def test_result_store_persists_and_ranks(tmp_path):
     s2 = ResultStore(p)                        # re-read from disk
     board = s2.leaderboard(400)
     assert [e["who"] for e in board] == ["bob", "ann"] and board[0]["avg_kmh"] == pytest.approx(16.0)
-    assert s2.best(400, "ann")["time"] == 120.0 and s2.best(1000, "ann") is None
+    assert s2.champion(400)["who"] == "bob" and s2.champion(400)["time"] == 90.0 and s2.champion(1000) is None
     assert DISTANCES == (100, 400, 1000)
 
 
@@ -167,20 +201,6 @@ def test_corrupt_results_file_is_kept_aside(tmp_path):
     assert len(bad) == 1 and bad[0].read_text() == "{not json"
     store.save(100, "ann", 20.0, [(0.5, 5.0)])
     assert json.loads(p.read_text())[0]["who"] == "ann"
-
-
-def test_anon_has_no_personal_ghost(tmp_path):
-    clk = Clock()
-    r = Race(ResultStore(tmp_path / "races.json"), clock=clk)
-    r.start(100, "")
-    clk.t += COUNTDOWN_S
-    r.tick(4.0, clk.t)
-    for _ in range(25):
-        clk.t += 1.0
-        r.tick(4.0, clk.t)
-    assert r.snapshot()["phase"] == "finished"
-    r.start(100, "")
-    assert [g["name"] for g in r.snapshot()["ghosts"]] == [n for n, _ in GHOSTS]
 
 
 def test_start_accepts_a_string_distance(tmp_path):
