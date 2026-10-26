@@ -39,7 +39,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
-        if url.path == "/":
+        if url.path in ("/", "/race"):  # one page; /race opens on the race tab
             self._send(200, "text/html; charset=utf-8", PAGE)
         elif url.path == "/state":
             self._json(self.gait.snapshot())

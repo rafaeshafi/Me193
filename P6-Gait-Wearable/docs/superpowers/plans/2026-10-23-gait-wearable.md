@@ -2184,6 +2184,8 @@ def test_page_and_state(server):
     assert status == 200 and "text/html" in ctype and b"EventSource" in body
     status, ctype, body = req(s, "GET", "/state")
     assert status == 200 and json.loads(body)["act"] == "---"
+    status, ctype, body = req(s, "GET", "/race")
+    assert status == 200 and "text/html" in ctype and b"raceCanvas" in body
 
 
 def test_recorder_controls(server):
@@ -2270,6 +2272,10 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'web'`
   ul { padding-left: 18px; } a { color: #0093e7; }
   .muted { color: #777; font-size: 13px; }
   .race { background: #0d0d0d; border: 1px solid #222; border-radius: 12px; padding: 12px 14px; margin-bottom: 18px; }
+  .tabs { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .tab { background: #222; color: #bbb; }
+  .tab.on { background: #0093e7; color: #fff; }
+  section.hidden { display: none; }
   .track { height: 360px; width: 100%; display: block; background: #1f2430; border-radius: 8px; margin: 10px 0 4px; touch-action: manipulation; }
   .countdown { font-size: 64px; font-weight: 800; text-align: center; color: #fff; min-height: 0; }
   .result { display: none; margin-top: 8px; }
@@ -2281,10 +2287,9 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'web'`
 </head>
 <body>
 <main>
-<h1>Gait Wearable</h1>
+<nav class="tabs"><button class="tab" data-tab="gait">Gait</button><button class="tab" data-tab="race">Race</button><span class="muted" style="margin-left:auto">Gait Wearable</span></nav>
 <section id="race" class="race">
   <div class="row" style="align-items:center">
-    <h1 style="margin:0">Race</h1>
     <span class="muted">run on the spot</span>
     <span style="flex:1"></span>
     <button class="sec dist" data-d="100">100 m</button>
@@ -2294,15 +2299,9 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'web'`
     <button id="raceAbort" class="stop" onclick="post('/race/abort')">Abort</button>
   </div>
   <canvas id="raceCanvas" class="track"></canvas>
-  <div class="muted">speed = cadence x stride, stride = 0.6 m + 0.5 m per g of impact above 1 g; WALK capped at 7 km/h, STAND and BIKE do not move</div>
-  <div class="row">
-    <div class="card"><small>Speed</small><b id="rSpeed">0.0</b> km/h</div>
-    <div class="card"><small>Distance</small><b id="rDist">0</b> m</div>
-    <div class="card"><small>Time</small><b id="rTime">0.0</b> s</div>
-  </div>
-  <div id="rResult" class="card result"></div>
   <table id="rBoard" class="board"></table>
 </section>
+<section id="gait">
 <div id="act" class="verdict">---</div>
 <div class="muted">Model 2: all six IMU channels</div>
 <div class="row">
@@ -2328,6 +2327,7 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'web'`
 <h1>Sessions</h1>
 <ul id="sessions"></ul>
 <details><summary class="muted">features</summary><pre id="features" class="muted"></pre></details>
+</section>
 <script>
 const $ = id => document.getElementById(id);
 const canvas = $("wave"), ctx = canvas.getContext("2d");
@@ -2358,16 +2358,9 @@ document.querySelector('.dist[data-d="400"]').classList.add("on");
 function raceStart() { post("/race/start?distance=" + raceDistance); }
 const ghostColor = {Jogger: "#16ec06", Runner: "#ffde00", Sprinter: "#ff0026", "Your best": "#0093e7"};
 function renderRace(r, speedKmh) {
-  $("rSpeed").textContent = speedKmh.toFixed(1);
-  $("rDist").textContent = Math.round(r.dist);
-  $("rTime").textContent = r.elapsed.toFixed(1);
   $("raceStart").style.display = r.phase === "idle" || r.phase === "finished" ? "" : "none";
   $("raceAbort").style.display = r.phase === "countdown" || r.phase === "running" ? "" : "none";
   raceSnap = r; raceSnapAt = performance.now();
-  if (r.result && r.phase === "finished") {
-    $("rResult").style.display = "block";
-    $("rResult").innerHTML = `<small>${r.who}, ${r.distance} m</small><b>${ordinal(r.result.place || 0)} of ${r.field || 0}</b> &nbsp; ${r.result.time.toFixed(2)} s &nbsp; ${r.result.avg_kmh.toFixed(1)} km/h` + (r.result.record ? `<div style="color:#ffde00;font-weight:700">NEW RECORD: you are the Champion ghost now</div>` : (r.champion ? `<div class="muted">Champion ${r.champion.who || ""} holds ${r.champion.time.toFixed(2)} s</div>` : ""));
-  } else { $("rResult").style.display = "none"; }
   const rows = r.leaderboard.map((e, i) => `<tr><td>${i + 1}</td><td>${e.who}</td><td>${e.time.toFixed(2)} s</td><td>${e.avg_kmh.toFixed(1)} km/h</td><td class="muted">${e.when}</td></tr>`).join("");
   const board = rows ? `<tr><th>#</th><th>who</th><th>${r.distance} m</th><th>avg</th><th>when</th></tr>` + rows : "";
   if ($("rBoard").dataset.html !== board) { $("rBoard").innerHTML = board; $("rBoard").dataset.html = board; }
@@ -2724,6 +2717,17 @@ function connect() {
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && (!es || es.readyState === 2)) connect(); });
 connect();
+
+// ---- tabs: the race is its own view, reachable at /race ----
+function showTab(name) {
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+  $("race").classList.toggle("hidden", name !== "race");
+  $("gait").classList.toggle("hidden", name !== "gait");
+  if (name === "race") fitRace();
+  history.replaceState(null, "", name === "race" ? "/race" : "/");
+}
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+showTab(location.pathname === "/race" || location.hash === "#race" ? "race" : "gait");
 </script>
 </main>
 </body>
@@ -2775,7 +2779,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
-        if url.path == "/":
+        if url.path in ("/", "/race"):  # one page; /race opens on the race tab
             self._send(200, "text/html; charset=utf-8", PAGE)
         elif url.path == "/state":
             self._json(self.gait.snapshot())
@@ -4454,3 +4458,7 @@ Spec Revision 6. `page.html`'s race script block was rewritten twice after Task 
 ### Task 26 (done in-session, 2026-10-26): realism pass
 
 A design agent rebuilt the race scene (commits 1379be7, 29de2d8): world-space 400 m oval with six 1.22 m lanes and 36.5 m bends turning LEFT (anticlockwise, infield on the left), pinhole chase camera 6 m behind and 2.2 m up, offscreen pre-rendered stadium/crowd/track grain, skeletal back-view runners with bibs and a stride cycle, sun from front-left with limb shadows, LED scoreboard, glossy power bar at 0.60 width with tag collision avoidance, medal-banded finish panel. The Task 11 `page.html` block above is synced to the final file.
+
+### Task 27 (done in-session, 2026-10-26): race on its own tab
+
+The page has a Gait / Race tab bar; `/race` serves the same page opened on the race tab (`history.replaceState` keeps the address in step). The text and stat cards under the race canvas are gone (the HUD carries speed, distance and time); the leaderboard table stays under the canvas.

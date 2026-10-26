@@ -40,6 +40,8 @@ def test_page_and_state(server):
     assert status == 200 and "text/html" in ctype and b"EventSource" in body
     status, ctype, body = req(s, "GET", "/state")
     assert status == 200 and json.loads(body)["act"] == "---"
+    status, ctype, body = req(s, "GET", "/race")
+    assert status == 200 and "text/html" in ctype and b"raceCanvas" in body
 
 
 def test_recorder_controls(server):
