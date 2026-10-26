@@ -10,7 +10,7 @@
  ],
  "root": {
   "f": "peak_x",
-  "t": 1.6824074983596802,
+  "t": 1.5163300037384033,
   "l": {
    "f": "peak_x",
    "t": 0.861739993095398,
@@ -19,7 +19,7 @@
    },
    "r": {
     "f": "peak_x",
-    "t": 1.4502325057983398,
+    "t": 1.2621474862098694,
     "l": {
      "label": "BIKE"
     },
@@ -32,7 +32,7 @@
    "label": "RUN"
   }
  },
- "trained_on_windows": 204,
- "train_accuracy": 0.7647,
- "heldout_accuracy": null
+ "trained_on_windows": 402,
+ "train_accuracy": 0.8184,
+ "heldout_accuracy": 0.7214
 }

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from imu import ACCEL_G_PER_LSB, GYRO_DPS_PER_LSB
 from models import Tree
+from seed_models import SEED1, SEED2
 from pipeline import Gait
 from recorder import Recorder
 from synth import synth
@@ -27,7 +28,7 @@ def to_batch(seq, samples, resets=0):
 
 
 def make(tmp_path, clk):
-    return Gait(Tree.load(ROOT / "models" / "model1.json"), Tree.load(ROOT / "models" / "model2.json"),
+    return Gait(Tree(SEED1), Tree(SEED2),
                 Recorder(tmp_path, clock=clk, rolling=False), clock=clk)
 
 

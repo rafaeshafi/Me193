@@ -1,7 +1,8 @@
 """Window features for both models, from a list of (ax, ay, az, gx, gy, gz) samples in g and deg/s.
 
 Pure Python so the same file runs on the board (no numpy there) and in training on the Mac. X is the thigh axis.
-Model 1 is allowed exactly one feature, peak_x. Model 2 reads MODEL2_FEATURES.
+Model 1 is allowed exactly one feature, peak_x. Model 2 reads MODEL2_FEATURES; its tree starts with the fixed
+motion gate gyro_rms <= STILL_GYRO -> STAND, then a learned tree over the moving classes (see train/train.py).
 dom_freq is the thigh swing rate (stride or pedal cycle), not the step rate; cadence in steps/min is 2 x 60 x dom_freq for walk and run.
 """
 import math
@@ -9,8 +10,10 @@ import math
 RATE = 100
 X, Y, Z, GX, GY, GZ = range(6)
 MODEL1_FEATURES = ["peak_x"]
-MODEL2_FEATURES = ["mean_x", "mean_y", "mean_z", "std_x", "std_y", "std_z", "mag_std", "mag_peak",
-                   "gyro_rms", "gyro_peak", "dom_freq", "gyro_ratio"]
+# Model 2 reads features that do not care how the breakout is rotated about the thigh axis: thigh tilt (|gravity on X|),
+# spreads along and across the thigh, impact and rotation energy, swing rate and the rotation-per-impact ratio.
+MODEL2_FEATURES = ["tilt", "std_x", "std_perp", "mag_std", "mag_peak", "gyro_rms", "gyro_peak", "dom_freq", "gyro_ratio"]
+STILL_GYRO = 40.0  # deg/s; a leg at rest reads the gyro bias (~10), any activity reads 65+: Model 2's root split
 FREQ_LO, FREQ_HI, FREQ_STEP = 0.5, 4.0, 0.1
 
 
@@ -86,6 +89,8 @@ def compute(window, rate=RATE):
         "peak_x": _percentile([abs(a) for a in ax], 0.95),
         "mean_x": _mean(ax), "mean_y": _mean(ay), "mean_z": _mean(az),
         "std_x": _std(ax), "std_y": _std(ay), "std_z": _std(az),
+        "tilt": abs(_mean(ax)),                                  # 1 g = thigh vertical, 0 = horizontal (pedalling)
+        "std_perp": math.sqrt(_std(ay) ** 2 + _std(az) ** 2),   # spread across the thigh, rotation-proof
         "mag_std": mag_std,
         "mag_peak": max(mag),
         "gyro_rms": gyro_rms,

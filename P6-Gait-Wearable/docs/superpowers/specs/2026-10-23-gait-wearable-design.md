@@ -174,3 +174,22 @@ everything. What changes:
   MPU 5 mm.
 - Out of scope now: any on-body display. The UNO Q's LED matrix could later show the activity's initial with the
   P5 `draw` provider; not built.
+
+## Revision 3 (2026-10-26, from the first two recorded sessions): rotation-proof features and a motion gate
+
+Two sessions trained against each other showed the original Model 2 picking up accidents of one session: a slight
+forward lean while walking (mean_x) separated standing from walking as cleanly as the gyro did, and the bike leg's
+tilt flipped sign between sessions, so raw gravity components did not transfer (77 % leave-one-session-out).
+
+- **Model 2 features** are now rotation-proof about the thigh axis: `tilt` (|gravity on the thigh axis|: 1 g upright,
+  ~0.3 g pedalling), `std_x`, `std_perp` (spread across the thigh), `mag_std`, `mag_peak`, `gyro_rms`, `gyro_peak`,
+  `dom_freq`, `gyro_ratio`. Raw `mean_y/z` and `std_y/z` are still computed and shown but not used.
+- **Model 2 is motion-gated:** the exported tree's root is the fixed split `gyro_rms <= 40 deg/s -> STAND` (a still
+  leg reads the gyro bias, ~10; every activity reads 65+), and the learned tree (depth <= 4, light cost-complexity
+  pruning) only sorts WALK / RUN / BIKE. A still leg is decided by motion, never by posture. Training warns if the
+  gate is not clean on the data.
+- Result on the two sessions: Model 2 97.8 % leave-one-session-out (STAND 100, WALK 96, RUN 97, BIKE 98); Model 1
+  72 % with WALK mostly called BIKE (1.26 g vs 1.20 g peak). Deployed tree: moving? -> impact > 2.8 g RUN ->
+  thigh horizontal BIKE -> else WALK.
+- Tests carry their own seed trees (`tests/seed_models.py`); the files in `models/` are the trained ones and a test
+  only checks them against the feature contract and the gate.

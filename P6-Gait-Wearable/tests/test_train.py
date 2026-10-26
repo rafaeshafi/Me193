@@ -8,7 +8,7 @@ import numpy as np
 from features import MODEL1_FEATURES, MODEL2_FEATURES, compute
 from models import Tree
 from synth import synth
-from train import LABELS, dataset, export_tree, fit, matrix, person_of, windows
+from train import LABELS, dataset, export_tree, fit, person_of, predict, windows
 
 
 def write_session(path, kinds, seconds=6.0, who=""):
@@ -51,17 +51,22 @@ def test_export_matches_sklearn_and_round_trips(tmp_path):
     feats, y, groups, persons = dataset(sorted(tmp_path.glob("*.csv")))
     assert set(y) == set(LABELS) and len(feats) == len(y) == len(groups) == len(persons)
     jittered = [{k: v * (1 + 1e-3 * ((i % 7) - 3)) for k, v in f.items()} for i, f in enumerate(feats)]
-    for names, depth, leaf in ((MODEL1_FEATURES, 3, 1), (MODEL2_FEATURES, 5, 1), (MODEL1_FEATURES, 3, 5), (MODEL2_FEATURES, 5, 5)):
-        clf, X = fit(feats, y, names, depth=depth, leaf=leaf)
-        tree = Tree(export_tree(clf, names))
+    for names, depth, leaf, gate in ((MODEL1_FEATURES, 3, 1, False), (MODEL2_FEATURES, 4, 1, True),
+                                     (MODEL1_FEATURES, 3, 5, False), (MODEL2_FEATURES, 4, 5, True)):
+        clf, X = fit(feats, y, names, depth=depth, leaf=leaf, gate=gate)
+        tree = Tree(export_tree(clf, names, gate))
         for rows in (feats, jittered):
             ours = [tree.predict(f) for f in rows]
-            assert ours == list(clf.predict(matrix(rows, names)))
-        spec = json.loads(json.dumps(export_tree(clf, names)))
-        assert spec["features"] == names and spec["classes"] == list(clf.classes_)
+            assert ours == list(predict(clf, rows, names, gate))
+        spec = json.loads(json.dumps(export_tree(clf, names, gate)))
+        assert spec["features"] == names
+        assert spec["classes"] == (sorted(set(clf.classes_) | {"STAND"}) if gate else list(clf.classes_))
+        if gate:
+            assert spec["root"]["f"] == "gyro_rms" and spec["root"]["l"] == {"label": "STAND"}
+            assert "STAND" not in clf.classes_          # the learned part never sees a still leg
     # Model 2 must separate all four synthetic activities perfectly; Model 1 is allowed to miss BIKE
-    clf2, X2 = fit(feats, y, MODEL2_FEATURES, depth=5, leaf=1)
-    assert (clf2.predict(X2) == np.array(y)).all()
+    clf2, X2 = fit(feats, y, MODEL2_FEATURES, depth=4, leaf=1, gate=True)
+    assert (predict(clf2, feats, MODEL2_FEATURES, True) == np.array(y)).all()
 
 
 def test_windows_do_not_straddle_a_time_gap(tmp_path):
@@ -89,3 +94,13 @@ def test_windows_survive_arrival_jitter(tmp_path):
         csv.writer(f).writerows(lines)
     assert clean == 57                                     # (3000 - 200) / 50 + 1
     assert len(list(windows(p))) == clean
+
+
+def test_load_session_skips_a_truncated_last_row(tmp_path):
+    from train import load_session
+    p = tmp_path / "20261026-120000-guided.csv"
+    write_session(p, ["WALK"], seconds=1.0)
+    with open(p, "a") as f:
+        f.write("1.0")                      # power pulled mid-row
+    rows = load_session(p)
+    assert len(rows) == 200 and rows[-1][1] == ""

@@ -3,8 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from features import compute
+from features import MODEL1_FEATURES, MODEL2_FEATURES, compute
 from models import Tree, Vote
+from seed_models import SEED1, SEED2
 from synth import synth
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,14 +34,22 @@ def test_tree_load_from_file(tmp_path):
 
 
 def test_seed_models_classify_the_synthetic_signals():
-    m1 = Tree.load(ROOT / "models" / "model1.json")
-    m2 = Tree.load(ROOT / "models" / "model2.json")
+    m1, m2 = Tree(SEED1), Tree(SEED2)
     for kind in ("STAND", "WALK", "RUN", "BIKE"):
         f = compute(synth(kind))
         assert m2.predict(f) == kind
         if kind != "BIKE":
             assert m1.predict(f) == kind
     assert m1.predict(compute(synth("BIKE"))) in ("STAND", "WALK")  # the honest limitation of one feature
+
+
+def test_deployed_model_files_match_the_feature_contract():
+    m1 = Tree.load(ROOT / "models" / "model1.json")
+    m2 = Tree.load(ROOT / "models" / "model2.json")
+    assert m1.features == MODEL1_FEATURES and set(m2.features) <= set(MODEL2_FEATURES)
+    assert set(m1.classes) <= {"STAND", "WALK", "RUN", "BIKE"} and set(m2.classes) == {"STAND", "WALK", "RUN", "BIKE"}
+    f = compute(synth("STAND"))
+    assert m2.predict(f) == "STAND"           # a leg at rest is decided by the motion gate, whatever was trained
 
 
 def test_tree_rejects_a_split_on_an_unlisted_feature():

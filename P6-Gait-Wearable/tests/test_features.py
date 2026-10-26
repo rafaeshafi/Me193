@@ -22,6 +22,8 @@ def test_gyro_and_gravity_features_separate_bike():
     f = {k: compute(synth(k)) for k in ("STAND", "WALK", "RUN", "BIKE")}
     assert f["BIKE"]["gyro_ratio"] > 2 * max(f["STAND"]["gyro_ratio"], f["WALK"]["gyro_ratio"], f["RUN"]["gyro_ratio"])
     assert f["STAND"]["gyro_ratio"] < 0.05
+    assert f["BIKE"]["tilt"] < 0.3 < 0.9 < f["WALK"]["tilt"]          # thigh horizontal when pedalling
+    assert f["WALK"]["tilt"] == abs(f["WALK"]["mean_x"]) and f["WALK"]["std_perp"] >= f["WALK"]["std_y"]
     assert f["BIKE"]["mean_y"] > 0.8 and f["WALK"]["mean_y"] < 0.3
     assert f["STAND"]["gyro_rms"] < 5 < f["WALK"]["gyro_rms"] < f["RUN"]["gyro_rms"]
 

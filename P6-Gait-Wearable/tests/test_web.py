@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from models import Tree
+from seed_models import SEED1, SEED2
 from pipeline import Gait
 from recorder import Recorder
 from web import serve
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def server(tmp_path):
-    g = Gait(Tree.load(ROOT / "models" / "model1.json"), Tree.load(ROOT / "models" / "model2.json"),
+    g = Gait(Tree(SEED1), Tree(SEED2),
              Recorder(tmp_path, rolling=False))
     (tmp_path / "20261023-120000-walk.csv").write_text("t,label\n0.0,WALK\n")
     s = serve(g, port=0)

@@ -17,16 +17,19 @@ from pathlib import Path
 
 import numpy as np
 from sklearn.metrics import accuracy_score, confusion_matrix
-from sklearn.model_selection import LeaveOneGroupOut, cross_val_predict
 from sklearn.tree import DecisionTreeClassifier
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app" / "python"))
-from features import MODEL1_FEATURES, MODEL2_FEATURES, RATE, compute  # noqa: E402
+from features import MODEL1_FEATURES, MODEL2_FEATURES, RATE, STILL_GYRO, compute  # noqa: E402
 
 LABELS = ["STAND", "WALK", "RUN", "BIKE"]
 WINDOW_S, HOP_S = 2.0, 0.5
-MODELS = {"model1": (MODEL1_FEATURES, 3, 5), "model2": (MODEL2_FEATURES, 5, 5)}  # name: (features, depth, min leaf)
+# name: (features, depth of the learned tree, min samples per leaf, motion gate). With the gate, the exported tree's root
+# is the fixed split gyro_rms <= STILL_GYRO -> STAND and the learned tree only sorts the moving classes: a still leg is
+# decided by motion, never by a lean or a tilt that happened to separate standing from walking in one session.
+MODELS = {"model1": (MODEL1_FEATURES, 3, 5, False), "model2": (MODEL2_FEATURES, 4, 5, True)}
+CCP_ALPHA = 0.005
 
 
 def load_session(path):
@@ -34,7 +37,10 @@ def load_session(path):
     rows = []
     with open(path) as f:
         for r in csv.DictReader(f):
-            rows.append((float(r["t"]), r["label"], tuple(float(r[k]) for k in ("ax", "ay", "az", "gx", "gy", "gz"))))
+            try:  # a session cut short (power pulled, file pulled while open) ends in a truncated row: skip it
+                rows.append((float(r["t"]), r["label"], tuple(float(r[k]) for k in ("ax", "ay", "az", "gx", "gy", "gz"))))
+            except (TypeError, ValueError):
+                continue
     return rows
 
 
@@ -87,13 +93,28 @@ def matrix(feats, names):
     return np.array([[f[n] for n in names] for f in feats], dtype=float)
 
 
-def fit(feats, y, names, depth, leaf):
+def moving(feats):
+    return np.array([f["gyro_rms"] > STILL_GYRO for f in feats])
+
+
+def fit(feats, y, names, depth, leaf, gate=False):
+    """-> (clf, X). With the gate the tree is fit on the moving windows only (X still covers every window)."""
     X = matrix(feats, names)
-    clf = DecisionTreeClassifier(max_depth=depth, min_samples_leaf=leaf, random_state=0).fit(X, y)
+    keep = moving(feats) if gate else np.ones(len(feats), dtype=bool)
+    # ccp_alpha prunes splits whose two leaves carry the same label (cost-complexity pruning), nothing else at this size
+    clf = DecisionTreeClassifier(max_depth=depth, min_samples_leaf=leaf, ccp_alpha=CCP_ALPHA, random_state=0).fit(X[keep], np.array(y)[keep])
     return clf, X
 
 
-def export_tree(clf, names):
+def predict(clf, feats, names, gate=False):
+    """Labels for every window, applying the motion gate in front of the tree when the model has one."""
+    out = clf.predict(matrix(feats, names)).astype(object)
+    if gate:
+        out[~moving(feats)] = "STAND"
+    return out
+
+
+def export_tree(clf, names, gate=False):
     t = clf.tree_
 
     def node(i):
@@ -102,13 +123,25 @@ def export_tree(clf, names):
         return {"f": names[t.feature[i]], "t": float(t.threshold[i]),
                 "l": node(t.children_left[i]), "r": node(t.children_right[i])}
 
-    return {"features": list(names), "classes": [str(c) for c in clf.classes_], "root": node(0)}
+    root = node(0)
+    classes = [str(c) for c in clf.classes_]
+    if gate:
+        root = {"f": "gyro_rms", "t": STILL_GYRO, "l": {"label": "STAND"}, "r": root}
+        classes = sorted(set(classes) | {"STAND"})
+    return {"features": list(names), "classes": classes, "root": root}
 
 
-def heldout_predictions(X, y, groups, depth, leaf):
+def heldout_predictions(feats, y, groups, names, depth, leaf, gate=False):
     """Every window predicted by a tree that never saw its own session (leave-one-session-out), pooled."""
-    clf = DecisionTreeClassifier(max_depth=depth, min_samples_leaf=leaf, random_state=0)
-    return cross_val_predict(clf, X, y, groups=groups, cv=LeaveOneGroupOut())
+    y = np.array(y)
+    groups = np.array(groups)
+    pred = np.empty(len(y), dtype=object)
+    for held in sorted(set(groups)):
+        tr = groups != held
+        clf, _ = fit([f for f, k in zip(feats, tr) if k], y[tr], names, depth, leaf, gate)
+        te = [f for f, k in zip(feats, tr) if not k]
+        pred[~tr] = predict(clf, te, names, gate)
+    return pred
 
 
 def report(title, y_true, y_pred):
@@ -144,11 +177,15 @@ def main():
             return 1
     Path(args.out).mkdir(parents=True, exist_ok=True)
 
-    for name, (names, depth, leaf) in MODELS.items():
-        X = matrix(feats, names)
+    still = [f["gyro_rms"] for f, lab in zip(feats, y) if lab == "STAND"]
+    active = [f["gyro_rms"] for f, lab in zip(feats, y) if lab != "STAND"]
+    if still and active and (max(still) > STILL_GYRO or min(active) < STILL_GYRO):
+        print("WARNING: motion gate %.0f deg/s is not clean: STAND reaches %.0f, moving starts at %.0f"
+              % (STILL_GYRO, max(still), min(active)))
+    for name, (names, depth, leaf, gate) in MODELS.items():
         y_arr = np.array(y)
         if len(set(groups)) >= 2:
-            pred = heldout_predictions(X, y_arr, groups, depth, leaf)
+            pred = heldout_predictions(feats, y_arr, groups, names, depth, leaf, gate)
             report("%s leave-one-session-out" % name, y_arr, pred)
             heldout = accuracy_score(y_arr, pred)
         else:
@@ -157,17 +194,18 @@ def main():
         if args.peer and len(set(persons)) >= 2:
             ppl = np.array(persons)
             for who in sorted(set(persons)):
-                tr, te = ppl != who, ppl == who
-                clf = DecisionTreeClassifier(max_depth=depth, min_samples_leaf=leaf, random_state=0).fit(X[tr], y_arr[tr])
-                report("%s tested on %s (trained on everyone else)" % (name, who), y_arr[te], clf.predict(X[te]))
-        clf, X = fit(feats, y, names, depth, leaf)
-        spec = export_tree(clf, names)
+                tr = ppl != who
+                clf, _ = fit([f for f, k in zip(feats, tr) if k], y_arr[tr], names, depth, leaf, gate)
+                te = [f for f, k in zip(feats, tr) if not k]
+                report("%s tested on %s (trained on everyone else)" % (name, who), y_arr[~tr], predict(clf, te, names, gate))
+        clf, X = fit(feats, y, names, depth, leaf, gate)
+        spec = export_tree(clf, names, gate)
         spec["trained_on_windows"] = len(y)
-        spec["train_accuracy"] = round(float(accuracy_score(y, clf.predict(X))), 4)
+        spec["train_accuracy"] = round(float(accuracy_score(y, predict(clf, feats, names, gate))), 4)
         spec["heldout_accuracy"] = None if heldout is None else round(float(heldout), 4)
         out = Path(args.out) / ("%s.json" % name)
         out.write_text(json.dumps(spec, indent=1))
-        print("wrote", out, "(depth %d, %d leaves)" % (clf.get_depth(), clf.get_n_leaves()))
+        print("wrote", out, "(depth %d, %d leaves%s)" % (clf.get_depth() + (1 if gate else 0), clf.get_n_leaves() + (1 if gate else 0), ", motion gate first" if gate else ""))
     return 0
 
 

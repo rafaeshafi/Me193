@@ -1,11 +1,8 @@
 {
  "features": [
-  "mean_x",
-  "mean_y",
-  "mean_z",
+  "tilt",
   "std_x",
-  "std_y",
-  "std_z",
+  "std_perp",
   "mag_std",
   "mag_peak",
   "gyro_rms",
@@ -20,19 +17,19 @@
   "WALK"
  ],
  "root": {
-  "f": "mean_y",
-  "t": -0.06223200261592865,
+  "f": "gyro_rms",
+  "t": 40.0,
   "l": {
-   "label": "BIKE"
+   "label": "STAND"
   },
   "r": {
-   "f": "gyro_rms",
-   "t": 131.63369750976562,
+   "f": "mag_peak",
+   "t": 2.798848271369934,
    "l": {
-    "f": "std_z",
-    "t": 0.06946303509175777,
+    "f": "tilt",
+    "t": 0.6973327398300171,
     "l": {
-     "label": "STAND"
+     "label": "BIKE"
     },
     "r": {
      "label": "WALK"
@@ -43,7 +40,7 @@
    }
   }
  },
- "trained_on_windows": 204,
- "train_accuracy": 1.0,
- "heldout_accuracy": null
+ "trained_on_windows": 402,
+ "train_accuracy": 0.995,
+ "heldout_accuracy": 0.9776
 }
