@@ -3742,3 +3742,141 @@ Expected: all green (41 + 6 race + 2 pipeline + 1 web = 50).
 ```bash
 cd ~/ME193 && git add P6-Gait-Wearable/app/python P6-Gait-Wearable/tests && git commit -m "P6-Gait-Wearable: race mode: the pipeline runs a speed model and the race every loop pass, web routes start/abort a race, the page gets a Race panel with distance buttons, lanes with ghosts, countdown, finish card and leaderboard"
 ```
+
+---
+
+## Revision 5 (2026-10-26): Olympic final, first person, champion ghost (spec Revision 5)
+
+### Task 23: champion ghost, record and place in `race.py`
+
+**Files:** modify `app/python/race.py`, `tests/test_race.py`
+
+- [ ] **Step 1: Tests.** In `tests/test_race.py`:
+  - `test_race_runs_countdown_distance_finish_and_saves`: after the finish also assert `s["result"]["place"] == 2`
+    (the Sprinter at 22 km/h runs 100 m in 16.4 s, faster than 20 s) and `s["result"]["record"] is True` (first ever),
+    and `s["champion"]["who"] == "ann"` once finished.
+  - Replace `test_second_race_gets_the_best_ghost_and_abort_resets` with `test_champion_ghost_is_the_fastest_of_anyone`:
+    ann finishes 100 m at 4 m/s (25 s); then bob starts 100 m: ghosts are the three fixed ones plus
+    `{"name": "Champion", "who": "ann", ...}`; at 2 s into bob's run the Champion's `dist == pytest.approx(8.0)`;
+    bob finishes at 5 m/s (20 s): `result["record"] is True` and `result["beat"]` contains `"Champion"`; a third race
+    by ann now shows the Champion as bob; `r.abort()` returns to idle; a race at 400 m shows only the three fixed ghosts.
+  - Replace `test_anon_has_no_personal_ghost` with `test_anon_can_hold_the_record`: who="" finishes; the next start
+    shows a Champion whose `who == "anon"`.
+  - Add `test_slower_than_the_champion_is_no_record`: ann 100 m in 20 s, then bob at 4 m/s (25 s): `record is False`,
+    `"Champion" not in result["beat"]`, `place == 3` (Sprinter and Champion ahead).
+  - Keep every other test.
+
+- [ ] **Step 2: Implementation** (`app/python/race.py`):
+  - `ResultStore.champion(distance)`: the entry with the smallest `time` at that distance, or None. Remove `best()`.
+  - `Race._reset` sets `self.champion = None` (replacing `self.best`); `start` sets `self.champion = self.store.champion(self.distance)`.
+  - `ghosts()`: the fixed three, then when `self.champion`: `{"name": "Champion", "who": champion["who"], "kmh": champion["avg_kmh"], "dist": min(distance, replay_distance(champion["profile"], t))}`.
+  - At the finish (under the lock, before the save): `ghost_times = [distance / (kmh / 3.6) for _, kmh in GHOSTS]` plus
+    `champion["time"]` when there is one; `beat` = names of those with `time > elapsed` (the champion's name is
+    `"Champion"`); `place = 1 + number of ghost times < elapsed`; `record = champion is None or elapsed < champion["time"]`.
+    `self.result = {"time", "avg_kmh", "rank", "beat", "place", "record"}`. After the save, if the race is still the
+    same one and `record`, set `self.champion = saved` (so the finish snapshot already shows the new champion).
+  - `snapshot()` adds `"champion": None or {"who", "time", "avg_kmh"}` and `"field"`: the number of runners (ghosts + 1).
+
+- [ ] **Step 3:** `.venv/bin/python -m pytest tests -q` green; commit as
+  `P6-Gait-Wearable: race: one Champion ghost (the fastest finish by anyone at that distance) replaces the personal best, results carry place and record, the record holder becomes the ghost`.
+
+### Task 24: first-person canvas race view on the page
+
+**Files:** modify `app/python/page.html` only.
+
+Replace the `<div class="track" id="track"></div>` with `<canvas id="raceCanvas" class="track"></canvas>` and delete the
+`.lane`, `.finish` CSS rules (keep `.track` but make it `height: 360px; width: 100%; display: block;`). In `renderRace`,
+delete the lanes/track HTML block and instead store the snapshot: `raceSnap = r; raceSnapAt = performance.now();`.
+The result card gains place and record: replace its innerHTML line with
+```js
+    $("rResult").innerHTML = `<small>${r.who}, ${r.distance} m</small><b>${ordinal(r.result.place)} of ${r.field}</b> &nbsp; ${r.result.time.toFixed(2)} s &nbsp; ${r.result.avg_kmh.toFixed(1)} km/h` + (r.result.record ? `<div style="color:#ffde00;font-weight:700">NEW RECORD: you are the Champion ghost now</div>` : (r.champion ? `<div class="muted">Champion ${r.champion.who} holds ${r.champion.time.toFixed(2)} s</div>` : ""));
+```
+with `const ordinal = n => n + (["th","st","nd","rd"][(n % 100 > 10 && n % 100 < 14) ? 0 : Math.min(n % 10, 4) % 4] || "th");` hmm, simpler: `const ordinal = n => n + ({1: "st", 2: "nd", 3: "rd"}[n] || "th");`.
+Remove the `$("rCountdown")` line (the canvas draws the countdown) and the `#rCountdown` div.
+
+Add this script block after the existing `renderRace` (keep everything else on the page):
+```js
+// ---- first-person Olympic final ----
+const rc = $("raceCanvas"), rctx = rc.getContext("2d");
+let raceSnap = null, raceSnapAt = 0;
+const LANES = 5, YOU_LANE = 2, VIEW_M = 80, K = 14;
+const runnerColor = {Jogger: "#16ec06", Runner: "#ffde00", Sprinter: "#ff0026", Champion: "#0093e7"};
+const crowd = Array.from({length: 400}, (_, i) => [Math.random(), Math.random(), ["#c33", "#36c", "#eee", "#fc3", "#3a3"][i % 5]]);
+function fitRace() { rc.width = rc.clientWidth * devicePixelRatio; rc.height = 360 * devicePixelRatio; }
+window.addEventListener("resize", fitRace); fitRace();
+function runnerFigure(ctx, x, y, s, color, phase) {   // feet at (x, y), height ~ 60 * s px
+  const h = 60 * s;
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = Math.max(1, 5 * s); ctx.lineCap = "round";
+  const swing = Math.sin(phase) * 0.6;
+  ctx.beginPath(); ctx.moveTo(x, y - h * 0.5); ctx.lineTo(x + Math.sin(swing) * h * 0.3, y - h * 0.1); ctx.stroke();           // leg 1
+  ctx.beginPath(); ctx.moveTo(x, y - h * 0.5); ctx.lineTo(x - Math.sin(swing) * h * 0.3, y - h * 0.1); ctx.stroke();           // leg 2
+  ctx.beginPath(); ctx.moveTo(x, y - h * 0.5); ctx.lineTo(x, y - h * 0.85); ctx.stroke();                                       // torso
+  ctx.beginPath(); ctx.moveTo(x - Math.sin(swing) * h * 0.25, y - h * 0.5); ctx.lineTo(x, y - h * 0.8); ctx.lineTo(x + Math.sin(swing) * h * 0.25, y - h * 0.5); ctx.stroke(); // arms
+  ctx.beginPath(); ctx.arc(x, y - h * 0.95, h * 0.1, 0, 7); ctx.fill();                                                          // head
+}
+function drawRace() {
+  requestAnimationFrame(drawRace);
+  const r = raceSnap; if (!r || rc.width === 0) return;
+  const ctx = rctx, W = rc.width, H = rc.height, dpr = devicePixelRatio;
+  const dt = r.phase === "running" ? (performance.now() - raceSnapAt) / 1000 : 0;
+  const you = Math.min(r.distance, r.dist + r.speed_kmh / 3.6 * dt);
+  const horizon = H * 0.38, vx = W / 2;
+  const laneX = i => W * (0.02 + 0.96 * i / LANES);
+  const proj = (xb, d) => { d = Math.max(0, d); const t = d / (d + K); return [xb + (vx - xb) * t, H - (H - horizon) * t, 1 - t]; };
+  // sky, crowd, track
+  ctx.fillStyle = "#0b1020"; ctx.fillRect(0, 0, W, horizon);
+  for (const [cx, cy, c] of crowd) { ctx.fillStyle = c; ctx.fillRect(cx * W, horizon * (0.45 + 0.55 * cy), 3 * dpr, 3 * dpr); }
+  ctx.fillStyle = "#8b2f1f"; ctx.fillRect(0, horizon, W, H - horizon);
+  ctx.strokeStyle = "#f4f4f4"; ctx.lineWidth = 2 * dpr;
+  for (let i = 0; i <= LANES; i++) { const [x1, y1] = proj(laneX(i), 0), [x2, y2] = proj(laneX(i), VIEW_M); ctx.beginPath(); ctx.moveTo(laneX(i), H); ctx.lineTo(x2, y2); ctx.stroke(); }
+  // 10 m marks scrolling towards you
+  ctx.font = `${12 * dpr}px system-ui`; ctx.fillStyle = "#ddd"; ctx.textAlign = "left";
+  for (let m = Math.floor(you / 10) * 10; m <= you + VIEW_M; m += 10) {
+    const d = m - you; if (d < 0) continue;
+    const [xl, y] = proj(laneX(0), d), [xr] = proj(laneX(LANES), d);
+    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = dpr; ctx.beginPath(); ctx.moveTo(xl, y); ctx.lineTo(xr, y); ctx.stroke();
+    if (m % 50 === 0) ctx.fillText(m + " m", xr + 4 * dpr, y);
+  }
+  // finish line
+  const df = r.distance - you;
+  if (df >= 0 && df <= VIEW_M) {
+    const [xl, y, s] = proj(laneX(0), df), [xr] = proj(laneX(LANES), df);
+    ctx.lineWidth = Math.max(2, 10 * s) * dpr; ctx.strokeStyle = "#fff"; ctx.setLineDash([8 * s * dpr, 8 * s * dpr]);
+    ctx.beginPath(); ctx.moveTo(xl, y); ctx.lineTo(xr, y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = `bold ${Math.max(10, 28 * s) * dpr}px system-ui`; ctx.fillText("FINISH", vx, y - 14 * s * dpr);
+  }
+  // competitors in the other lanes, drawn far to near
+  const lanes = [0, 1, 3, 4];
+  const runners = r.ghosts.map((g, i) => ({name: g.name, who: g.who, lane: lanes[i % lanes.length], dist: Math.min(r.distance, g.dist + g.kmh / 3.6 * dt), kmh: g.kmh}));
+  runners.sort((a, b) => b.dist - a.dist);
+  for (const g of runners) {
+    const gap = g.dist - you;
+    if (gap < -2 || gap > VIEW_M) continue;
+    const xb = (laneX(g.lane) + laneX(g.lane + 1)) / 2, [x, y, s] = proj(xb, gap);
+    runnerFigure(ctx, x, y, s * dpr, runnerColor[g.name] || "#aaa", performance.now() / 1000 * g.kmh / 3.6 * 3);
+    ctx.fillStyle = runnerColor[g.name] || "#aaa"; ctx.textAlign = "center"; ctx.font = `${Math.max(9, 12 * s) * dpr}px system-ui`;
+    ctx.fillText(g.name === "Champion" ? "Champion " + (g.who || "") : g.name, x, y - 66 * s * dpr);
+  }
+  // you, bottom centre, legs driven by cadence
+  const cad = (raceSnap.cadence || 0);
+  runnerFigure(ctx, vx, H - 6 * dpr, 1.15 * dpr, "#fff", performance.now() / 1000 * Math.PI * 2 * (cad / 60));
+  // HUD
+  ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = `bold ${14 * dpr}px system-ui`;
+  ctx.fillText(`OLYMPIC FINAL  ${r.distance} m`, 10 * dpr, 20 * dpr);
+  const order = [{name: "YOU", dist: you}].concat(runners).sort((a, b) => b.dist - a.dist);
+  ctx.font = `${12 * dpr}px system-ui`;
+  order.forEach((o, i) => { ctx.fillStyle = o.name === "YOU" ? "#fff" : (runnerColor[o.name] || "#aaa"); ctx.fillText(`${i + 1}. ${o.name === "Champion" ? "Champion " + (o.who || "") : o.name}  ${Math.round(o.dist)} m`, 10 * dpr, (40 + 16 * i) * dpr); });
+  ctx.textAlign = "right"; ctx.fillStyle = "#fff"; ctx.font = `bold ${22 * dpr}px system-ui`;
+  ctx.fillText((r.elapsed + dt).toFixed(1) + " s", W - 10 * dpr, 26 * dpr);
+  ctx.font = `${14 * dpr}px system-ui`; ctx.fillText(r.speed_kmh.toFixed(1) + " km/h", W - 10 * dpr, 46 * dpr);
+  // countdown / go / finish
+  const big = r.phase === "countdown" ? String(Math.ceil(r.countdown)) : (r.phase === "running" && r.elapsed + dt < 1.5 ? "GO!" : (r.phase === "finished" ? "FINISH" : (r.phase === "idle" ? "" : "")));
+  if (big) { ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.font = `bold ${72 * dpr}px system-ui`; ctx.fillText(big, vx, H * 0.6); }
+  if (r.phase === "idle") { ctx.textAlign = "center"; ctx.fillStyle = "#ddd"; ctx.font = `${16 * dpr}px system-ui`; ctx.fillText("pick a distance and press Start", vx, H * 0.6); }
+}
+drawRace();
+```
+`raceSnap.cadence` comes from the main snapshot: in `render(s)` set `s.race.cadence = s.cad || 0;` before calling `renderRace(s.race, s.speed_kmh)`.
+
+- [ ] **Step 2:** sanity: `.venv/bin/python -c "import html.parser; html.parser.HTMLParser().feed(open('app/python/page.html').read()); print('ok')"`, the suite stays green (`tests/test_web.py` only checks for `EventSource`), then commit as
+  `P6-Gait-Wearable: race view is a first-person Olympic final on a canvas: perspective lanes, crowd, scrolling marks, approaching finish line, competitors as animated figures in the lanes beside you, HUD with positions and time, the Champion ghost named`.

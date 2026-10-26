@@ -214,3 +214,19 @@ A race mode on the page: the runner runs on the spot, the gait drives a runner a
   printed under the track. The gait view keeps working during a race. Web routes: `POST /race/start?distance=&who=`,
   `POST /race/abort`; the race state rides in the existing snapshot/SSE stream.
 - No sketch change. Code: `app/python/race.py` (SpeedModel, ResultStore, Race) driven from `Gait.tick`.
+
+## Revision 5 (2026-10-26): Olympic final, first person, one champion ghost
+
+- **View.** The race is drawn first-person from the runner's own lane on a canvas: a five-lane track in perspective
+  converging to a vanishing point, crowd band above the horizon, 10 m marks scrolling towards the runner as distance
+  accumulates, the finish line approaching from the distance, animated runner figures in the lanes beside you (gap
+  ahead maps to depth), a HUD with the event name, positions, time and speed, the 3-2-1-GO countdown, and a finish
+  card with place, time and "NEW RECORD" when earned. The page extrapolates positions between the 10 Hz snapshots
+  from each runner's speed so motion is smooth.
+- **Field.** Jogger 9, Runner 13, Sprinter 22 km/h as before, plus the **Champion**: the fastest finish ever
+  recorded at that distance by anyone (name, time, speed profile replayed). Beat the Champion and your run becomes
+  the Champion ghost for everyone after you. The per-person "Your best" ghost is gone.
+- **Result.** time, average speed, place in the field (1 to 5), the ghosts beaten, `record` true when the time beats
+  the Champion (or there was none). Leaderboard unchanged.
+- Code: `race.py` gains `ResultStore.champion(distance)`, `Race.champion`, `result["place"]`, `result["record"]`;
+  the page replaces the lane bars with the canvas view.
