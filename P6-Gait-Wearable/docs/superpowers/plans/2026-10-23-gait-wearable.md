@@ -2270,7 +2270,7 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'web'`
   ul { padding-left: 18px; } a { color: #0093e7; }
   .muted { color: #777; font-size: 13px; }
   .race { background: #0d0d0d; border: 1px solid #222; border-radius: 12px; padding: 12px 14px; margin-bottom: 18px; }
-  .track { height: 360px; width: 100%; display: block; background: #8fbfe6; border-radius: 8px; margin: 10px 0 4px; }
+  .track { height: 360px; width: 100%; display: block; background: #1f2430; border-radius: 8px; margin: 10px 0 4px; touch-action: manipulation; }
   .countdown { font-size: 64px; font-weight: 800; text-align: center; color: #fff; min-height: 0; }
   .result { display: none; margin-top: 8px; }
   .board { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
@@ -2374,110 +2374,330 @@ function renderRace(r, speedKmh) {
 }
 const ordinal = n => n + ({1: "st", 2: "nd", 3: "rd"}[n] || "th");
 // ---- London 2012 (SEGA) look: chase camera behind the runners on the stadium track ----
+// World in metres: x east, y up, z north. The oval is run anticlockwise, as on a real track: the bends turn left, lane 1 is on the inside (left).
+// u = metres along the inside kerb (bend radius R), w = metres outward from it. A pinhole chase camera sits 6 m behind and
+// 2.2 m above you. Textures (crowd, wraps, boards, roof, flags, grain), the sky and the HUD plates are pre-rendered; per frame
+// the stands are texture-mapped segment by segment far to near, the ground is batched into a few fills, runners are 3D skeletons.
 const rc = $("raceCanvas"), rctx = rc.getContext("2d");
 let raceSnap = null, raceSnapAt = 0;
-const SCENE_H = 360, K = 9, BEND = 0.16, YOU_DEPTH = 5, VIEW_M = 110;
-const LANES = 6, YOU_LANE = 1.5, GHOST_LANES = [2.5, 3.5, 4.5, 0.5];
-const KIT = {YOU: ["#f2c230", "#1f3f8f"], Jogger: ["#1b8f3a", "#ffffff"], Runner: ["#d8d8d8", "#c8102e"], Sprinter: ["#1f3f8f", "#ffffff"], Champion: ["#c3338b", "#ffffff"]};
-const HAIR = {YOU: "#5a3a1e", Jogger: "#222", Runner: "#b5651d", Sprinter: "#1a1a1a", Champion: "#f5e6a8"};
-const crowd = Array.from({length: 1100}, (_, i) => [Math.random(), Math.random(), ["#d9c7d9", "#8c6fa6", "#f0e0c0", "#5a4a6a", "#e8a0b0", "#b0c4de"][i % 6]]);
-const flags = ["#c8102e", "#ffffff", "#1f3f8f", "#ffd100", "#007a33", "#000000", "#ff7f00", "#00a3e0"];
-function fitRace() { rc.width = rc.clientWidth * devicePixelRatio; rc.height = SCENE_H * devicePixelRatio; }
-window.addEventListener("resize", fitRace); fitRace();
-function runnerBack(ctx, x, y, s, kit, hair, phase) {   // seen from behind, feet at (x, y), height ~ 110 * s
-  const L = Math.sin(phase), skin = "#c98a62";
-  ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.beginPath(); ctx.ellipse(x + 14 * s, y + 1, 22 * s, 6 * s, 0, 0, 7); ctx.fill();   // shadow
-  ctx.lineCap = "round"; ctx.strokeStyle = skin; ctx.lineWidth = 8 * s;
-  ctx.beginPath(); ctx.moveTo(x - 7 * s, y - 50 * s); ctx.lineTo(x - 8 * s, y - 24 * s - 22 * s * Math.max(0, L)); ctx.lineTo(x - 9 * s, y - 2 * s - 26 * s * Math.max(0, L)); ctx.stroke();   // left leg
-  ctx.beginPath(); ctx.moveTo(x + 7 * s, y - 50 * s); ctx.lineTo(x + 8 * s, y - 24 * s - 22 * s * Math.max(0, -L)); ctx.lineTo(x + 9 * s, y - 2 * s - 26 * s * Math.max(0, -L)); ctx.stroke(); // right leg
-  ctx.fillStyle = "#1a1a1a"; ctx.fillRect(x - 15 * s, y - 8 * s - 26 * s * Math.max(0, L), 10 * s, 7 * s); ctx.fillRect(x + 5 * s, y - 8 * s - 26 * s * Math.max(0, -L), 10 * s, 7 * s);  // shoes
-  ctx.fillStyle = kit[1]; ctx.fillRect(x - 13 * s, y - 64 * s, 26 * s, 16 * s);                  // shorts
-  ctx.fillStyle = kit[0]; ctx.beginPath(); ctx.roundRect(x - 15 * s, y - 102 * s, 30 * s, 40 * s, 6 * s); ctx.fill();   // singlet
-  ctx.fillStyle = kit[1]; ctx.fillRect(x - 3 * s, y - 102 * s, 6 * s, 40 * s);                   // back stripe
-  ctx.strokeStyle = skin; ctx.lineWidth = 7 * s;
-  ctx.beginPath(); ctx.moveTo(x - 15 * s, y - 96 * s); ctx.lineTo(x - 22 * s, y - 80 * s + 12 * s * L); ctx.lineTo(x - 16 * s, y - 66 * s + 18 * s * L); ctx.stroke();   // arms swing opposite to the legs
-  ctx.beginPath(); ctx.moveTo(x + 15 * s, y - 96 * s); ctx.lineTo(x + 22 * s, y - 80 * s - 12 * s * L); ctx.lineTo(x + 16 * s, y - 66 * s - 18 * s * L); ctx.stroke();
-  ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(x, y - 112 * s, 10 * s, 0, 7); ctx.fill();      // head
-  ctx.fillStyle = hair; ctx.beginPath(); ctx.arc(x, y - 114 * s, 10 * s, Math.PI * 0.95, Math.PI * 2.05); ctx.fill(); ctx.fillRect(x - 10 * s, y - 114 * s, 20 * s, 7 * s);   // hair, seen from behind
+const SCENE_H = 360, STR = 85.3319, R = 36.5, BND = Math.PI * R, LOOP = 2 * STR + 2 * BND, LW = 1.22, U0 = STR - 50, NEAR = 0.3;
+const SEG = 5, NSEG = Math.ceil(LOOP / SEG), SCR0 = 26, SUN = [-0.42, 0.53, 0.74], TAU = Math.PI * 2;
+const LANE = {YOU: 3, Jogger: 1, Runner: 2, Sprinter: 5, Champion: 4}, BIB = {YOU: 1, Jogger: 2, Runner: 3, Sprinter: 4, Champion: 5};
+const LOOK = {   // singlet, trim, shorts, skin, hair, shoes, hair style (0 short, 1 bun, 2 ponytail)
+  YOU: ["#f2c230", "#0b7a55", "#123a8a", "#e3b48d", "#7a4a22", "#1c1c1c", 2], Jogger: ["#1b8f3a", "#ffffff", "#f0f0f0", "#6f4428", "#151515", "#f05a28", 0],
+  Runner: ["#f4f4f4", "#c8102e", "#16224f", "#f3cfb0", "#b5651d", "#2b59c3", 1], Sprinter: ["#1f3f8f", "#d22630", "#c81f2b", "#8d5a3b", "#121212", "#c6ff00", 0], Champion: ["#c3338b", "#ffffff", "#ffffff", "#c99268", "#f1d38a", "#ff3d9a", 2]};
+const FONT = "-apple-system, system-ui, Helvetica, Arial, sans-serif", COND = '"Avenir Next Condensed", "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif';
+// track geometry: trackPt(u, w) -> TX, TZ (position) and HX, HZ (unit heading)
+let TX = 0, TZ = 0, HX = 0, HZ = 1;
+function trackPt(u, w) { u -= Math.floor(u / LOOP) * LOOP; let a;
+  if (u < STR) { HX = 0; HZ = 1; TX = 0; TZ = u; } else if (u < STR + BND) { a = (u - STR) / R; HX = Math.sin(a); HZ = Math.cos(a); TX = R - R * HZ; TZ = STR + R * HX; } else if (u < 2 * STR + BND) { HX = 0; HZ = -1; TX = 2 * R; TZ = 2 * STR + BND - u; }
+  else { a = (u - 2 * STR - BND) / R; HX = -Math.sin(a); HZ = -Math.cos(a); TX = R - R * HZ; TZ = R * HX; } TX = w * HZ - TX; TZ += w * HX; HX = -HX;   // mirror x so the oval runs anticlockwise; outward is to the right of the heading
 }
-function drawRace() {
-  requestAnimationFrame(drawRace);
-  const r = raceSnap; if (!r || rc.width === 0) return;
-  const ctx = rctx, dpr = devicePixelRatio, W = rc.width / dpr, H = SCENE_H;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const dt = r.phase === "running" ? (performance.now() - raceSnapAt) / 1000 : 0;
-  const you = Math.min(r.distance, r.dist + r.speed_kmh / 3.6 * dt);
-  const horizon = H * 0.42, vx = W * 0.5;
-  const laneX = i => W * (-0.32 + 1.55 * i / LANES);
-  const proj = (xb, d) => { d = Math.max(0.2, d); const t = d / (d + K); return [xb + (vx - xb) * t + BEND * W * t * t, H - (H - horizon) * t, 1 - t]; };
-  // sky, roof and trusses, flags, crowd tiers, purple wrap
-  const sky = ctx.createLinearGradient(0, 0, 0, horizon); sky.addColorStop(0, "#8fbfe6"); sky.addColorStop(1, "#d8ebf7");
-  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, horizon);
-  ctx.fillStyle = "#dfe3e8"; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(W, 0); ctx.lineTo(W, horizon * 0.30); ctx.quadraticCurveTo(W / 2, horizon * 0.55, 0, horizon * 0.30); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = "#aeb6c2"; ctx.lineWidth = 1.5;
-  for (let i = 0; i < 14; i++) { const x = (i / 13) * W; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 30, horizon * 0.42); ctx.moveTo(x, 0); ctx.lineTo(x - 30, horizon * 0.42); ctx.stroke(); }
-  for (let i = 0; i < 24; i++) { ctx.fillStyle = flags[i % flags.length]; ctx.fillRect(14 + i * (W / 24), horizon * 0.40 - 2 * Math.sin(i), 12, 8); }
-  ctx.fillStyle = "#3a3348"; ctx.fillRect(0, horizon * 0.45, W, horizon * 0.5);
-  for (const [cx, cy, c] of crowd) { ctx.fillStyle = c; ctx.fillRect(cx * W, horizon * (0.46 + 0.47 * cy), 2.2, 2.2); }
-  ctx.fillStyle = "#6a2c91"; ctx.fillRect(0, horizon * 0.93, W, horizon * 0.09);
-  ctx.fillStyle = "#f3e9ff"; ctx.font = `bold ${Math.max(8, horizon * 0.055)}px system-ui`; ctx.textAlign = "left";
-  for (let x = 10; x < W; x += 150) ctx.fillText("LONDON 2012", x, horizon * 0.995);
-  // infield and track
-  ctx.fillStyle = "#4c9a3f"; ctx.fillRect(0, horizon, W, H - horizon);
-  ctx.fillStyle = "#c93a30";
-  { const pts = []; for (let d = 0; d <= VIEW_M; d += 2) pts.push(proj(laneX(0), d)); const rpts = []; for (let d = VIEW_M; d >= 0; d -= 2) rpts.push(proj(laneX(LANES), d));
-    ctx.beginPath(); ctx.moveTo(laneX(0), H); for (const [x, y] of pts) ctx.lineTo(x, y); for (const [x, y] of rpts) ctx.lineTo(x, y); ctx.lineTo(laneX(LANES), H); ctx.closePath(); ctx.fill(); }
-  ctx.strokeStyle = "#ffffff";
-  for (let l = 0; l <= LANES; l++) { ctx.lineWidth = l === 0 || l === LANES ? 3 : 2; ctx.beginPath(); ctx.moveTo(laneX(l), H); for (let d = 0; d <= VIEW_M; d += 2) { const [x, y] = proj(laneX(l), d); ctx.lineTo(x, y); } ctx.stroke(); }
-  for (let m = Math.ceil((you - YOU_DEPTH) / 10) * 10; m <= you + VIEW_M; m += 10) {   // 10 m marks and the finish line
-    const d = m - you + YOU_DEPTH; if (d < 0.3 || d > VIEW_M || m <= 0) continue;
-    const [xl, y, s] = proj(laneX(0), d), [xr] = proj(laneX(LANES), d);
-    if (m === r.distance) { ctx.lineWidth = Math.max(3, 14 * s); ctx.setLineDash([10 * s + 2, 10 * s + 2]); } else { ctx.lineWidth = 1; ctx.setLineDash([]); ctx.strokeStyle = "rgba(255,255,255,0.5)"; }
-    ctx.beginPath(); ctx.moveTo(xl, y); ctx.lineTo(xr, y); ctx.stroke(); ctx.setLineDash([]); ctx.strokeStyle = "#ffffff";
-    if (m === r.distance) { ctx.fillStyle = "#fff"; ctx.font = `bold ${Math.max(10, 22 * s)}px system-ui`; ctx.textAlign = "center"; ctx.fillText("FINISH", (xl + xr) / 2, y - 10 * s); }
+function arcS(u, w) {   // arc length along the line w (texture coordinate along the stands)
+  const f = (R + w) / R; u -= Math.floor(u / LOOP) * LOOP; return u < STR ? u : u < STR + BND ? STR + (u - STR) * f : u < 2 * STR + BND ? u - BND + BND * f : 2 * STR + BND * f + (u - 2 * STR - BND) * f;
+}
+// camera and projection
+let CX = 0, CY = 2.2, CZ = 0, RX = 1, RZ = 0, FX = 0, FY = 0, FZ = 1, UX = 0, UY = 1, UZ = 0, CHX = 0, CHZ = 1, FOC = 400, W2 = 0, HC = 0, HOR = 0, YAW = 0, VW = 0, VH = SCENE_H, CAMU = 0, DPR = 1;
+let PX = 0, PY = 0, PZ = 0;
+function proj(x, y, z) { const dx = x - CX, dy = y - CY, dz = z - CZ; PZ = dx * FX + dy * FY + dz * FZ; if (PZ < NEAR) return false; const k = FOC / PZ; PX = W2 + (dx * RX + dz * RZ) * k; PY = HC - (dx * UX + dy * UY + dz * UZ) * k; return true; }
+function setCam(u, w, bob, sway) { trackPt(u - 6, w + sway); CX = TX; CZ = TZ; CY = 2.2 + bob; CAMU = u - 6;
+  trackPt(u + 12, w); let dx = TX - CX, dz = TZ - CZ; const d = Math.hypot(dx, dz); dx /= d; dz /= d; const p = Math.atan2(CY - 0.3, d), cp = Math.cos(p), sp = Math.sin(p);
+  RX = dz; RZ = -dx; FX = dx * cp; FY = -sp; FZ = dz * cp; UX = dx * sp; UY = cp; UZ = dz * sp; CHX = dx; CHZ = dz; YAW = Math.atan2(dx, dz); HOR = HC - FOC * sp / cp;
+}
+const CV = new Float64Array(30), CW = new Float64Array(60), QP = new Float64Array(30), PQ = new Float64Array(12);
+function polyW(n) {   // QP holds n world points: clip against the near plane, project, append to the current path
+  let m = 0, x0 = 1e9, x1 = -1e9, y0 = 1e9; for (let i = 0; i < n; i++) { const dx = QP[3 * i] - CX, dy = QP[3 * i + 1] - CY, dz = QP[3 * i + 2] - CZ; CV[3 * i] = dx * RX + dz * RZ; CV[3 * i + 1] = dx * UX + dy * UY + dz * UZ; CV[3 * i + 2] = dx * FX + dy * FY + dz * FZ; }
+  for (let i = 0; i < n; i++) { const j = i + 1 === n ? 0 : i + 1, za = CV[3 * i + 2], zb = CV[3 * j + 2]; if (za >= NEAR) { CW[2 * m] = W2 + CV[3 * i] * FOC / za; CW[2 * m + 1] = HC - CV[3 * i + 1] * FOC / za; m++; }
+    if ((za >= NEAR) !== (zb >= NEAR)) { const t = (NEAR - za) / (zb - za); CW[2 * m] = W2 + (CV[3 * i] + t * (CV[3 * j] - CV[3 * i])) * FOC / NEAR; CW[2 * m + 1] = HC - (CV[3 * i + 1] + t * (CV[3 * j + 1] - CV[3 * i + 1])) * FOC / NEAR; m++; } } if (m < 3) return;
+  for (let i = 0; i < m; i++) { const x = CW[2 * i], y = CW[2 * i + 1]; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; } if (x1 < 0 || x0 > VW || y0 > VH) return;
+  rctx.moveTo(CW[0], CW[1]); for (let i = 1; i < m; i++) rctx.lineTo(CW[2 * i], CW[2 * i + 1]); rctx.closePath();
+}
+function setQ(i, u, w, y) { trackPt(u, w); QP[3 * i] = TX; QP[3 * i + 1] = y; QP[3 * i + 2] = TZ; }
+function quadUW(ua, ub, wa0, wb0, wa1, wb1, y) { setQ(0, ua, wa0, y); setQ(1, ub, wa1, y); setQ(2, ub, wb1, y); setQ(3, ua, wb0, y); polyW(4); }
+function quadV(ua, ub, w, y0, y1) { setQ(0, ua, w, y0); setQ(1, ub, w, y0); setQ(2, ub, w, y1); setQ(3, ua, w, y1); polyW(4); }
+const stepAt = d => d < 24 ? 1.5 : d < 90 ? 3 : 6;
+function strip(wa, wb, y) { for (let d = -3; d < LOOP - 8;) { const s = stepAt(d); quadUW(CAMU + d, CAMU + d + s, wa, wb, wa, wb, y); d += s; } }
+function halfW(u, w) { trackPt(u, w); return Math.max(0.03, 0.55 * Math.max(1, (TX - CX) * FX - CY * FY + (TZ - CZ) * FZ) / FOC); }
+function lineStrip(w) { for (let d = -3; d < LOOP - 8;) { const s = stepAt(d), u = CAMU + d, h0 = halfW(u, w), h1 = halfW(u + s, w); quadUW(u, u + s, w - h0, w + h0, w - h1, w + h1, 0); d += s; } }
+function pq(i, u, w, y) { trackPt(u, w); if (!proj(TX, y, TZ)) return false; PQ[3 * i] = PX; PQ[3 * i + 1] = PY; PQ[3 * i + 2] = PZ; return true; }
+function affine(ctx, i, j, k, tw, th) {   // map text space [0,tw]x[0,th] onto the screen points PQ[i] (top left), PQ[j] (top right), PQ[k] (bottom left)
+  const x0 = PQ[3 * i], y0 = PQ[3 * i + 1]; ctx.setTransform(DPR * (PQ[3 * j] - x0) / tw, DPR * (PQ[3 * j + 1] - y0) / tw, DPR * (PQ[3 * k] - x0) / th, DPR * (PQ[3 * k + 1] - y0) / th, DPR * x0, DPR * y0);
+}
+// pre-rendered textures (seeded so the crowd is the same every load)
+function cnv(w, h) { const c = document.createElement("canvas"); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; }
+let seed = 11; const rand = () => (seed = seed * 16807 % 2147483647) / 2147483647, pick = a => a[(rand() * a.length) | 0];
+function texSet(w, h, period, draw) {   // a texture and two mip levels as repeating patterns
+  const cs = [cnv(w, h), cnv(w / 2, h / 2), cnv(w / 4, h / 4)]; draw(cs[0].getContext("2d"), w, h); for (let i = 1; i < 3; i++) cs[i].getContext("2d").drawImage(cs[i - 1], 0, 0, cs[i].width, cs[i].height);
+  return {pat: cs.map(c => rctx.createPattern(c, "repeat")), w: cs.map(c => c.width), h: cs.map(c => c.height), period, cv: cs, org: 0};
+}
+function rings(g, x, y, r, cols, lw) {   // the five rings, interlaced: top row blue, black, red; bottom row yellow, green
+  const C = [[x - 2.2 * r, y], [x - 1.1 * r, y + r], [x, y], [x + 1.1 * r, y + r], [x + 2.2 * r, y]];
+  const ring = (i, a0, a1) => { g.beginPath(); g.arc(C[i][0], C[i][1], r, a0, a1); if (cols[5]) { g.lineWidth = lw + 1.8; g.strokeStyle = cols[5]; g.stroke(); } g.lineWidth = lw; g.strokeStyle = cols[i]; g.stroke(); }; for (const i of [1, 3, 0, 2, 4]) ring(i, 0, TAU);
+  for (const i of [1, 3]) ring(i, -1.95, -1.2);   // each lower ring crosses over its neighbours at the top crossings, under them at the sides
+}
+const SHIRT = ["#f4f4f4", "#e6e6e6", "#cfcfd4", "#c8102e", "#1f3f8f", "#1c1c1c", "#ffd100", "#7a2a8c", "#e46aa6", "#5aa0d8", "#2e8b57", "#ff7f00", "#8a8a8a", "#b22234", "#f4f4f4"];
+const SKIN = ["#f1c7a5", "#e0ac83", "#c68642", "#8d5524", "#5c3a1e", "#f3d2b8", "#d9a37a"];
+const crowd = upper => (g, w, h) => { const rows = 24, rh = h / rows;
+  g.fillStyle = upper ? "#3a3446" : "#4a4456"; g.fillRect(0, 0, w, h); for (let r = 0; r < rows; r++) { const y = r * rh; g.fillStyle = "rgba(160,160,180,0.22)"; g.fillRect(0, y + rh - 1, w, 1); for (let x = 15 + rand() * 3; x < w - 4; x += 4.4 + rand() * 1.8) {
+      if ((!upper && r > 9 && r < 17 && x > 236 && x < 292) || rand() < 0.05) continue; const sw = 3.4 + rand() * 1.2; g.fillStyle = pick(SHIRT); g.fillRect(x, y + rh * 0.44, sw, rh * 0.56);
+      g.fillStyle = pick(SKIN); g.beginPath(); g.arc(x + sw / 2, y + rh * 0.3, 1.55, 0, TAU); g.fill(); if (rand() < 0.035) { g.fillStyle = rand() < 0.5 ? "#c8102e" : "#ffffff"; g.fillRect(x - 1, y - rh * 0.35, 5.5, 3.5); } }
+    g.fillStyle = `rgba(14,8,26,${((upper ? 0.45 : 0.3) * (1 - r / rows)).toFixed(3)})`; g.fillRect(0, y, w, rh);   // roof shade on the back rows
+  } g.fillStyle = "#6f6b78"; g.fillRect(0, 0, 13, h); g.fillStyle = "#4f4b58"; for (let y = 0; y < h; y += rh / 2) g.fillRect(0, y, 13, 1.2);   // aisle steps
+  if (!upper) { g.fillStyle = "#120e18"; g.fillRect(240, 10 * rh, 48, 7 * rh); g.fillStyle = "#9a96a2"; g.fillRect(236, 10 * rh - 2.5, 56, 2.5); }   // vomitory
+};
+function wrapDraw(g, w, h) { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, "#5a2386"); gr.addColorStop(0.55, "#71309c"); gr.addColorStop(1, "#4a1a70"); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  g.fillStyle = "#e4007c"; g.fillRect(0, h * 0.86, w, h * 0.07); g.fillStyle = "rgba(255,255,255,0.25)"; g.fillRect(0, h * 0.06, w, 1.5);
+  g.fillStyle = "#fff"; g.font = `600 ${h * 0.4}px ${FONT}`; g.textBaseline = "middle"; g.fillText("London 2012", 26, h * 0.47); g.fillText("London 2012", 286, h * 0.47);
+  rings(g, 225, h * 0.38, h * 0.11, ["#fff", "#fff", "#fff", "#fff", "#fff"], 1.6); rings(g, 485, h * 0.38, h * 0.11, ["#fff", "#fff", "#fff", "#fff", "#fff"], 1.6);
+}
+function boardsDraw(g, w, h) { const B = [["#e4007c", "#fff", "london 2012"], ["#5a2386", "#fff", ""], ["#2d1e6b", "#ff9f1c", "London 2012"], ["#f2f2f2", "#5a2386", "london"]];
+  for (let i = 0; i < 4; i++) { const x = i * w / 4; g.fillStyle = B[i][0]; g.fillRect(x, 0, w / 4, h); g.fillStyle = "rgba(0,0,0,0.45)"; g.fillRect(x, 0, 2, h); g.fillStyle = B[i][1]; g.font = `bold ${h * 0.5}px ${FONT}`; g.textBaseline = "middle"; g.textAlign = "center";
+    if (B[i][2]) g.fillText(B[i][2], x + w / 8, h * 0.53); else rings(g, x + w / 8, h * 0.42, h * 0.16, ["#fff", "#fff", "#fff", "#fff", "#fff"], 2); }
+}
+function roofDraw(g, w, h) { g.fillStyle = "#e9ecf0"; g.fillRect(0, 0, w, h);
+  for (let x = 0; x < w; x += 64) { const gr = g.createLinearGradient(x, 0, x + 64, 0); gr.addColorStop(0, "#f6f7f9"); gr.addColorStop(0.55, "#d9dde3"); gr.addColorStop(1, "#c3c8d0"); g.fillStyle = gr; g.fillRect(x, 0, 64, h); g.fillStyle = "#8b919b"; g.fillRect(x, 0, 2, h); }
+  g.fillStyle = "rgba(120,126,136,0.7)"; g.fillRect(0, 18, w, 1); g.fillRect(0, 42, w, 1); const sh = g.createLinearGradient(0, 0, 0, h); sh.addColorStop(0, "rgba(40,40,60,0)"); sh.addColorStop(1, "rgba(40,40,60,0.22)"); g.fillStyle = sh; g.fillRect(0, 0, w, h);
+}
+const FLAGS = [["v", "#0055a4", "#fff", "#ef4135"], ["v", "#009246", "#fff", "#ce2b37"], ["h", "#000", "#dd0000", "#ffce00"], ["h", "#ae1c28", "#fff", "#21468b"], ["v", "#169b62", "#fff", "#ff883e"],
+  ["jp"], ["h", "#fff", "#0039a6", "#d52b1e"], ["v", "#002b7f", "#fcd116", "#ce1126"], ["n", "#006aa7", "#fecc00"], ["n", "#c8102e", "#fff"], ["h", "#00966e", "#fff", "#d62612"], ["uk"], ["v", "#000", "#ffd520", "#ef3340"], ["h", "#009c3b", "#ffdf00", "#009c3b"]];
+function flagsDraw(g, w, h) { g.fillStyle = "#c9ced6"; g.fillRect(0, 2, w, 1.5);
+  for (let i = 0; i < 8; i++) { const f = FLAGS[(i * 5 + 3) % FLAGS.length], x = i * 64 + 10, fw = 43, fh = 28, y = 4; g.fillStyle = "#fff"; g.fillRect(x, y, fw, fh);
+    if (f[0] === "v") for (let k = 0; k < 3; k++) { g.fillStyle = f[k + 1]; g.fillRect(x + k * fw / 3, y, fw / 3 + 0.5, fh); } else if (f[0] === "h") for (let k = 0; k < 3; k++) { g.fillStyle = f[k + 1]; g.fillRect(x, y + k * fh / 3, fw, fh / 3 + 0.5); }
+    else if (f[0] === "jp") { g.fillStyle = "#bc002d"; g.beginPath(); g.arc(x + fw / 2, y + fh / 2, 7, 0, TAU); g.fill(); } else if (f[0] === "n") { g.fillStyle = f[1]; g.fillRect(x, y, fw, fh); g.fillStyle = f[2]; g.fillRect(x + 12, y, 6, fh); g.fillRect(x, y + 11, fw, 6); }
+    else { g.fillStyle = "#012169"; g.fillRect(x, y, fw, fh); g.strokeStyle = "#fff"; g.lineWidth = 5; g.beginPath(); g.moveTo(x, y); g.lineTo(x + fw, y + fh); g.moveTo(x + fw, y); g.lineTo(x, y + fh); g.stroke();
+      g.strokeStyle = "#c8102e"; g.lineWidth = 2; g.stroke(); g.fillStyle = "#fff"; g.fillRect(x + fw / 2 - 5, y, 10, fh); g.fillRect(x, y + fh / 2 - 5, fw, 10); g.fillStyle = "#c8102e"; g.fillRect(x + fw / 2 - 3, y, 6, fh); g.fillRect(x, y + fh / 2 - 3, fw, 6); }
+    for (let k = 0; k < 4; k++) { g.fillStyle = k % 2 ? "rgba(0,0,0,0.13)" : "rgba(255,255,255,0.12)"; g.fillRect(x + k * fw / 4, y, fw / 4, fh); }   // the cloth ripples
   }
-  // runners, far to near
-  const t = performance.now() / 1000;
-  const ghosts = r.ghosts.map((g, i) => ({name: g.name, who: g.who, kmh: g.kmh, lane: GHOST_LANES[i % GHOST_LANES.length], dist: Math.min(r.distance, g.dist + g.kmh / 3.6 * dt)}))
-    .filter(g => !(r.phase === "finished" && r.result && r.result.record && g.name === "Champion"));
-  const field = ghosts.map(g => ({...g, depth: YOU_DEPTH + g.dist - you})).concat([{name: "YOU", kmh: r.speed_kmh, lane: YOU_LANE, dist: you, depth: YOU_DEPTH}]);
-  field.sort((a, b) => b.depth - a.depth);
-  for (const f of field) {
-    if (f.depth < 0.6 || f.depth > VIEW_M) continue;
-    const [x, y, s] = proj(laneX(f.lane), f.depth);
-    const phase = f.name === "YOU" ? t * Math.PI * 2 * ((raceSnap.cadence || 0) / 120) : t * Math.PI * 2 * (f.kmh / 3.6 / 1.3);
-    runnerBack(ctx, x, y, s * 1.0, KIT[f.name] || ["#888", "#fff"], HAIR[f.name] || "#222", phase);
-    if (f.name !== "YOU") { ctx.fillStyle = "#fff"; ctx.font = `bold ${Math.max(9, 12 * s)}px system-ui`; ctx.textAlign = "center"; ctx.fillText(f.name === "Champion" ? "Champion " + (f.who || "") : f.name, x, y - 122 * s); }
-  }
-  for (const g of ghosts) if (g.dist - you < -YOU_DEPTH + 0.6) { ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.font = "bold 11px system-ui"; ctx.textAlign = "right"; ctx.fillText((g.name === "Champion" ? "Champion " + (g.who || "") : g.name) + " " + Math.round(g.dist - you) + " m", W - 12, H - 70 - 14 * ghosts.indexOf(g)); }
-  // scoreboard (top right), power bar (centre), position (bottom left), time bar with rings (bottom right)
-  ctx.fillStyle = "#15131c"; ctx.beginPath(); ctx.roundRect(W - 156, 12, 144, 46, 6); ctx.fill(); ctx.strokeStyle = "#444"; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = "#ffd100"; ctx.font = "bold 15px ui-monospace, Menlo, monospace"; ctx.textAlign = "left"; ctx.fillText(r.distance + "m", W - 146, 31); ctx.textAlign = "right"; ctx.fillText((r.elapsed + dt).toFixed(2), W - 22, 31);
-  ctx.fillStyle = "#9ad"; ctx.font = "11px system-ui"; ctx.textAlign = "left"; ctx.fillText(r.phase === "idle" ? "press START" : (Math.round(you) + " m   " + r.speed_kmh.toFixed(1) + " km/h"), W - 146, 50);
-  const bx = W * 0.70, by = horizon + 6, bw = 18, bh = 100, frac = Math.min(1, r.speed_kmh / 22);
-  ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.beginPath(); ctx.roundRect(bx - 3, by - 3, bw + 6, bh + 6, 6); ctx.fill();
-  const pg = ctx.createLinearGradient(0, by + bh, 0, by); pg.addColorStop(0, "#0b7a2a"); pg.addColorStop(1, "#6cff3a");
-  ctx.fillStyle = pg; ctx.fillRect(bx, by + bh * (1 - frac), bw, bh * frac);
-  ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.strokeRect(bx, by, bw, bh); ctx.fillStyle = "#fff"; ctx.fillRect(bx - 4, by + bh * (1 - frac) - 1.5, bw + 8, 3);
-  for (let i = 1; i < 4; i++) ctx.fillRect(bx, by + bh * i / 4, bw, 1);
-  const place = 1 + field.filter(f => f.name !== "YOU" && f.dist > you).length;
-  ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 6; ctx.fillStyle = "#fff"; ctx.textAlign = "left";
-  ctx.font = "15px system-ui"; ctx.fillText("Position", 18, H - 56); ctx.font = "bold 58px system-ui"; ctx.fillText(String(r.phase === "idle" ? "-" : place), 18, H - 8);
-  ctx.shadowBlur = 0;
-  const tg = ctx.createLinearGradient(W - 230, 0, W - 10, 0); tg.addColorStop(0, "rgba(195,51,139,0.6)"); tg.addColorStop(1, "#c3338b");
-  ctx.fillStyle = tg; ctx.fillRect(W - 230, H - 44, 220, 34);
-  ctx.fillStyle = "#fff"; ctx.font = "bold 20px system-ui"; ctx.textAlign = "right"; ctx.fillText((r.elapsed + dt).toFixed(2), W - 90, H - 19);
-  ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; for (const [dx, dy] of [[0, 0], [12, 0], [24, 0], [6, 7], [18, 7]]) { ctx.beginPath(); ctx.arc(W - 76 + dx, H - 30 + dy, 5.5, 0, 7); ctx.stroke(); }
-  // centre messages
-  ctx.textAlign = "center";
-  const big = r.phase === "countdown" ? String(Math.ceil(r.countdown)) : (r.phase === "running" && r.elapsed + dt < 1.2 ? "GO!" : "");
-  if (big) { ctx.font = "bold 80px system-ui"; ctx.lineWidth = 8; ctx.strokeStyle = "#1a1a1a"; ctx.strokeText(big, W / 2, H * 0.62); ctx.fillStyle = "#fff"; ctx.fillText(big, W / 2, H * 0.62); }
-  if (r.phase === "finished" && r.result) {
-    ctx.fillStyle = "rgba(20,16,30,0.88)"; ctx.beginPath(); ctx.roundRect(W / 2 - 170, 70, 340, 96, 10); ctx.fill();
-    ctx.fillStyle = "#c3338b"; ctx.fillRect(W / 2 - 170, 70, 340, 26); ctx.fillStyle = "#fff"; ctx.font = "bold 14px system-ui"; ctx.fillText("FINISH  " + r.distance + " m", W / 2, 88);
-    ctx.font = "bold 26px system-ui"; ctx.fillText(ordinal(r.result.place) + "   " + r.result.time.toFixed(2) + " s", W / 2, 128);
-    ctx.font = "13px system-ui"; ctx.fillStyle = r.result.record ? "#ffd100" : "#ddd"; ctx.fillText(r.result.record ? "NEW RECORD: you are the Champion ghost" : "beat " + (r.result.beat.length ? r.result.beat.join(", ") : "nobody"), W / 2, 152);
-  }
+}
+function grainDraw(g, w, h) { for (let i = 0; i < 2600; i++) { g.fillStyle = rand() < 0.5 ? `rgba(255,214,190,${(0.08 + rand() * 0.14).toFixed(2)})` : `rgba(60,8,8,${(0.1 + rand() * 0.2).toFixed(2)})`; g.fillRect((rand() * w) | 0, (rand() * h) | 0, 1 + (rand() < 0.2), 1); }
+}
+const TEX = {lo: texSet(512, 192, 32, crowd(false)), up: texSet(512, 192, 32, crowd(true)), wrap: texSet(512, 64, 32, wrapDraw), boards: texSet(512, 32, 30, boardsDraw),
+  roof: texSet(256, 64, 16, roofDraw), flags: texSet(512, 40, 24, flagsDraw)};
+const GRAIN = cnv(128, 128); grainDraw(GRAIN.getContext("2d"), 128, 128); const GRAINP = rctx.createPattern(GRAIN, "repeat");
+const SCR = cnv(256, 128), SCRG = SCR.getContext("2d");
+TEX.scr = {pat: [null, null, null], w: [256, 256, 256], h: [128, 128, 128], period: arcS((SCR0 + 2) * SEG, 32.5) - arcS(SCR0 * SEG, 32.5), org: SCR0 * SEG, end: (SCR0 + 2) * SEG};
+const HAZE = [];   // overlay per stand segment: [shade 0..4][haze 0..10], one rgba string each, built once
+for (let s = 0; s <= 4; s++) { HAZE.push([]); for (let k = 0; k <= 10; k++) { const h = k * 0.05, as = s * 0.09, a = h + as * (1 - h); HAZE[s].push(a < 0.005 ? "" : `rgba(${Math.round((h * 196 + as * (1 - h) * 22) / a)},${Math.round((h * 208 + as * (1 - h) * 14) / a)},${Math.round((h * 226 + as * (1 - h) * 44) / a)},${a.toFixed(3)})`); } }
+// a stand band: the quad between two lines along the ring (edge A = texture top), texture-mapped with an affine pattern transform
+const MAT = new DOMMatrix(), GM = new DOMMatrix();
+let LODZ = 60;
+function band(T, u0, u1, wA, yA, wB, yB, depth) { if (!pq(0, u0, wA, yA) || !pq(1, u1, wA, yA) || !pq(2, u1, wB, yB) || !pq(3, u0, wB, yB)) return;
+  if (typeof T !== "string" && (depth || 0) < 3 && Math.max(PQ[2], PQ[5], PQ[8], PQ[11]) > 1.3 * Math.min(PQ[2], PQ[5], PQ[8], PQ[11])) {   // deep band: split so the affine map stays close to perspective
+    const um = (u0 + u1) / 2, d = (depth || 0) + 1; band(T, u0, um, wA, yA, wB, yB, d); band(T, um, u1, wA, yA, wB, yB, d); return; } const ax = PQ[0], ay = PQ[1], bx = PQ[3], by = PQ[4], cx = PQ[6], cy = PQ[7], dx = PQ[9], dy = PQ[10];
+  if ((ax < 0 && bx < 0 && cx < 0 && dx < 0) || (ax > VW && bx > VW && cx > VW && dx > VW)) return; const ctx = rctx; if (typeof T === "string") { if (!T) return; ctx.fillStyle = T; } else {
+    const lod = PQ[2] < LODZ ? 0 : PQ[2] < 2 * LODZ ? 1 : 2, pat = T.pat[lod]; if (!pat) return; const tw = T.w[lod], th = T.h[lod], k = tw / T.period, sa = arcS(u0, wA), sb = u1 >= LOOP ? 2 * STR + 2 * BND * (R + wA) / R : arcS(u1, wA);
+    const s0 = T.org ? (arcS(T.end, wA) - sa) * k : ((-sa * k) % tw + tw) % tw, s1 = s0 - (sb - sa) * k;   // u runs right to left on the stands seen from inside
+    MAT.a = (bx - ax) / (s1 - s0); MAT.b = (by - ay) / (s1 - s0); MAT.c = (dx - ax) / th; MAT.d = (dy - ay) / th; MAT.e = ax - MAT.a * s0; MAT.f = ay - MAT.b * s0; pat.setTransform(MAT); ctx.fillStyle = pat; }
+  ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.lineTo(cx, cy); ctx.lineTo(dx, dy); ctx.closePath(); ctx.fill();
+}
+function truss(u) {   // a triangular floodlight tower on the roof edge, leaning in over the track
+  if (!pq(0, u - 1.6, 31, 31) || !pq(1, u + 1.6, 31, 31) || !pq(2, u, 33.5, 31) || !pq(3, u, 26, 45)) return; const ctx = rctx, k = FOC / PQ[11]; ctx.strokeStyle = "#e3e7ee"; ctx.lineWidth = Math.max(0.6, 0.35 * k); ctx.beginPath();
+  for (const i of [0, 1, 2]) { ctx.moveTo(PQ[3 * i], PQ[3 * i + 1]); ctx.lineTo(PQ[9], PQ[10]); } for (let s = 0; s < 5; s++) { const t0 = s / 5, t1 = (s + 0.5) / 5, L = (i, t) => PQ[3 * i] + (PQ[9] - PQ[3 * i]) * t, M = (i, t) => PQ[3 * i + 1] + (PQ[10] - PQ[3 * i + 1]) * t;
+    ctx.moveTo(L(0, t0), M(0, t0)); ctx.lineTo(L(1, t1), M(1, t1)); ctx.lineTo(L(2, t0), M(2, t0)); ctx.lineTo(L(0, t1), M(0, t1)); } ctx.stroke(); if (!pq(0, u - 2.6, 25.5, 46.2) || !pq(1, u + 2.6, 25.5, 46.2) || !pq(2, u + 2.6, 25.5, 44.2)) return;
+  ctx.fillStyle = "#59606c"; ctx.beginPath(); ctx.moveTo(PQ[0], PQ[1]); ctx.lineTo(PQ[3], PQ[4]); ctx.lineTo(PQ[6], PQ[7]); ctx.lineTo(PQ[6] + PQ[0] - PQ[3], PQ[7] + PQ[1] - PQ[4]); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#fffbe8"; for (let i = 1; i < 6; i++) { const t = i / 6; ctx.fillRect(PQ[0] + (PQ[3] - PQ[0]) * t - 0.5, (PQ[1] + PQ[7]) / 2 - 0.5, Math.max(1, 0.5 * k), Math.max(1, 0.5 * k)); }
+}
+function drawSeg(i, hz) { const u0 = i * SEG, u1 = Math.min(LOOP, u0 + SEG), scr = i === SCR0 || i === SCR0 + 1;
+  band(TEX.lo, u0, u1, 36, 13, 12.5, 2.4); band("#1c1724", u0, u1, 33, 14, 36, 13); band(TEX.wrap, u0, u1, 12.5, 2.4, 12.5, 0);
+  band(TEX.boards, u0, u1, 10.5, 0.95, 10.5, 0); band(TEX.wrap, u0, u1, 33, 17.2, 33, 14); band("#221d2b", u0, u1, 58, 32.6, 58, 26); band(TEX.up, u0, u1, 58, 26, 33, 17.2);
+  if (scr) { band("#0b0b10", u0 - (i === SCR0 ? 0.25 : 0), u1 + (i > SCR0 ? 0.25 : 0), 32.4, 21.1, 32.4, 13.9); band(TEX.scr, u0, u1, 32.3, 20.7, 32.3, 14.3); }
+  band(TEX.flags, u0, u1, 31.3, 29.9, 31.3, 27.6); band(TEX.roof, u0, u1, 31, 30, 56, 32.6); band("#f4f6f8", u0, u1, 31, 31.2, 31, 30); band(hz, u0, u1, 31, 31.2, 10.5, 0); if (i % 6 === 2) truss(u0 + SEG / 2);
+}
+// runners: 3D skeletons. Joints: 0 head, 1 neck, 2/3 shoulders, 4/5 elbows, 6/7 hands, 8/9 hips, 10/11 knees, 12/13 ankles, 14/15 toes, 16 pelvis,
+// 17/18 waist, 19/20 armpits, 21 crown, 22/23 hip outline, 24/25 singlet straps, 26/27 racer-back cut, 28/29 crotch, 30-33 bib corners, 34/35 calves
+const JN = 36, JL = new Float64Array(JN * 3), TMP = new Float64Array(6), RB = Array.from({length: 6}, () => ({J: new Float64Array(JN * 3), S: new Float64Array(JN * 3)}));
+function sj(i, x, y, z) { JL[3 * i] = x; JL[3 * i + 1] = y; JL[3 * i + 2] = z; }
+function pose(p, k) {   // running cycle at stride phase p with effort k (0 = standing still, 1 = sprinting)
+  const hipA = 0.5 * k, knA = 1.5 * k, armA = 0.08 + 0.55 * k, lean = 0.03 + 0.16 * k, sp = Math.sin(p), flex = 0.3 + 1.05 * Math.min(1, k * 3) + 0.2 * k; let low = 9; for (let s = 0; s < 2; s++) {
+    const q = p + s * Math.PI, sd = s ? 1 : -1, h = hipA * Math.sin(q) + 0.05 * k, hz = 0.025 * sd * sp * k; const kn = 0.05 + knA * Math.pow(Math.max(0, Math.cos(q + 0.35)), 1.6) + 0.2 * k * Math.max(0, -Math.cos(q));
+    const kz = hz + 0.46 * Math.sin(h), ky = 0.93 - 0.46 * Math.cos(h), a = h - kn, az = kz + 0.44 * Math.sin(a), ay = ky - 0.44 * Math.cos(a), pf = 0.12 + 0.6 * k * Math.max(0, -Math.sin(q + 0.6)); const tz = az + 0.16 * Math.cos(a - pf), ty = ay + 0.16 * Math.sin(a - pf);
+    sj(8 + s, sd * 0.1, 0.93, hz); sj(10 + s, sd * 0.097, ky, kz); sj(12 + s, sd * 0.083, ay, az); sj(14 + s, sd * 0.088, ty, tz); sj(34 + s, sd * 0.094, ky + 0.36 * (ay - ky), kz + 0.36 * (az - kz) - 0.025 * Math.cos(a)); low = Math.min(low, ay - 0.075, ty - 0.025); }
+  const ny = 0.93 + 0.55 * Math.cos(lean), nz = 0.55 * Math.sin(lean), shy = ny - 0.035, wy = 0.93 + 0.27 * Math.cos(lean), wz = 0.27 * Math.sin(lean) - 0.08; sj(16, 0, 0.93, -0.02); sj(1, 0, ny, nz - 0.02); sj(0, 0, ny + 0.145, nz + 0.03); sj(21, 0, ny + 0.245, nz - 0.03);
+  for (let s = 0; s < 2; s++) { const sd = s ? 1 : -1, tw = 0.05 * k * sp * sd, a = armA * sp * sd + 0.12 + lean * 0.5, ez = nz + tw + 0.28 * Math.sin(a), ey = shy - 0.28 * Math.cos(a), fa = a + flex;
+    sj(2 + s, sd * 0.2, shy, nz - 0.03 + tw); sj(4 + s, sd * 0.235, ey, ez); sj(6 + s, sd * (0.2 - 0.06 * Math.max(0, Math.sin(a))), ey - 0.26 * Math.cos(fa), ez + 0.26 * Math.sin(fa));
+    sj(17 + s, sd * 0.128, wy, wz); sj(19 + s, sd * 0.175, shy - 0.15, nz * 0.75 - 0.09 + tw * 0.5); sj(22 + s, sd * 0.152, 0.98, -0.08); sj(24 + s, sd * 0.07, ny - 0.005, nz - 0.1); sj(26 + s, sd * 0.1, shy - 0.1, nz * 0.85 - 0.1); sj(28 + s, sd * 0.03, 0.83, -0.02); }
+  sj(30, -0.085, wy + 0.2, wz - 0.03 + nz * 0.25); sj(31, 0.085, wy + 0.2, wz - 0.03 + nz * 0.25); sj(32, 0.085, wy + 0.03, wz - 0.03); sj(33, -0.085, wy + 0.03, wz - 0.03);
+  const dy = -low + 0.05 * k * Math.max(0, -Math.cos(2 * p));   // feet on the ground in stance, airborne in flight
+  for (let i = 0; i < JN; i++) JL[3 * i + 1] += dy;
+}
+function placeRunner(b, u, w) {   // local joints -> screen (J: x, y, px per metre) and their sun shadows on the ground (S)
+  trackPt(u, w); const bx = TX, bz = TZ, hx = HX, hz = HZ, kx = SUN[0] / SUN[1], kz = SUN[2] / SUN[1]; for (let i = 0; i < JN; i++) { const lx = JL[3 * i], ly = JL[3 * i + 1], lz = JL[3 * i + 2], x = bx + lx * hz + lz * hx, z = bz - lx * hx + lz * hz;
+    if (!proj(x, ly, z)) return false; b.J[3 * i] = PX; b.J[3 * i + 1] = PY; b.J[3 * i + 2] = FOC / PZ; if (!proj(x - ly * kx, 0, z - ly * kz)) return false; b.S[3 * i] = PX; b.S[3 * i + 1] = PY; b.S[3 * i + 2] = FOC / PZ; } return true;
+}
+function cap(g, B, i, j, ri, rj, o) {   // tapered capsule between joints i and j (radii in metres), shifted left by o radii, appended to the path
+  const r1 = ri * B[3 * i + 2], r2 = rj * B[3 * j + 2], x1 = B[3 * i] - o * r1, y1 = B[3 * i + 1], x2 = B[3 * j] - o * r2, y2 = B[3 * j + 1]; const a = Math.atan2(y2 - y1, x2 - x1), c = -Math.sin(a), s = Math.cos(a);
+  g.moveTo(x1 + c * r1, y1 + s * r1); g.lineTo(x2 + c * r2, y2 + s * r2); g.arc(x2, y2, r2, a + 1.5708, a - 1.5708, true); g.lineTo(x1 - c * r1, y1 - s * r1); g.arc(x1, y1, r1, a - 1.5708, a + 1.5708, true); g.closePath();
+}
+function polyL(g, B, ids) { g.moveTo(B[3 * ids[0]], B[3 * ids[0] + 1]); for (let i = 1; i < ids.length; i++) g.lineTo(B[3 * ids[i]], B[3 * ids[i] + 1]); }
+function polyJ(g, B, ids) { g.moveTo(B[3 * ids[0]], B[3 * ids[0] + 1]); for (let i = 1; i < ids.length; i++) g.lineTo(B[3 * ids[i]], B[3 * ids[i] + 1]); g.closePath(); }
+const LIT = "rgba(255,236,212,0.24)", DARK = "rgba(20,8,16,0.13)";
+function limb(B, segs, cols) {   // segs: [i, j, ri, rj] per segment; each gets its colour, a rim light on the sun side and shade on the other
+  const g = rctx; for (let n = 0; n < segs.length; n += 4) { g.fillStyle = cols[n >> 2]; g.beginPath(); cap(g, B, segs[n], segs[n + 1], segs[n + 2], segs[n + 3], 0); g.fill(); }
+  g.fillStyle = DARK; g.beginPath(); for (let n = 0; n < segs.length; n += 4) cap(g, B, segs[n], segs[n + 1], segs[n + 2] * 0.55, segs[n + 3] * 0.55, -0.5); g.fill();
+  g.fillStyle = LIT; g.beginPath(); for (let n = 0; n < segs.length; n += 4) cap(g, B, segs[n], segs[n + 1], segs[n + 2] * 0.45, segs[n + 3] * 0.45, 0.55); g.fill();
+}
+const LEG = [[8, 10, 0.094, 0.06, 10, 34, 0.052, 0.062, 34, 12, 0.06, 0.036, 12, 14, 0.05, 0.043], [9, 11, 0.094, 0.06, 11, 35, 0.052, 0.062, 35, 13, 0.06, 0.036, 13, 15, 0.05, 0.043]];
+const ARM = [[2, 4, 0.06, 0.044, 4, 6, 0.044, 0.033], [3, 5, 0.06, 0.044, 5, 7, 0.044, 0.033]];
+const TORSO = [24, 25, 27, 20, 18, 23, 22, 17, 19, 26], BACK = [2, 1, 3, 20, 19], SEAT = [22, 23, 29, 28];
+function drawRunner(e) { const B = e.b.J, L = LOOK[e.name] || LOOK.Jogger, g = rctx, sk = L[3];
+  const leg = s => { limb(B, LEG[s], [sk, sk, sk, L[5]]); for (let c = 0; c < 3; c++) { TMP[c] = B[3 * (8 + s) + c]; TMP[3 + c] = TMP[c] + (B[3 * (10 + s) + c] - TMP[c]) * 0.24; }
+    g.fillStyle = L[2]; g.beginPath(); cap(g, TMP, 0, 1, 0.102, 0.098, 0); g.fill(); g.fillStyle = s ? DARK : LIT; g.fill(); };
+  const arm = s => { limb(B, ARM[s], [sk, sk]); g.fillStyle = sk; g.beginPath(); g.arc(B[3 * (6 + s)], B[3 * (6 + s) + 1], 0.045 * B[3 * (6 + s) + 2], 0, TAU); g.fill(); }; const torso = () => {
+    g.fillStyle = sk; g.beginPath(); polyJ(g, B, BACK); g.fill(); g.beginPath(); cap(g, B, 2, 19, 0.06, 0.05, 0); cap(g, B, 3, 20, 0.06, 0.05, 0); g.fill();
+    g.fillStyle = L[0]; g.beginPath(); polyJ(g, B, TORSO); g.fill(); g.fillStyle = DARK; g.beginPath(); polyJ(g, B, [1, 25, 27, 20, 18, 23, 16]); g.fill(); g.beginPath(); polyJ(g, B, [25, 27, 20, 18, 23]); g.fill();
+    g.fillStyle = LIT; g.beginPath(); polyJ(g, B, [24, 26, 19, 17, 22]); g.fill(); g.strokeStyle = L[1]; g.lineWidth = Math.max(0.8, 0.025 * B[50]); g.beginPath(); polyL(g, B, [24, 26, 19]); polyL(g, B, [25, 27, 20]); g.stroke();
+    g.fillStyle = L[2]; g.beginPath(); polyJ(g, B, SEAT); g.fill(); g.fillStyle = DARK; g.beginPath(); polyJ(g, B, [16, 23, 29]); g.fill(); g.fillStyle = LIT; g.beginPath(); polyJ(g, B, [22, 16, 28]); g.fill(); const bw = Math.hypot(B[93] - B[90], B[94] - B[91]);
+    if (bw > 5) { g.fillStyle = "#fafafa"; g.beginPath(); polyJ(g, B, [30, 31, 32, 33]); g.fill(); if (bw > 11) { PQ[0] = B[90]; PQ[1] = B[91]; PQ[3] = B[93]; PQ[4] = B[94]; PQ[6] = B[99]; PQ[7] = B[100]; affine(g, 0, 1, 2, 100, 60);
+        g.fillStyle = "#111"; g.font = `bold 48px ${FONT}`; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(String(BIB[e.name] || 0), 50, 33); g.setTransform(DPR, 0, 0, DPR, 0, 0); } } }; const head = () => {
+    const x = B[0], y = B[1], s = B[2]; g.fillStyle = sk; g.beginPath(); cap(g, B, 1, 0, 0.056, 0.05, 0); g.fill();
+    g.beginPath(); g.ellipse(x - 0.093 * s, y + 0.01 * s, 0.02 * s, 0.032 * s, 0, 0, TAU); g.ellipse(x + 0.093 * s, y + 0.01 * s, 0.02 * s, 0.032 * s, 0, 0, TAU); g.fill(); g.beginPath(); g.ellipse(x, y, 0.094 * s, 0.116 * s, 0, 0, TAU); g.fill();
+    g.fillStyle = L[4]; g.beginPath(); g.ellipse(x, y - 0.018 * s, 0.1 * s, 0.108 * s, 0, 0, TAU); g.fill(); if (L[6] === 1) { g.beginPath(); g.arc(B[63], B[64] + 0.01 * s, 0.05 * s, 0, TAU); g.fill(); }
+    if (L[6] === 2) { const sw = Math.sin(e.ph * 2) * 0.05 * s * e.k; g.beginPath(); g.moveTo(x - 0.03 * s, y - 0.06 * s); g.quadraticCurveTo(x + sw, y + 0.12 * s, x + sw * 2, y + 0.2 * s); g.quadraticCurveTo(x + sw + 0.01 * s, y + 0.1 * s, x + 0.03 * s, y - 0.06 * s); g.fill(); }
+    g.fillStyle = "rgba(255,240,215,0.22)"; g.beginPath(); g.ellipse(x - 0.04 * s, y - 0.05 * s, 0.045 * s, 0.06 * s, -0.4, 0, TAU); g.fill(); }; // limbs swung forward are farther from the camera: draw them before the torso, the others after
+  const kL = e.z3[12], kR = e.z3[13], aL = e.z3[6], aR = e.z3[7]; if (aL > 0.05) arm(0); if (aR > 0.05) arm(1); if (kL > kR) { leg(0); leg(1); } else { leg(1); leg(0); } torso(); if (aL <= 0.05) arm(0); if (aR <= 0.05) arm(1); head();
+}
+// shadows: one low-resolution offscreen layer (soft for free when scaled up), composited once so overlapping shadows do not darken
+let SHC = cnv(1, 1), SHG = SHC.getContext("2d"), SHS = 0.5;
+function drawShadow(B) { const g = SHG; g.beginPath();
+  for (const s of LEG) for (let n = 0; n < s.length; n += 4) cap(g, B, s[n], s[n + 1], s[n + 2], s[n + 3], 0); for (const s of ARM) for (let n = 0; n < s.length; n += 4) cap(g, B, s[n], s[n + 1], s[n + 2], s[n + 3], 0);
+  g.fill(); g.beginPath(); polyJ(g, B, [2, 3, 23, 22]); g.fill(); g.beginPath(); cap(g, B, 1, 21, 0.1, 0.1, 0); g.fill();
+}
+// HUD helpers
+const LED = {"0": [14, 17, 19, 21, 25, 17, 14], "1": [4, 12, 4, 4, 4, 4, 14], "2": [14, 17, 1, 2, 4, 8, 31], "3": [31, 2, 4, 2, 1, 17, 14], "4": [2, 6, 10, 18, 31, 2, 2], "5": [31, 16, 30, 1, 1, 17, 14],
+  "6": [6, 8, 16, 30, 17, 17, 14], "7": [31, 1, 2, 4, 8, 8, 8], "8": [14, 17, 17, 14, 17, 17, 14], "9": [14, 17, 17, 15, 1, 2, 12], "M": [17, 27, 21, 21, 17, 17, 17], ".": [0, 0, 0, 0, 0, 3, 3], "-": [0, 0, 0, 31, 0, 0, 0], " ": [0, 0, 0, 0, 0, 0, 0]};
+const ledW = ch => ch === "." ? 2 : 5;
+function ledText(g, s, col, row, p, right) {   // lit dots of string s on the panel grid (pitch p), into the current path
+  let w = 0; for (const ch of s) w += ledW(ch) + 1; if (right) col -= w - 1;
+  for (const ch of s) { const m = LED[ch] || LED[" "], cw = ledW(ch); for (let y = 0; y < 7; y++) for (let x = 0; x < cw; x++) if (m[y] >> (cw - 1 - x) & 1) g.rect((col + x) * p, (row + y) * p, p * 0.78, p * 0.78); col += cw + 1; }
+}
+function rrect(g, x, y, w, h, r) { g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+let UI = 1, SKY = null, SKY0 = 0, LEDP = null, LEDPP = 3, TBAR = null, GR = {};
+function setupSize(W, H, dpr) { DPR = dpr; VW = W; VH = H; W2 = W / 2; HC = H / 2; FOC = Math.max(W2 / Math.tan(35 * Math.PI / 180), HC / Math.tan(26 * Math.PI / 180));
+  UI = Math.max(0.62, Math.min(1.15, W / 640)); LODZ = 0.09 * FOC * dpr; const hor = HC - FOC * Math.tan(0.105); SKY0 = hor + 24; SKY = cnv(W * 1.6, SKY0 + 30); const g = SKY.getContext("2d"), sg = g.createLinearGradient(0, 0, 0, SKY.height);
+  sg.addColorStop(0, "#4f8fd0"); sg.addColorStop(0.6, "#9cc6e8"); sg.addColorStop(1, "#e3edf3"); g.fillStyle = sg; g.fillRect(0, 0, SKY.width, SKY.height);
+  seed = 5; for (let i = 0; i < 26; i++) { const cx = rand() * SKY.width, cy = 10 + rand() * SKY0 * 0.5, r = (18 + rand() * 40) * UI;
+    for (const o of [-SKY.width, 0, SKY.width]) { const cg = g.createRadialGradient(cx + o, cy, 0, cx + o, cy, r); cg.addColorStop(0, "rgba(255,255,255,0.75)"); cg.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = cg; g.fillRect(cx + o - r, cy - r, 2 * r, 2 * r); } }
+  const t = rctx.createLinearGradient(0, hor, 0, H); t.addColorStop(0, "#94402f"); t.addColorStop(0.35, "#bb4e3a"); t.addColorStop(1, "#d2603f"); GR.track = t;
+  const hz = rctx.createLinearGradient(0, hor - 6, 0, hor + H * 0.22); hz.addColorStop(0, "rgba(206,214,226,0.6)"); hz.addColorStop(0.35, "rgba(206,214,226,0.22)"); hz.addColorStop(1, "rgba(206,214,226,0)"); GR.haze = hz; GR.hor = hor;
+  const kl = rctx.createRadialGradient(W * 0.32, H * 1.05, 0, W * 0.32, H * 1.05, W * 0.75); kl.addColorStop(0, "rgba(255,200,140,0.24)"); kl.addColorStop(1, "rgba(255,196,130,0)"); GR.key = kl;
+  const vg = rctx.createRadialGradient(W2, H * 0.55, Math.min(W, H) * 0.45, W2, H * 0.55, Math.max(W, H) * 0.78); vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.42)"); GR.vig = vg; SHC = cnv(W * SHS, H * SHS); SHG = SHC.getContext("2d");
+  LEDPP = Math.max(2, Math.round(2.6 * UI * 2) / 2); LEDP = cnv((34 * LEDPP + 10) * dpr, (19 * LEDPP + 10) * dpr); { const p = LEDPP, lg = LEDP.getContext("2d"); lg.scale(dpr, dpr);
+    lg.fillStyle = "#0d0c12"; lg.beginPath(); rrect(lg, 0, 0, 34 * p + 10, 19 * p + 10, 5); lg.fill(); lg.strokeStyle = "#5c5a66"; lg.lineWidth = 2; lg.stroke();
+    lg.fillStyle = "#26201a"; lg.translate(5, 5); lg.beginPath(); for (let y = 0; y < 19; y++) if (y < 7 || y > 10) for (let x = 0; x < 34; x++) lg.rect(x * p, y * p, p * 0.78, p * 0.78); lg.fill(); }
+  const bw = 236 * UI, bh = 40 * UI; TBAR = cnv((bw + 4) * dpr, (bh + 4) * dpr); { const tg = TBAR.getContext("2d"); tg.scale(dpr, dpr);
+    const gr = tg.createLinearGradient(0, 0, bw, 0); gr.addColorStop(0, "rgba(30,24,40,0.15)"); gr.addColorStop(0.35, "rgba(30,24,40,0.78)"); gr.addColorStop(1, "rgba(30,24,40,0.9)");
+    tg.fillStyle = gr; tg.beginPath(); tg.moveTo(bh * 0.4, 0); tg.lineTo(bw, 0); tg.lineTo(bw, bh); tg.lineTo(0, bh); tg.closePath(); tg.fill();
+    const mg = tg.createLinearGradient(0, 0, bw, 0); mg.addColorStop(0, "rgba(228,0,124,0)"); mg.addColorStop(0.4, "#e4007c"); mg.addColorStop(1, "#ff3d9a"); tg.fillStyle = mg; tg.fillRect(bh * 0.2, bh - 4 * UI, bw - bh * 0.2, 4 * UI);
+    tg.fillStyle = "#fff"; tg.beginPath(); rrect(tg, bw - 74 * UI, 6 * UI, 68 * UI, bh - 14 * UI, 4 * UI); tg.fill(); rings(tg, bw - 40 * UI, 14 * UI, 6.2 * UI, ["#0085c7", "#f4c300", "#000000", "#009f3d", "#df0024", "#ffffff"], 1.7 * UI); } sizedW = rc.width;
+}
+function updateScreen(r, t, d) {   // the big screen on the far stand: live time and distance
+  const g = SCRG; g.fillStyle = "#07070c"; g.fillRect(0, 0, 256, 128); g.fillStyle = "#c3338b"; g.fillRect(0, 0, 256, 26);
+  g.fillStyle = "#fff"; g.textBaseline = "middle"; g.textAlign = "left"; g.font = `bold 15px ${FONT}`; g.fillText("London 2012", 8, 14); rings(g, 218, 10, 5.5, ["#fff", "#fff", "#fff", "#fff", "#fff"], 1.4);
+  g.textAlign = "center"; g.font = `bold 50px ${FONT}`; g.fillText(t.toFixed(2), 128, 66); g.font = `600 18px ${FONT}`; g.fillStyle = "#ffd100"; g.fillText(r.phase === "idle" ? "ATHLETICS  " + r.distance + " m" : Math.round(d) + " m  /  " + r.distance + " m", 128, 108);
+  const p = rctx.createPattern(SCR, "no-repeat"); TEX.scr.pat = [p, p, p];
+}
+let sizedW = 0, lastT = 0, scrAt = 0, frameMs = 0, goAt = 0, ELX = 0, FINAT = 0, LASTPH = "";
+const RS = {}, FIELD = Array.from({length: 6}, (_, i) => ({name: "", who: "", kmh: 0, d: 0, u: 0, w: 0, z: 0, vis: false, ph: 0, k: 0, b: RB[i], z3: new Float64Array(JN)}));
+function fitRace() { const d = Math.min(2, window.devicePixelRatio || 1); rc.width = Math.round(rc.clientWidth * d); rc.height = Math.round(SCENE_H * d); sizedW = 0; }
+window.addEventListener("resize", fitRace); fitRace();
+function runner(e, name, who, kmh, dist, total, live, el0, tclk, fdt, cad, tf) {   // smoothed position, effort and stride phase for one runner
+  const st = RS[name] || (RS[name] = {d: 0, ph: rand() * TAU, k: 0}), v = kmh / 3.6, ts = tclk - tf; let target = Math.min(total, dist + (live ? v * Math.max(0, tclk - el0) : 0)), va = live ? v : 0;
+  if (live && ts > 0) { const dec = Math.exp(-ts / 1.8); target = total + v * 1.8 * (1 - dec); va = v * dec; }   // over the line: run out and ease off
+  st.d = !live || Math.abs(target - st.d) > 12 ? target : st.d + (target - st.d) * (1 - Math.exp(-fdt * 8)); const kt = va > 0.3 ? Math.min(1, 0.22 + va / 7.5) : 0; st.k += (kt - st.k) * (1 - Math.exp(-fdt * 3));
+  const f = cad > 0 && !(ts > 0) ? cad / 120 : va > 0.3 ? va / (2 * (0.6 + 0.16 * va)) : 0; st.ph = (st.ph + TAU * f * fdt) % TAU; e.name = name; e.who = who; e.kmh = kmh; e.d = st.d; e.ph = st.ph; e.k = st.k; e.u = U0 + st.d; e.w = (LANE[name] - 0.5) * LW; return e;
+}
+const TAGS = new Float64Array(18), BAR = new Float64Array(6), SV = new Int16Array(NSEG), SK = new Float64Array(NSEG), ORD = [0, 0, 0, 0, 0, 0, 0, 0];
+function drawRace() { requestAnimationFrame(drawRace);
+  const r = raceSnap; if (!r || rc.width === 0 || rc.clientWidth === 0) return; const now = performance.now(), fdt = Math.min(0.1, lastT ? (now - lastT) / 1000 : 0.016); lastT = now;
+  if (Math.abs(rc.clientWidth * Math.min(2, window.devicePixelRatio || 1) - rc.width) > 2) fitRace(); const dpr = rc.height / SCENE_H, W = rc.width / dpr, H = SCENE_H, ctx = rctx; if (sizedW !== rc.width) setupSize(W, H, dpr); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const run = r.phase === "running", fin = r.phase === "finished", dt = (now - raceSnapAt) / 1000; if (r.phase !== LASTPH) { LASTPH = r.phase; FINAT = now; ELX = 0; }
+  const el = run ? (ELX = Math.max(ELX, r.elapsed + dt)) : r.elapsed, tclk = fin ? r.elapsed + (now - FINAT) / 1000 : el, live = run || fin;   // the clock runs on after the finish for the run-out
+  // runners: you plus the ghosts (the Champion hides while your own record run is on show)
+  let n = 0; const res = fin && r.result, me = runner(FIELD[n++], "YOU", r.who, res ? res.avg_kmh : r.speed_kmh, r.dist, r.distance, live, r.elapsed, tclk, fdt, run ? r.cadence || 0 : 0, fin ? (res ? res.time : r.elapsed) : 1e9);
+  for (const g of r.ghosts) if (n < 6 && LANE[g.name] && !(g.name === "Champion" && fin && res && res.record))
+    runner(FIELD[n++], g.name, g.who || "", g.kmh, g.dist, r.distance, live, r.elapsed, tclk, fdt, 0, g.name === "Champion" && r.champion ? r.champion.time : r.distance / Math.max(0.1, g.kmh / 3.6));
+  const bob = -0.03 * me.k * Math.cos(2 * me.ph), sway = 0.025 * me.k * Math.sin(me.ph); setCam(me.u, me.w, bob, sway); if (now - scrAt > 100) { scrAt = now; updateScreen(r, el, me.d); } // sky (scrolls with the camera yaw), then the stands far to near
+  const sw = SKY.width, sx = -((YAW * FOC) % sw + sw) % sw; ctx.drawImage(SKY, sx, HOR - SKY0); ctx.drawImage(SKY, sx + sw, HOR - SKY0); const tanH = W2 / FOC * 1.15; let nv = 0; for (let i = 0; i < NSEG; i++) { let front = 0, left = 0, right = 0;
+    for (let c = 0; c < 4; c++) { trackPt(i * SEG + (c & 1 ? SEG : 0), c & 2 ? 58 : 10.5); const dx = TX - CX, dz = TZ - CZ, f = dx * CHX + dz * CHZ, x = dx * RX + dz * RZ; if (f > 1) { front++; if (x > f * tanH) right++; else if (x < -f * tanH) left++; } }
+    if (!front || right === 4 || left === 4) continue; trackPt(i * SEG + SEG / 2, 24); const dx = TX - CX, dz = TZ - CZ; SK[i] = dx * dx + dz * dz; let j = nv++; while (j > 0 && SK[SV[j - 1]] < SK[i]) { SV[j] = SV[j - 1]; j--; } SV[j] = i; } for (let v = 0; v < nv; v++) {
+    const i = SV[v], u = i * SEG + SEG / 2; trackPt(u, 0); const face = (HX * SUN[2] - HZ * SUN[0]) / 0.85;   // inward normal (left of the heading) . sun
+    drawSeg(i, HAZE[Math.max(0, Math.min(4, Math.round(2 - 2.6 * face)))][Math.min(10, Math.round(10 * (1 - Math.exp(-Math.sqrt(SK[i]) / 230))))]); } // ground: infield with mowing stripes, track with grain, markings, kerb
+  ctx.fillStyle = "#58a043"; ctx.beginPath(); strip(-0.9, -R, 0); ctx.fill(); ctx.fillStyle = "rgba(24,70,16,0.22)"; ctx.beginPath(); for (let w = -4.9; w > -R + 4; w -= 8) strip(w, w - 4, 0); ctx.fill();
+  ctx.fillStyle = "#8c8784"; ctx.beginPath(); strip(-0.12, -0.9, 0); ctx.fill(); ctx.fillStyle = "#8a8f98"; ctx.beginPath(); strip(9.5, 10.5, 0); ctx.fill(); ctx.fillStyle = "#4b4d56"; ctx.beginPath(); strip(10.5, 12.5, 0); ctx.fill();
+  ctx.beginPath(); strip(0, 9.5, 0); ctx.save(); ctx.translate(0, HOR - GR.hor); ctx.fillStyle = GR.track; ctx.fill(); ctx.restore(); ctx.save(); ctx.clip();
+  for (let y = H, s = 1; y > HOR + 3 && s > 0.12;) {   // grain in screen bands, scaled to the ground distance and scrolled with your run
+    const D = CY * FOC / Math.max(1, y - HOR); s = FOC / D / 64; const h = Math.max(6, (y - HOR) * 0.22); GM.a = GM.d = s; GM.e = W2; GM.f = y + ((me.u * FOC / D) % (128 * s));
+    GRAINP.setTransform(GM); ctx.fillStyle = GRAINP; ctx.globalAlpha = Math.min(1, s * 1.6); ctx.fillRect(0, y - h, W, h); y -= h; } ctx.globalAlpha = 1; ctx.restore(); ctx.fillStyle = "#f3efe8"; ctx.beginPath(); for (let l = 1; l <= 6; l++) lineStrip(l * LW); ctx.fill();
+  const uF = U0 + r.distance; ctx.beginPath(); quadUW(U0 - 0.05, U0 + 0.05, 0, 7.32, 0, 7.32, 0); quadUW(uF - 0.32, uF, 0, 7.32, 0, 7.32, 0); ctx.fill();
+  for (const [du, col] of [[10, "#f5d000"], [20, "#2f7ad8"], [30, "#2fb84a"], [40, "#2f7ad8"]]) { ctx.fillStyle = col; ctx.beginPath(); for (let l = 1; l < 6; l++) quadUW(U0 + du, U0 + du + 0.45, l * LW - 0.06, l * LW + 0.06, l * LW - 0.06, l * LW + 0.06, 0); ctx.fill(); }
+  ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `bold 100px ${FONT}`;
+  for (let l = 1; l <= 6; l++) { const w = (l - 0.5) * LW; if (pq(0, U0 - 1.2, w - 0.32, 0) && pq(1, U0 - 1.2, w + 0.32, 0) && pq(2, U0 - 1.9, w - 0.32, 0)) { affine(ctx, 0, 1, 2, 100, 100); ctx.fillText(String(l), 50, 52); } } ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  for (let c = 0; c < 2; c++) { ctx.fillStyle = c ? "#d8343a" : "#f6f4f0"; ctx.beginPath(); for (let d = 0; d < 70; d++) if (((Math.floor(CAMU + d) % 2) + 2) % 2 === c) quadUW(Math.floor(CAMU) + d, Math.floor(CAMU) + d + 1, -0.12, 0, -0.12, 0, 0.07); ctx.fill(); }
+  ctx.fillStyle = "#e8dcd8"; ctx.beginPath(); for (let d = 70; d < LOOP - 8;) { const s = stepAt(d); quadUW(CAMU + d, CAMU + d + s, -0.12, 0, -0.12, 0, 0.07); d += s; } ctx.fill();
+  ctx.fillStyle = "#8e8681"; ctx.beginPath(); for (let d = 0; d < 70; d += 1.5) quadV(CAMU + d, CAMU + d + 1.5, 0, 0, 0.07); ctx.fill();
+  ctx.fillStyle = "#f3c300"; ctx.beginPath(); for (let m = 20; m < 400; m += 20) { const u = U0 + m; trackPt(u, -0.45); const dz = (TX - CX) * CHX + (TZ - CZ) * CHZ; if (dz < 2 || dz > 130) continue; setQ(0, u, -0.32, 0); setQ(1, u, -0.58, 0); setQ(2, u, -0.53, 0.32); setQ(3, u, -0.37, 0.32); polyW(4); } ctx.fill();
+  ctx.fillStyle = GR.haze; ctx.save(); ctx.translate(0, HOR - GR.hor); ctx.fillRect(0, GR.hor - 8, W, H * 0.24); ctx.restore(); // runners: project, shadows (one soft layer), then bodies and the stadium props far to near
+  let nr = 0; for (let i = 0; i < n; i++) { const e = FIELD[i]; pose(e.ph, e.k); for (let j = 0; j < JN; j++) e.z3[j] = JL[3 * j + 2]; e.vis = placeRunner(e.b, e.u, e.w); trackPt(e.u, e.w); e.z = (TX - CX) * CHX + (TZ - CZ) * CHZ; if (e.vis) ORD[nr++] = i; }
+  SHG.setTransform(1, 0, 0, 1, 0, 0); SHG.clearRect(0, 0, SHC.width, SHC.height); SHG.setTransform(SHS, 0, 0, SHS, 0, 0); SHG.fillStyle = "#1c0505"; for (let i = 0; i < nr; i++) drawShadow(FIELD[ORD[i]].b.S);
+  ctx.globalAlpha = 0.4; ctx.drawImage(SHC, 0, 0, W, H); ctx.globalAlpha = 1; const props = [[uF, "gantry"], [U0 + 28, "board"]]; let pz = [0, 0]; for (let p = 0; p < 2; p++) { trackPt(props[p][0], 3); pz[p] = (TX - CX) * CHX + (TZ - CZ) * CHZ; }
+  for (let i = 1; i < nr; i++) { const k = ORD[i]; let j = i; while (j > 0 && FIELD[ORD[j - 1]].z < FIELD[k].z) { ORD[j] = ORD[j - 1]; j--; } ORD[j] = k; } let pi = pz[0] > pz[1] ? [0, 1] : [1, 0], q = 0;
+  const prop = p => props[p][1] === "gantry" ? gantry(props[p][0], el) : scoreboard(props[p][0], r, el); for (let i = 0; i < nr; i++) { const e = FIELD[ORD[i]]; while (q < 2 && pz[pi[q]] > e.z) prop(pi[q++]); drawRunner(e); } while (q < 2) prop(pi[q++]);
+  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  let nt = 0; { const bw = Math.max(12, 15 * UI), bh = Math.max(70, 0.24 * H), bx = W * 0.6, by = HOR - bh * 0.78; BAR[0] = bx - 4; BAR[1] = by - 4; BAR[2] = bx + bw * 1.55 + 13; BAR[3] = by + bh + 4; BAR[4] = bw; BAR[5] = bh; }   // power bar rectangle
+  for (let i = nr - 1; i >= 0; i--) { const e = FIELD[ORD[i]]; if (e.name === "YOU" || e.z > 90) continue; const B = e.b.J, fs = Math.max(9, Math.min(13 * UI, B[2] * 0.11)), label = e.name === "Champion" ? "Champion " + (e.who || "") : e.name;
+    ctx.font = `600 ${fs}px ${FONT}`; const tw = ctx.measureText(label).width + fs * 0.9; let x = Math.max(tw / 2 + 3, Math.min(W - tw / 2 - 3, B[63])); let y = B[64] - fs * 1.1;
+    for (let t = 0; t < nt; t++) if (Math.abs(TAGS[3 * t] - x) < (TAGS[3 * t + 2] + tw) / 2 && Math.abs(TAGS[3 * t + 1] - y) < fs * 1.4) { y = TAGS[3 * t + 1] - fs * 1.45; t = -1; }   // nearer tags keep their place, farther ones step up
+    if (run && y + fs * 0.4 > BAR[1] && y - fs * 0.95 < BAR[3] && x + tw / 2 > BAR[0] && x - tw / 2 < BAR[2]) x = x < (BAR[0] + BAR[2]) / 2 ? BAR[0] - tw / 2 - 2 : BAR[2] + tw / 2 + 2;   // keep tags off the power bar
+    if (nt < 6) { TAGS[3 * nt] = x; TAGS[3 * nt + 1] = y; TAGS[3 * nt + 2] = tw; nt++; } ctx.fillStyle = "rgba(20,14,30,0.55)"; ctx.beginPath(); rrect(ctx, x - tw / 2, y - fs * 0.95, tw, fs * 1.35, fs * 0.4); ctx.fill(); ctx.fillStyle = "#fff"; ctx.fillText(label, x, y); }
+  ctx.fillStyle = GR.key; ctx.fillRect(0, 0, W, H); ctx.fillStyle = GR.vig; ctx.fillRect(0, 0, W, H); hud(ctx, r, W, H, el, me, n); frameMs = frameMs * 0.95 + (performance.now() - now) * 0.05; rc.dataset.ms = frameMs.toFixed(2);
+}
+function gantry(u, el) {   // the finish: a post pair carrying the photo-finish camera and the clock, and a FINISH sign outside
+  const ctx = rctx; ctx.fillStyle = "#eef0f4"; ctx.beginPath(); for (const w of [-0.9, 9.9]) { setQ(0, u, w - 0.06, 0); setQ(1, u, w + 0.06, 0); setQ(2, u, w + 0.06, 1.75); setQ(3, u, w - 0.06, 1.75); polyW(4); } ctx.fill();
+  ctx.fillStyle = "#1e2026"; ctx.beginPath(); for (const w of [-0.9, 9.9]) { setQ(0, u, w - 0.24, 1.7); setQ(1, u, w + 0.24, 1.7); setQ(2, u, w + 0.24, 2.08); setQ(3, u, w - 0.24, 2.08); polyW(4); } ctx.fill();
+  ctx.fillStyle = "#c3338b"; ctx.beginPath(); setQ(0, u, 10.9, 0.55); setQ(1, u, 9.96, 0.55); setQ(2, u, 9.96, 1.25); setQ(3, u, 10.9, 1.25); polyW(4); ctx.fill();
+  if (pq(0, u, 9.96, 1.25) && pq(1, u, 10.9, 1.25) && pq(2, u, 9.96, 0.55) && PQ[3] - PQ[0] > 14) { affine(ctx, 0, 1, 2, 100, 74); ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `bold 26px ${FONT}`; ctx.fillText("FINISH", 50, 38); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
+  if (pq(0, u, -1.12, 2.02) && pq(1, u, -0.68, 2.02) && pq(2, u, -1.12, 1.76) && PQ[3] - PQ[0] > 10) { affine(ctx, 0, 1, 2, 100, 60); ctx.fillStyle = "#ffc20e"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `bold 34px ui-monospace, Menlo, monospace`; ctx.fillText(el.toFixed(1), 50, 32); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
+}
+function scoreboard(u, r, el) {   // the infield board by the kerb, as in the reference
+  const ctx = rctx; ctx.fillStyle = "#3c3f46"; ctx.beginPath(); for (const w of [-4.6, -7.4]) { setQ(0, u, w - 0.07, 0); setQ(1, u, w + 0.07, 0); setQ(2, u, w + 0.07, 1); setQ(3, u, w - 0.07, 1); polyW(4); } ctx.fill();
+  if (!pq(0, u, -8.0, 2.4) || !pq(1, u, -4.0, 2.4) || !pq(2, u, -8.0, 0.9)) return;
+  ctx.fillStyle = "#16171c"; ctx.beginPath(); setQ(0, u, -4, 2.4); setQ(1, u, -8, 2.4); setQ(2, u, -8, 0.9); setQ(3, u, -4, 0.9); polyW(4); ctx.fill(); ctx.strokeStyle = "#8d9099"; ctx.lineWidth = Math.max(1, 0.06 * FOC / PQ[2]); ctx.stroke();
+  affine(ctx, 0, 1, 2, 400, 150); ctx.fillStyle = "#ffc20e"; ctx.textBaseline = "middle"; ctx.font = `bold 52px ui-monospace, Menlo, monospace`;
+  ctx.textAlign = "right"; ctx.fillText(r.distance + "m", 370, 42); ctx.fillText(el.toFixed(2), 370, 108); ctx.fillStyle = "#c3338b"; ctx.fillRect(30, 70, 120, 8); ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+function hud(ctx, r, W, H, el, me, n) { const U = UI, pad = 14 * U, idle = r.phase === "idle", live = r.phase === "running" || r.phase === "finished";
+  // scoreboard, top right: LED dots
+  const p = LEDPP, pw = 34 * p + 10, px = W - pw - pad, py = pad; ctx.drawImage(LEDP, px, py, pw, 19 * p + 10); ctx.save(); ctx.translate(px + 5, py + 5); ctx.beginPath(); ledText(ctx, r.distance + "M", 0, 0, p, false); ledText(ctx, el.toFixed(2), 33, 11, p, true);
+  ctx.strokeStyle = "rgba(255,160,40,0.3)"; ctx.lineWidth = p * 0.6; ctx.stroke(); ctx.fillStyle = "#ffb627"; ctx.fill(); ctx.restore(); // power bar: speed as a fraction of 22 km/h, plus a cadence meter
+  if (r.phase === "running") { const bw = BAR[4], bh = BAR[5], bx = BAR[0] + 4, by = BAR[1] + 4, frac = Math.min(1, Math.max(0, r.speed_kmh / 22)); ctx.fillStyle = "rgba(10,14,10,0.5)"; ctx.beginPath(); rrect(ctx, bx - 3, by - 3, bw + 6, bh + 6, 4); ctx.fill();
+  const pg = ctx.createLinearGradient(0, by + bh, 0, by); pg.addColorStop(0, "#0a6b22"); pg.addColorStop(0.6, "#2fd23f"); pg.addColorStop(1, "#b6ff5a"); ctx.fillStyle = pg; ctx.fillRect(bx, by + bh * (1 - frac), bw, bh * frac);
+  ctx.fillStyle = "rgba(255,255,255,0.32)"; ctx.fillRect(bx + 1.5, by + bh * (1 - frac), bw * 0.35, bh * frac);
+  ctx.strokeStyle = "#f4f4f4"; ctx.lineWidth = 2; ctx.strokeRect(bx, by, bw, bh); ctx.fillStyle = "#f4f4f4"; for (let i = 1; i < 4; i++) ctx.fillRect(bx - 4, by + bh * i / 4 - 0.5, 6, 1);
+  const cf = Math.min(1, (r.cadence || 0) / 200), sx = bx + bw + 7, sh = bh * 0.52, cy0 = by + bh - sh; ctx.fillStyle = "rgba(10,14,10,0.5)"; ctx.fillRect(sx - 2, cy0 - 2, bw * 0.55 + 4, sh + 4);
+  for (let i = 0; i < 5; i++) { ctx.fillStyle = cf * 5 > i ? (i > 3 ? "#ffde00" : "#4be35a") : "rgba(255,255,255,0.12)"; ctx.fillRect(sx, cy0 + sh - (i + 1) * sh / 5 + 1.5, bw * 0.55, sh / 5 - 3); } } // position, bottom left
+  let place = 1; for (let i = 1; i < n; i++) if (FIELD[i].d > me.d + 0.05) place++; if (r.phase === "finished" && r.result) place = r.result.place;
+  ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.55)"; ctx.shadowBlur = 8 * U; ctx.shadowOffsetX = 1.5 * U; ctx.shadowOffsetY = 2 * U; ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  if (live) { ctx.font = `600 ${15 * U}px ${COND}`; ctx.fillText("Position", pad + 4 * U, H - pad - 54 * U); ctx.font = `700 ${62 * U}px ${COND}`; ctx.fillText(String(place), pad, H - pad); } // runners behind the camera, with gaps
+  ctx.font = `600 ${11.5 * U}px ${FONT}`; ctx.textAlign = "right"; let ly = H - pad - 52 * U;
+  for (let i = 1; i < n; i++) { const e = FIELD[i]; if (e.vis && e.z > 1) continue; const gap = e.d - me.d; ctx.fillStyle = "#fff"; ctx.fillText((e.name === "Champion" ? "Champion " + (e.who || "") : e.name) + "  " + (gap >= 0 ? "+" : "") + gap.toFixed(1) + " m", W - pad - 14 * U, ly);
+    ctx.fillStyle = LOOK[e.name][0]; ctx.fillRect(W - pad - 10 * U, ly - 9 * U, 8 * U, 9 * U); ly -= 15 * U; } ctx.restore(); // time bar with the rings, bottom right
+  const tw = 236 * U, th = 40 * U, tx = W - tw - pad, ty = H - th - pad; ctx.drawImage(TBAR, tx, ty, tw + 4, th + 4);
+  ctx.fillStyle = "#fff"; ctx.font = `700 ${24 * U}px ${COND}`; ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.fillText(el.toFixed(2), tx + tw - 84 * U, ty + th * 0.47); // countdown and GO!
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"; if (r.phase === "countdown") { const c = Math.max(0, (r.countdown || 0) - (performance.now() - raceSnapAt) / 1000), num = Math.max(1, Math.ceil(c)), f = num - c, s = 1 + 1.2 * Math.max(0, 1 - f * 4) ** 2; goAt = 0;
+    ctx.save(); ctx.globalAlpha = Math.min(1, f * 5); ctx.translate(W2, H * 0.4); ctx.scale(s, s); ctx.font = `800 ${92 * U}px ${COND}`; ctx.lineWidth = 7 * U; ctx.strokeStyle = "rgba(20,10,30,0.85)"; ctx.strokeText(String(num), 0, 0); ctx.fillStyle = "#fff"; ctx.fillText(String(num), 0, 0); ctx.restore(); }
+  if (r.phase === "running" && el < 1.3) { const f = el / 1.3, s = 0.9 + 0.5 * f;
+    ctx.save(); ctx.globalAlpha = 1 - f * f; ctx.translate(W2, H * 0.4); ctx.scale(s, s); ctx.font = `800 ${96 * U}px ${COND}`; ctx.lineWidth = 9 * U; ctx.strokeStyle = "#c3338b"; ctx.strokeText("GO!", 0, 0); ctx.fillStyle = "#fff36b"; ctx.fillText("GO!", 0, 0); ctx.restore();
+    ctx.fillStyle = `rgba(255,255,255,${(0.35 * (1 - f) * (1 - f)).toFixed(3)})`; ctx.fillRect(0, 0, W, H); } if (idle) { const t = "Choose a distance and press Start"; ctx.font = `600 ${13 * U}px ${FONT}`; const w = ctx.measureText(t).width + 22 * U, y = H * 0.7;
+    ctx.fillStyle = "rgba(18,14,28,0.62)"; ctx.beginPath(); rrect(ctx, W2 - w / 2, y - 12 * U, w, 24 * U, 12 * U); ctx.fill(); ctx.fillStyle = "#fff"; ctx.fillText(t, W2, y + 1); } // finish panel with a medal band
+  if (r.phase === "finished" && r.result) { const res = r.result, medal = res.record ? ["#fff3a8", "#e8b923", "#9a7410"] : res.beat.includes("Runner") ? ["#ffffff", "#c9ccd3", "#7d828c"] : ["#ffd2a8", "#c9773a", "#7a3f16"];
+    const pw2 = Math.min(360 * U, W - 2 * pad), ph = 118 * U, x = W2 - pw2 / 2, y = 0.13 * H; ctx.fillStyle = "rgba(18,14,28,0.88)"; ctx.beginPath(); rrect(ctx, x, y, pw2, ph, 10 * U); ctx.fill();
+    const mg = ctx.createLinearGradient(x, 0, x + pw2, 0); mg.addColorStop(0, medal[2]); mg.addColorStop(0.5, medal[1]); mg.addColorStop(1, medal[2]); ctx.fillStyle = mg; ctx.fillRect(x, y + 26 * U, pw2, 4 * U);
+    ctx.fillStyle = "#c3338b"; ctx.beginPath(); rrect(ctx, x, y, pw2, 26 * U, 10 * U); ctx.fill(); ctx.fillRect(x, y + 14 * U, pw2, 12 * U); ctx.fillStyle = "#fff"; ctx.font = `700 ${14 * U}px ${FONT}`; ctx.fillText("FINISH  " + r.distance + " m", W2, y + 14 * U);
+    const mx = x + 42 * U, my = y + 72 * U, rg = ctx.createRadialGradient(mx - 6 * U, my - 6 * U, 2, mx, my, 24 * U); rg.addColorStop(0, medal[0]); rg.addColorStop(0.6, medal[1]); rg.addColorStop(1, medal[2]);
+    ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(mx, my, 23 * U, 0, TAU); ctx.fill(); ctx.fillStyle = "rgba(40,24,0,0.75)"; ctx.font = `800 ${20 * U}px ${COND}`; ctx.fillText(String(res.place), mx, my + 1);
+    ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = `700 ${30 * U}px ${COND}`; ctx.fillText(ordinal(res.place) + "   " + res.time.toFixed(2) + " s", x + 80 * U, y + 60 * U); ctx.font = `500 ${12.5 * U}px ${FONT}`; ctx.fillStyle = res.record ? "#ffd84a" : "#d8d8e0";
+    ctx.fillText(res.record ? "NEW RECORD: you are the Champion ghost" : "beat " + (res.beat.length ? res.beat.join(", ") : "nobody"), x + 80 * U, y + 86 * U);
+    ctx.fillStyle = "#a9a6b6"; ctx.fillText(res.avg_kmh.toFixed(1) + " km/h average" + (r.champion && !res.record ? "   record " + r.champion.time.toFixed(2) + " s" : ""), x + 80 * U, y + 104 * U); }
 }
 drawRace();
 function render(s) {
@@ -4230,3 +4450,7 @@ drawRace();
 ### Task 25 (done in-session, 2026-10-26): race view in the SEGA London 2012 look
 
 Spec Revision 6. `page.html`'s race script block was rewritten twice after Task 24 (doodle side view, then the chase-camera stadium view) directly in the file; the Task 11 `page.html` block above is synced to the final file, so read the file, not Tasks 22-24, for the current view.
+
+### Task 26 (done in-session, 2026-10-26): realism pass
+
+A design agent rebuilt the race scene (commits 1379be7, 29de2d8): world-space 400 m oval with six 1.22 m lanes and 36.5 m bends turning LEFT (anticlockwise, infield on the left), pinhole chase camera 6 m behind and 2.2 m up, offscreen pre-rendered stadium/crowd/track grain, skeletal back-view runners with bibs and a stride cycle, sun from front-left with limb shadows, LED scoreboard, glossy power bar at 0.60 width with tag collision avoidance, medal-banded finish panel. The Task 11 `page.html` block above is synced to the final file.
