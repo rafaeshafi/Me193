@@ -24,12 +24,7 @@
   ul { padding-left: 18px; } a { color: #0093e7; }
   .muted { color: #777; font-size: 13px; }
   .race { background: #0d0d0d; border: 1px solid #222; border-radius: 12px; padding: 12px 14px; margin-bottom: 18px; }
-  .track { position: relative; height: 150px; background: #161616; border-radius: 8px; margin: 10px 0 4px; overflow: hidden; }
-  .lane { position: absolute; left: 0; right: 0; height: 28px; border-bottom: 1px dashed #2a2a2a; }
-  .lane .name { position: absolute; left: 8px; top: 6px; font-size: 12px; color: #999; width: 24%; overflow: hidden; white-space: nowrap; }
-  .lane .dot { position: absolute; top: 6px; width: 16px; height: 16px; border-radius: 50%; margin-left: -8px; transition: left 0.1s linear; }
-  .lane .time { position: absolute; right: 6px; top: 6px; font-size: 12px; color: #bbb; background: #161616; padding-left: 4px; }
-  .finish { position: absolute; top: 0; bottom: 0; left: 88%; width: 2px; background: repeating-linear-gradient(#fff 0 4px, #000 4px 8px); }
+  .track { height: 360px; width: 100%; display: block; background: #161616; border-radius: 8px; margin: 10px 0 4px; }
   .countdown { font-size: 64px; font-weight: 800; text-align: center; color: #fff; min-height: 0; }
   .result { display: none; margin-top: 8px; }
   .board { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
@@ -52,14 +47,13 @@
     <button id="raceStart" onclick="raceStart()">Start</button>
     <button id="raceAbort" class="stop" onclick="post('/race/abort')">Abort</button>
   </div>
-  <div class="track" id="track"></div>
+  <canvas id="raceCanvas" class="track"></canvas>
   <div class="muted">speed = cadence x stride, stride = 0.6 m + 0.5 m per g of impact above 1 g; WALK capped at 7 km/h, STAND and BIKE do not move</div>
   <div class="row">
     <div class="card"><small>Speed</small><b id="rSpeed">0.0</b> km/h</div>
     <div class="card"><small>Distance</small><b id="rDist">0</b> m</div>
     <div class="card"><small>Time</small><b id="rTime">0.0</b> s</div>
   </div>
-  <div id="rCountdown" class="countdown"></div>
   <div id="rResult" class="card result"></div>
   <table id="rBoard" class="board"></table>
 </section>
@@ -121,22 +115,99 @@ function renderRace(r, speedKmh) {
   $("rSpeed").textContent = speedKmh.toFixed(1);
   $("rDist").textContent = Math.round(r.dist);
   $("rTime").textContent = r.elapsed.toFixed(1);
-  $("rCountdown").textContent = r.phase === "countdown" ? Math.ceil(r.countdown) : (r.phase === "running" && r.elapsed < 1.5 ? "GO" : (r.phase === "finished" ? "FINISH" : ""));
   $("raceStart").style.display = r.phase === "idle" || r.phase === "finished" ? "" : "none";
   $("raceAbort").style.display = r.phase === "countdown" || r.phase === "running" ? "" : "none";
-  const lanes = [{name: "You", dist: r.dist, color: "#fff"}].concat(r.ghosts.map(g => ({name: g.name + " " + g.kmh + " km/h", dist: g.dist, color: ghostColor[g.name] || "#888"})));
-  const html = '<div class="finish"></div>' + lanes.map((l, i) => `<div class="lane" style="top:${i * 29}px"><span class="name">${l.name}</span><span class="dot" style="left:${26 + 62 * Math.min(1, l.dist / r.distance)}%;background:${l.color}"></span><span class="time">${Math.round(l.dist)} m</span></div>`).join("");
-  if ($("track").dataset.html !== html) { $("track").innerHTML = html; $("track").dataset.html = html; }
-  $("track").style.height = (lanes.length * 29 + 4) + "px";
+  raceSnap = r; raceSnapAt = performance.now();
   if (r.result && r.phase === "finished") {
     $("rResult").style.display = "block";
-    $("rResult").innerHTML = `<small>${r.who}, ${r.distance} m</small><b>${r.result.time.toFixed(2)} s</b> &nbsp; ${r.result.avg_kmh.toFixed(1)} km/h &nbsp; rank #${r.result.rank}` + (r.result.beat.length ? `<div class="muted">beat ${r.result.beat.join(", ")}</div>` : `<div class="muted">beat nobody this time</div>`);
+    $("rResult").innerHTML = `<small>${r.who}, ${r.distance} m</small><b>${ordinal(r.result.place || 0)} of ${r.field || 0}</b> &nbsp; ${r.result.time.toFixed(2)} s &nbsp; ${r.result.avg_kmh.toFixed(1)} km/h` + (r.result.record ? `<div style="color:#ffde00;font-weight:700">NEW RECORD: you are the Champion ghost now</div>` : (r.champion ? `<div class="muted">Champion ${r.champion.who || ""} holds ${r.champion.time.toFixed(2)} s</div>` : ""));
   } else { $("rResult").style.display = "none"; }
   const rows = r.leaderboard.map((e, i) => `<tr><td>${i + 1}</td><td>${e.who}</td><td>${e.time.toFixed(2)} s</td><td>${e.avg_kmh.toFixed(1)} km/h</td><td class="muted">${e.when}</td></tr>`).join("");
   const board = rows ? `<tr><th>#</th><th>who</th><th>${r.distance} m</th><th>avg</th><th>when</th></tr>` + rows : "";
   if ($("rBoard").dataset.html !== board) { $("rBoard").innerHTML = board; $("rBoard").dataset.html = board; }
 }
+const ordinal = n => n + ({1: "st", 2: "nd", 3: "rd"}[n] || "th");
+// ---- first-person Olympic final ----
+const rc = $("raceCanvas"), rctx = rc.getContext("2d");
+let raceSnap = null, raceSnapAt = 0;
+const LANES = 5, YOU_LANE = 2, VIEW_M = 80, K = 14;
+const runnerColor = {Jogger: "#16ec06", Runner: "#ffde00", Sprinter: "#ff0026", Champion: "#0093e7"};
+const crowd = Array.from({length: 400}, (_, i) => [Math.random(), Math.random(), ["#c33", "#36c", "#eee", "#fc3", "#3a3"][i % 5]]);
+function fitRace() { rc.width = rc.clientWidth * devicePixelRatio; rc.height = 360 * devicePixelRatio; }
+window.addEventListener("resize", fitRace); fitRace();
+function runnerFigure(ctx, x, y, s, color, phase) {   // feet at (x, y), height ~ 60 * s px
+  const h = 60 * s;
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = Math.max(1, 5 * s); ctx.lineCap = "round";
+  const swing = Math.sin(phase) * 0.6;
+  ctx.beginPath(); ctx.moveTo(x, y - h * 0.5); ctx.lineTo(x + Math.sin(swing) * h * 0.3, y - h * 0.1); ctx.stroke();           // leg 1
+  ctx.beginPath(); ctx.moveTo(x, y - h * 0.5); ctx.lineTo(x - Math.sin(swing) * h * 0.3, y - h * 0.1); ctx.stroke();           // leg 2
+  ctx.beginPath(); ctx.moveTo(x, y - h * 0.5); ctx.lineTo(x, y - h * 0.85); ctx.stroke();                                       // torso
+  ctx.beginPath(); ctx.moveTo(x - Math.sin(swing) * h * 0.25, y - h * 0.5); ctx.lineTo(x, y - h * 0.8); ctx.lineTo(x + Math.sin(swing) * h * 0.25, y - h * 0.5); ctx.stroke(); // arms
+  ctx.beginPath(); ctx.arc(x, y - h * 0.95, h * 0.1, 0, 7); ctx.fill();                                                          // head
+}
+function drawRace() {
+  requestAnimationFrame(drawRace);
+  const r = raceSnap; if (!r || rc.width === 0) return;
+  const ctx = rctx, W = rc.width, H = rc.height, dpr = devicePixelRatio;
+  const dt = r.phase === "running" ? (performance.now() - raceSnapAt) / 1000 : 0;
+  const you = Math.min(r.distance, r.dist + r.speed_kmh / 3.6 * dt);
+  const horizon = H * 0.38, vx = W / 2;
+  const laneX = i => W * (0.02 + 0.96 * i / LANES);
+  const proj = (xb, d) => { d = Math.max(0, d); const t = d / (d + K); return [xb + (vx - xb) * t, H - (H - horizon) * t, 1 - t]; };
+  // sky, crowd, track
+  ctx.fillStyle = "#0b1020"; ctx.fillRect(0, 0, W, horizon);
+  for (const [cx, cy, c] of crowd) { ctx.fillStyle = c; ctx.fillRect(cx * W, horizon * (0.45 + 0.55 * cy), 3 * dpr, 3 * dpr); }
+  ctx.fillStyle = "#8b2f1f"; ctx.fillRect(0, horizon, W, H - horizon);
+  ctx.strokeStyle = "#f4f4f4"; ctx.lineWidth = 2 * dpr;
+  for (let i = 0; i <= LANES; i++) { const [x1, y1] = proj(laneX(i), 0), [x2, y2] = proj(laneX(i), VIEW_M); ctx.beginPath(); ctx.moveTo(laneX(i), H); ctx.lineTo(x2, y2); ctx.stroke(); }
+  // 10 m marks scrolling towards you
+  ctx.font = `${12 * dpr}px system-ui`; ctx.fillStyle = "#ddd"; ctx.textAlign = "left";
+  for (let m = Math.floor(you / 10) * 10; m <= you + VIEW_M; m += 10) {
+    const d = m - you; if (d < 0) continue;
+    const [xl, y] = proj(laneX(0), d), [xr] = proj(laneX(LANES), d);
+    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = dpr; ctx.beginPath(); ctx.moveTo(xl, y); ctx.lineTo(xr, y); ctx.stroke();
+    if (m % 50 === 0) ctx.fillText(m + " m", xr + 4 * dpr, y);
+  }
+  // finish line
+  const df = r.distance - you;
+  if (df >= 0 && df <= VIEW_M) {
+    const [xl, y, s] = proj(laneX(0), df), [xr] = proj(laneX(LANES), df);
+    ctx.lineWidth = Math.max(2, 10 * s) * dpr; ctx.strokeStyle = "#fff"; ctx.setLineDash([8 * s * dpr, 8 * s * dpr]);
+    ctx.beginPath(); ctx.moveTo(xl, y); ctx.lineTo(xr, y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = `bold ${Math.max(10, 28 * s) * dpr}px system-ui`; ctx.fillText("FINISH", vx, y - 14 * s * dpr);
+  }
+  // competitors in the other lanes, drawn far to near
+  const lanes = [0, 1, 3, 4];
+  const runners = r.ghosts.map((g, i) => ({name: g.name, who: g.who, lane: lanes[i % lanes.length], dist: Math.min(r.distance, g.dist + g.kmh / 3.6 * dt), kmh: g.kmh}));
+  runners.sort((a, b) => b.dist - a.dist);
+  for (const g of runners) {
+    const gap = g.dist - you;
+    if (gap < -2 || gap > VIEW_M) continue;
+    const xb = (laneX(g.lane) + laneX(g.lane + 1)) / 2, [x, y, s] = proj(xb, gap);
+    runnerFigure(ctx, x, y, s * dpr, runnerColor[g.name] || "#aaa", performance.now() / 1000 * g.kmh / 3.6 * 3);
+    ctx.fillStyle = runnerColor[g.name] || "#aaa"; ctx.textAlign = "center"; ctx.font = `${Math.max(9, 12 * s) * dpr}px system-ui`;
+    ctx.fillText(g.name === "Champion" ? "Champion " + (g.who || "") : g.name, x, y - 66 * s * dpr);
+  }
+  // you, bottom centre, legs driven by cadence
+  const cad = (raceSnap.cadence || 0);
+  runnerFigure(ctx, vx, H - 6 * dpr, 1.15 * dpr, "#fff", performance.now() / 1000 * Math.PI * 2 * (cad / 60));
+  // HUD
+  ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = `bold ${14 * dpr}px system-ui`;
+  ctx.fillText(`OLYMPIC FINAL  ${r.distance} m`, 10 * dpr, 20 * dpr);
+  const order = [{name: "YOU", dist: you}].concat(runners).sort((a, b) => b.dist - a.dist);
+  ctx.font = `${12 * dpr}px system-ui`;
+  order.forEach((o, i) => { ctx.fillStyle = o.name === "YOU" ? "#fff" : (runnerColor[o.name] || "#aaa"); ctx.fillText(`${i + 1}. ${o.name === "Champion" ? "Champion " + (o.who || "") : o.name}  ${Math.round(o.dist)} m`, 10 * dpr, (40 + 16 * i) * dpr); });
+  ctx.textAlign = "right"; ctx.fillStyle = "#fff"; ctx.font = `bold ${22 * dpr}px system-ui`;
+  ctx.fillText((r.elapsed + dt).toFixed(1) + " s", W - 10 * dpr, 26 * dpr);
+  ctx.font = `${14 * dpr}px system-ui`; ctx.fillText(r.speed_kmh.toFixed(1) + " km/h", W - 10 * dpr, 46 * dpr);
+  // countdown / go / finish
+  const big = r.phase === "countdown" ? String(Math.ceil(r.countdown)) : (r.phase === "running" && r.elapsed + dt < 1.5 ? "GO!" : (r.phase === "finished" ? "FINISH" : (r.phase === "idle" ? "" : "")));
+  if (big) { ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.font = `bold ${72 * dpr}px system-ui`; ctx.fillText(big, vx, H * 0.6); }
+  if (r.phase === "idle") { ctx.textAlign = "center"; ctx.fillStyle = "#ddd"; ctx.font = `${16 * dpr}px system-ui`; ctx.fillText("pick a distance and press Start", vx, H * 0.6); }
+}
+drawRace();
 function render(s) {
+  s.race.cadence = s.cad || 0;
   renderRace(s.race, s.speed_kmh);
   const act = $("act"); act.textContent = s.act; act.className = "verdict " + s.act.replace(" ", "");
   $("m1").textContent = s.m1;
