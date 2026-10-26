@@ -23,11 +23,46 @@
   #prompt { font-size: 28px; color: #fff; min-height: 34px; }
   ul { padding-left: 18px; } a { color: #0093e7; }
   .muted { color: #777; font-size: 13px; }
+  .race { background: #0d0d0d; border: 1px solid #222; border-radius: 12px; padding: 12px 14px; margin-bottom: 18px; }
+  .track { position: relative; height: 150px; background: #161616; border-radius: 8px; margin: 10px 0 4px; overflow: hidden; }
+  .lane { position: absolute; left: 0; right: 0; height: 28px; border-bottom: 1px dashed #2a2a2a; }
+  .lane .name { position: absolute; left: 8px; top: 6px; font-size: 12px; color: #999; }
+  .lane .dot { position: absolute; top: 6px; width: 16px; height: 16px; border-radius: 50%; margin-left: -8px; transition: left 0.1s linear; }
+  .lane .time { position: absolute; right: 8px; top: 6px; font-size: 12px; color: #bbb; }
+  .finish { position: absolute; top: 0; bottom: 0; right: 6%; width: 2px; background: repeating-linear-gradient(#fff 0 4px, #000 4px 8px); }
+  .countdown { font-size: 64px; font-weight: 800; text-align: center; color: #fff; min-height: 0; }
+  .result { display: none; margin-top: 8px; }
+  .board { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
+  .board td, .board th { padding: 4px 6px; text-align: left; border-bottom: 1px solid #222; color: #ccc; }
+  .board th { color: #888; font-weight: 500; text-transform: uppercase; font-size: 11px; }
+  .dist.on { background: #0093e7; }
 </style>
 </head>
 <body>
 <main>
 <h1>Gait Wearable</h1>
+<section id="race" class="race">
+  <div class="row" style="align-items:center">
+    <h1 style="margin:0">Race</h1>
+    <span class="muted">run on the spot</span>
+    <span style="flex:1"></span>
+    <button class="sec dist" data-d="100">100 m</button>
+    <button class="sec dist" data-d="400">400 m</button>
+    <button class="sec dist" data-d="1000">1 km</button>
+    <button id="raceStart" onclick="raceStart()">Start</button>
+    <button id="raceAbort" class="stop" onclick="post('/race/abort')">Abort</button>
+  </div>
+  <div class="track" id="track"></div>
+  <div class="muted">speed = cadence x stride, stride = 0.6 m + 0.5 m per g of impact above 1 g; WALK capped at 7 km/h, STAND and BIKE do not move</div>
+  <div class="row">
+    <div class="card"><small>Speed</small><b id="rSpeed">0.0</b> km/h</div>
+    <div class="card"><small>Distance</small><b id="rDist">0</b> m</div>
+    <div class="card"><small>Time</small><b id="rTime">0.0</b> s</div>
+  </div>
+  <div id="rCountdown" class="countdown"></div>
+  <div id="rResult" class="card result"></div>
+  <table id="rBoard" class="board"></table>
+</section>
 <div id="act" class="verdict">---</div>
 <div class="muted">Model 2: all six IMU channels</div>
 <div class="row">
@@ -77,7 +112,32 @@ function drawWave(w) {
   w.forEach((g, i) => { const x = i / (w.length - 1) * W; i ? ctx.lineTo(x, y(g)) : ctx.moveTo(x, y(g)); });
   ctx.stroke();
 }
+let raceDistance = 400;
+document.querySelectorAll(".dist").forEach(b => b.onclick = () => { raceDistance = +b.dataset.d; document.querySelectorAll(".dist").forEach(x => x.classList.toggle("on", x === b)); });
+document.querySelector('.dist[data-d="400"]').classList.add("on");
+function raceStart() { post("/race/start?distance=" + raceDistance); }
+const ghostColor = {Jogger: "#16ec06", Runner: "#ffde00", Sprinter: "#ff0026", "Your best": "#0093e7"};
+function renderRace(r, speedKmh) {
+  $("rSpeed").textContent = speedKmh.toFixed(1);
+  $("rDist").textContent = Math.round(r.dist);
+  $("rTime").textContent = r.elapsed.toFixed(1);
+  $("rCountdown").textContent = r.phase === "countdown" ? Math.ceil(r.countdown) : (r.phase === "running" ? "GO" : "");
+  $("raceStart").style.display = r.phase === "idle" || r.phase === "finished" ? "" : "none";
+  $("raceAbort").style.display = r.phase === "countdown" || r.phase === "running" ? "" : "none";
+  const lanes = [{name: "You", dist: r.dist, color: "#fff"}].concat(r.ghosts.map(g => ({name: g.name + " " + g.kmh + " km/h", dist: g.dist, color: ghostColor[g.name] || "#888"})));
+  const html = '<div class="finish"></div>' + lanes.map((l, i) => `<div class="lane" style="top:${i * 29}px"><span class="name">${l.name}</span><span class="dot" style="left:${8 + 86 * Math.min(1, l.dist / r.distance)}%;background:${l.color}"></span><span class="time">${Math.round(l.dist)} m</span></div>`).join("");
+  if ($("track").dataset.html !== html) { $("track").innerHTML = html; $("track").dataset.html = html; }
+  $("track").style.height = (lanes.length * 29 + 4) + "px";
+  if (r.result && r.phase === "finished") {
+    $("rResult").style.display = "block";
+    $("rResult").innerHTML = `<small>${r.who}, ${r.distance} m</small><b>${r.result.time.toFixed(2)} s</b> &nbsp; ${r.result.avg_kmh.toFixed(1)} km/h &nbsp; rank #${r.result.rank}` + (r.result.beat.length ? `<div class="muted">beat ${r.result.beat.join(", ")}</div>` : `<div class="muted">beat nobody this time</div>`);
+  } else { $("rResult").style.display = "none"; }
+  const rows = r.leaderboard.map((e, i) => `<tr><td>${i + 1}</td><td>${e.who}</td><td>${e.time.toFixed(2)} s</td><td>${e.avg_kmh.toFixed(1)} km/h</td><td class="muted">${e.when}</td></tr>`).join("");
+  const board = rows ? `<tr><th>#</th><th>who</th><th>${r.distance} m</th><th>avg</th><th>when</th></tr>` + rows : "";
+  if ($("rBoard").dataset.html !== board) { $("rBoard").innerHTML = board; $("rBoard").dataset.html = board; }
+}
 function render(s) {
+  renderRace(s.race, s.speed_kmh);
   const act = $("act"); act.textContent = s.act; act.className = "verdict " + s.act.replace(" ", "");
   $("m1").textContent = s.m1;
   $("agree").textContent = s.agree == null ? "" : (s.agree ? "agrees" : "differs"); $("agree").className = s.agree ? "agree" : "differ";

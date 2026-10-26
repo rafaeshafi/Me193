@@ -79,3 +79,15 @@ def test_events_stream_sends_json_frames(server):
         line = r.fp.readline()
     assert json.loads(line[6:])["act"] == "---"
     c.close()
+
+
+def test_race_routes(server):
+    s, g = server
+    status, _, body = req(s, "POST", "/race/start?distance=400&who=ann")
+    snap = json.loads(body)
+    assert status == 200 and snap["race"]["phase"] == "countdown" and snap["race"]["distance"] == 400
+    assert g.race.who == "ann"
+    status, _, body = req(s, "POST", "/race/start?distance=123")
+    assert status == 400
+    status, _, body = req(s, "POST", "/race/abort")
+    assert status == 200 and json.loads(body)["race"]["phase"] == "idle"

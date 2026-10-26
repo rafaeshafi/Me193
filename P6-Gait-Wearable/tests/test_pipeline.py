@@ -143,3 +143,26 @@ def test_on_batch_from_a_thread_while_ticking(tmp_path):
     assert not errors
     g.tick()
     assert g.state["act"] == "RUN"
+
+
+def test_race_runs_on_the_gait(tmp_path):
+    clk = Clock()
+    g = make(tmp_path, clk)
+    assert g.snapshot()["race"]["phase"] == "idle" and g.snapshot()["speed_kmh"] == 0.0
+    g.race.start(100, "ann")
+    feed(g, clk, "RUN", 6.0)                       # 2.8 Hz synth run: ~168 spm x stride(3.5 g) 1.85 m = ~5 m/s
+    snap = g.snapshot()
+    assert snap["speed_kmh"] > 10
+    assert snap["race"]["phase"] in ("running", "finished") and snap["race"]["dist"] > 0
+    assert len(snap["race"]["ghosts"]) == 3
+    g.race.abort()
+    assert g.snapshot()["race"]["phase"] == "idle"
+
+
+def test_race_distance_does_not_grow_while_standing(tmp_path):
+    clk = Clock()
+    g = make(tmp_path, clk)
+    g.race.start(100, "ann")
+    feed(g, clk, "STAND", 6.0)
+    snap = g.snapshot()
+    assert snap["race"]["phase"] == "running" and snap["race"]["dist"] == 0.0 and snap["speed_kmh"] == 0.0

@@ -3,6 +3,7 @@
 GET  /            the page            GET /events  SSE stream of Gait.snapshot() at 10 Hz
 GET  /state       one snapshot (JSON) GET /data/<session.csv>  download a recording
 POST /guided?who= start the guided script   POST /record?label=WALK&who=   POST /stop
+POST /race/start?distance=100|400|1000&who=   POST /race/abort
 """
 import json
 import threading
@@ -64,6 +65,13 @@ class Handler(BaseHTTPRequestHandler):
                 rec.start_single(label, who=who)
             elif url.path == "/stop":
                 rec.stop()
+            elif url.path == "/race/start":
+                try:
+                    self.gait.race.start(int(q.get("distance", ["400"])[0]), who)
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 400)
+            elif url.path == "/race/abort":
+                self.gait.race.abort()
             else:
                 return self._send(404, "text/plain", b"not found")
             self._json(self.gait.snapshot())

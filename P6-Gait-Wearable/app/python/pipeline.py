@@ -1,10 +1,12 @@
 """Gait: IMU batches in, both verdicts out. Owns the ring buffer, the two trees, the votes and the recorder."""
 import threading
 import time
+from pathlib import Path
 
 from features import X, compute
 from imu import RATE, Ring, decode
 from models import Vote
+from race import Race, ResultStore, SpeedModel
 
 WINDOW_S = 2.0
 HOP_S = 0.5
@@ -14,8 +16,10 @@ CADENCE_MULT = {"WALK": 2.0, "RUN": 2.0, "BIKE": 1.0}
 
 
 class Gait:
-    def __init__(self, model1, model2, recorder, rate=RATE, clock=time.monotonic):
+    def __init__(self, model1, model2, recorder, rate=RATE, clock=time.monotonic, races_path=None):
         self.m1, self.m2, self.recorder, self.rate, self._clock = model1, model2, recorder, rate, clock
+        self.speed = SpeedModel()
+        self.race = Race(ResultStore(races_path or (Path(recorder.dir) / "races.json")), clock=clock)
         self.ring = Ring(5.0, rate)
         self.vote1, self.vote2 = Vote(3), Vote(3)
         self._lock = threading.Lock()
@@ -50,8 +54,9 @@ class Gait:
 
     # --- from the main loop -------------------------------------------------------------------------------------
     def tick(self, now=None):
-        """Every HOP_S: classify the newest window. Returns True when it ran."""
+        """Advance the race every call; every HOP_S also classify the newest window. Returns True when it classified."""
         now = self._clock() if now is None else now
+        self.race.tick(self.speed.speed, now)
         if now < self._next_tick:
             return False
         self._next_tick = now + HOP_S
@@ -63,16 +68,19 @@ class Gait:
         if not imu_ok:
             self.vote1, self.vote2 = Vote(3), Vote(3)
             self._set(act="NO IMU" if heard else "---", m1="---", cad=None, pk=None, features={}, imu=False)
+            self.speed.update(self.state["act"], self.state["cad"], self.state["pk"], now)
             return True
         if win is None:
             self.vote1, self.vote2 = Vote(3), Vote(3)
             self._set(act="---", m1="---", cad=None, pk=None, features={}, imu=True)
+            self.speed.update(self.state["act"], self.state["cad"], self.state["pk"], now)
             return True
         f = compute(win, self.rate)
         a1 = self.vote1.push(self.m1.predict(f))
         a2 = self.vote2.push(self.m2.predict(f))
         cad = None if a2 == "STAND" else int(round(f["dom_freq"] * 60 * CADENCE_MULT.get(a2, 1.0)))
         self._set(act=a2, m1=a1, cad=cad, pk=f["peak_x"], features=f, dropped=dropped, imu=True)
+        self.speed.update(self.state["act"], self.state["cad"], self.state["pk"], now)
         return True
 
     def snapshot(self):
@@ -83,6 +91,7 @@ class Gait:
         real = ("---", "NO IMU")
         agree = None if s["act"] in real or s["m1"] in real else int(s["act"] == s["m1"])
         return {"act": s["act"], "m1": s["m1"], "cad": s["cad"], "pk": s["pk"], "imu": s["imu"], "agree": agree, "dropped": s["dropped"],
+                "speed_kmh": round(self.speed.speed * 3.6, 1), "race": self.race.snapshot(),
                 "features": {k: round(v, 4) for k, v in s["features"].items()},
                 "wave": [round(r[X], 3) for r in recent],
                 "recorder": self.recorder.status(), "sessions": self.recorder.sessions()}
