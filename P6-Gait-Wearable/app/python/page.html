@@ -26,10 +26,10 @@
   .race { background: #0d0d0d; border: 1px solid #222; border-radius: 12px; padding: 12px 14px; margin-bottom: 18px; }
   .track { position: relative; height: 150px; background: #161616; border-radius: 8px; margin: 10px 0 4px; overflow: hidden; }
   .lane { position: absolute; left: 0; right: 0; height: 28px; border-bottom: 1px dashed #2a2a2a; }
-  .lane .name { position: absolute; left: 8px; top: 6px; font-size: 12px; color: #999; }
+  .lane .name { position: absolute; left: 8px; top: 6px; font-size: 12px; color: #999; width: 24%; overflow: hidden; white-space: nowrap; }
   .lane .dot { position: absolute; top: 6px; width: 16px; height: 16px; border-radius: 50%; margin-left: -8px; transition: left 0.1s linear; }
-  .lane .time { position: absolute; right: 8px; top: 6px; font-size: 12px; color: #bbb; }
-  .finish { position: absolute; top: 0; bottom: 0; right: 6%; width: 2px; background: repeating-linear-gradient(#fff 0 4px, #000 4px 8px); }
+  .lane .time { position: absolute; right: 6px; top: 6px; font-size: 12px; color: #bbb; background: #161616; padding-left: 4px; }
+  .finish { position: absolute; top: 0; bottom: 0; left: 88%; width: 2px; background: repeating-linear-gradient(#fff 0 4px, #000 4px 8px); }
   .countdown { font-size: 64px; font-weight: 800; text-align: center; color: #fff; min-height: 0; }
   .result { display: none; margin-top: 8px; }
   .board { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
@@ -121,11 +121,11 @@ function renderRace(r, speedKmh) {
   $("rSpeed").textContent = speedKmh.toFixed(1);
   $("rDist").textContent = Math.round(r.dist);
   $("rTime").textContent = r.elapsed.toFixed(1);
-  $("rCountdown").textContent = r.phase === "countdown" ? Math.ceil(r.countdown) : (r.phase === "running" ? "GO" : "");
+  $("rCountdown").textContent = r.phase === "countdown" ? Math.ceil(r.countdown) : (r.phase === "running" && r.elapsed < 1.5 ? "GO" : (r.phase === "finished" ? "FINISH" : ""));
   $("raceStart").style.display = r.phase === "idle" || r.phase === "finished" ? "" : "none";
   $("raceAbort").style.display = r.phase === "countdown" || r.phase === "running" ? "" : "none";
   const lanes = [{name: "You", dist: r.dist, color: "#fff"}].concat(r.ghosts.map(g => ({name: g.name + " " + g.kmh + " km/h", dist: g.dist, color: ghostColor[g.name] || "#888"})));
-  const html = '<div class="finish"></div>' + lanes.map((l, i) => `<div class="lane" style="top:${i * 29}px"><span class="name">${l.name}</span><span class="dot" style="left:${8 + 86 * Math.min(1, l.dist / r.distance)}%;background:${l.color}"></span><span class="time">${Math.round(l.dist)} m</span></div>`).join("");
+  const html = '<div class="finish"></div>' + lanes.map((l, i) => `<div class="lane" style="top:${i * 29}px"><span class="name">${l.name}</span><span class="dot" style="left:${26 + 62 * Math.min(1, l.dist / r.distance)}%;background:${l.color}"></span><span class="time">${Math.round(l.dist)} m</span></div>`).join("");
   if ($("track").dataset.html !== html) { $("track").innerHTML = html; $("track").dataset.html = html; }
   $("track").style.height = (lanes.length * 29 + 4) + "px";
   if (r.result && r.phase === "finished") {
