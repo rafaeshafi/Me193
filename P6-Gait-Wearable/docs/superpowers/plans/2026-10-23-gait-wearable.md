@@ -1847,6 +1847,7 @@ from pathlib import Path
 
 from imu import ACCEL_G_PER_LSB, GYRO_DPS_PER_LSB
 from models import Tree
+from seed_models import SEED1, SEED2
 from pipeline import Gait
 from recorder import Recorder
 from synth import synth
@@ -1871,7 +1872,7 @@ def to_batch(seq, samples, resets=0):
 
 
 def make(tmp_path, clk):
-    return Gait(Tree.load(ROOT / "models" / "model1.json"), Tree.load(ROOT / "models" / "model2.json"),
+    return Gait(Tree(SEED1), Tree(SEED2),
                 Recorder(tmp_path, clock=clk, rolling=False), clock=clk)
 
 
@@ -1891,7 +1892,7 @@ def test_no_imu_until_samples_arrive(tmp_path):
     g.on_batch(to_batch(0, []))                                  # heartbeat, empty: the sketch has no IMU
     g.tick()
     assert g.state["act"] == "NO IMU"
-    assert "act=NO IMU" in g.payload()
+    assert g.snapshot()["agree"] is None
 
 
 def test_classifies_walk_then_bike_with_seed_models(tmp_path):
@@ -1902,7 +1903,7 @@ def test_classifies_walk_then_bike_with_seed_models(tmp_path):
     assert 90 < g.state["cad"] < 130                              # 1.8 Hz steps -> 108 per minute
     feed(g, clk, "BIKE", 3.5)
     assert g.state["act"] == "BIKE" and g.state["m1"] in ("STAND", "WALK")
-    assert "agree=0" in g.payload()
+    assert g.snapshot()["agree"] == 0
 
 
 def test_fifo_reset_clears_the_window(tmp_path):
@@ -1915,22 +1916,14 @@ def test_fifo_reset_clears_the_window(tmp_path):
     assert g.ring.window(2.0) is None and g.ring.window(0.1) is not None
 
 
-def test_wave_bytes_are_downsampled_to_50_hz(tmp_path):
-    clk = Clock()
-    g = make(tmp_path, clk)
-    g.on_batch(to_batch(0, synth("STAND", seconds=0.1)))          # 10 samples
-    w = g.take_wave()
-    assert len(w) == 5 and g.take_wave() == b""
-
-
-def test_recorder_gets_every_sample_and_prompt_reaches_payload(tmp_path):
+def test_recorder_gets_every_sample_and_prompt_reaches_snapshot(tmp_path):
     clk = Clock()
     g = make(tmp_path, clk)
     g.recorder.start_single("STAND", seconds=5)
     clk.t += 6.0
     g.on_batch(to_batch(0, synth("STAND", seconds=0.1)))
     assert g.recorder.rows == 10
-    assert "prompt=STAND" in g.payload()
+    assert g.snapshot()["recorder"]["prompt"].startswith("STAND")
 
 
 def test_snapshot_is_json_friendly(tmp_path):
@@ -1940,7 +1933,7 @@ def test_snapshot_is_json_friendly(tmp_path):
     feed(g, clk, "RUN", 2.5)
     snap = json.loads(json.dumps(g.snapshot()))
     assert snap["act"] == "RUN" and snap["recorder"]["active"] is False
-    assert len(snap["wave"]) <= 150 and isinstance(snap["features"]["peak_x"], float)
+    assert len(snap["wave"]) <= 400 and snap["agree"] in (0, 1) and isinstance(snap["features"]["peak_x"], float)
 
 
 def test_votes_clear_after_an_imu_gap(tmp_path):
@@ -1994,6 +1987,29 @@ def test_on_batch_from_a_thread_while_ticking(tmp_path):
     assert not errors
     g.tick()
     assert g.state["act"] == "RUN"
+
+
+def test_race_runs_on_the_gait(tmp_path):
+    clk = Clock()
+    g = make(tmp_path, clk)
+    assert g.snapshot()["race"]["phase"] == "idle" and g.snapshot()["speed_kmh"] == 0.0
+    g.race.start(100, "ann")
+    feed(g, clk, "RUN", 6.0)                       # 2.8 Hz synth run: ~168 spm x stride(3.5 g) 1.85 m = ~5 m/s
+    snap = g.snapshot()
+    assert snap["speed_kmh"] > 10
+    assert snap["race"]["phase"] in ("running", "finished") and snap["race"]["dist"] > 0
+    assert len(snap["race"]["ghosts"]) == 3
+    g.race.abort()
+    assert g.snapshot()["race"]["phase"] == "idle"
+
+
+def test_race_distance_does_not_grow_while_standing(tmp_path):
+    clk = Clock()
+    g = make(tmp_path, clk)
+    g.race.start(100, "ann")
+    feed(g, clk, "STAND", 6.0)
+    snap = g.snapshot()
+    assert snap["race"]["phase"] == "running" and snap["race"]["dist"] == 0.0 and snap["speed_kmh"] == 0.0
 ```
 
 Run: `.venv/bin/python -m pytest tests/test_pipeline.py -q`
@@ -2006,28 +2022,28 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'pipeline'`
 """Gait: IMU batches in, both verdicts out. Owns the ring buffer, the two trees, the votes and the recorder."""
 import threading
 import time
+from pathlib import Path
 
-from display import payload as tft_payload, wave_byte
 from features import X, compute
 from imu import RATE, Ring, decode
 from models import Vote
+from race import Race, ResultStore, SpeedModel
 
 WINDOW_S = 2.0
 HOP_S = 0.5
 IMU_TIMEOUT_S = 1.5
-WAVE_MAX = 64  # the sketch's buffer
-WAVE_DECIMATE = 2  # 100 Hz samples -> 50 Hz sweep columns
 # dom_freq is the thigh swing rate: a stride has two steps, a pedal cycle is one revolution
 CADENCE_MULT = {"WALK": 2.0, "RUN": 2.0, "BIKE": 1.0}
 
 
 class Gait:
-    def __init__(self, model1, model2, recorder, rate=RATE, clock=time.monotonic):
+    def __init__(self, model1, model2, recorder, rate=RATE, clock=time.monotonic, races_path=None):
         self.m1, self.m2, self.recorder, self.rate, self._clock = model1, model2, recorder, rate, clock
+        self.speed = SpeedModel()
+        self.race = Race(ResultStore(races_path or (Path(recorder.dir) / "races.json")), clock=clock)
         self.ring = Ring(5.0, rate)
         self.vote1, self.vote2 = Vote(3), Vote(3)
         self._lock = threading.Lock()
-        self._wave = bytearray()
         self._last_sample_t = None
         self._resets = None
         self._next_tick = 0.0
@@ -2047,8 +2063,6 @@ class Gait:
             if samples:
                 self._last_sample_t = now
                 self.ring.push(seq, samples)
-                self._wave.extend(wave_byte(s[X]) for s in samples[::WAVE_DECIMATE])
-                del self._wave[:-WAVE_MAX]
             elif self._last_sample_t is None:
                 self._last_sample_t = -1.0  # heard the sketch, it has no IMU
         if samples:
@@ -2059,16 +2073,11 @@ class Gait:
         new.update(kw)
         self.state = new  # readers see the old frame or the new one, never half of each
 
-    def take_wave(self):
-        with self._lock:
-            out = bytes(self._wave)
-            self._wave.clear()
-        return out
-
     # --- from the main loop -------------------------------------------------------------------------------------
     def tick(self, now=None):
-        """Every HOP_S: classify the newest window. Returns True when it ran (the payload may have changed)."""
+        """Advance the race every call; every HOP_S also classify the newest window. Returns True when it classified."""
         now = self._clock() if now is None else now
+        self.race.tick(self.speed.speed, now)
         if now < self._next_tick:
             return False
         self._next_tick = now + HOP_S
@@ -2080,29 +2089,30 @@ class Gait:
         if not imu_ok:
             self.vote1, self.vote2 = Vote(3), Vote(3)
             self._set(act="NO IMU" if heard else "---", m1="---", cad=None, pk=None, features={}, imu=False)
+            self.speed.update(self.state["act"], self.state["cad"], self.state["pk"], now)
             return True
         if win is None:
             self.vote1, self.vote2 = Vote(3), Vote(3)
             self._set(act="---", m1="---", cad=None, pk=None, features={}, imu=True)
+            self.speed.update(self.state["act"], self.state["cad"], self.state["pk"], now)
             return True
         f = compute(win, self.rate)
         a1 = self.vote1.push(self.m1.predict(f))
         a2 = self.vote2.push(self.m2.predict(f))
         cad = None if a2 == "STAND" else int(round(f["dom_freq"] * 60 * CADENCE_MULT.get(a2, 1.0)))
         self._set(act=a2, m1=a1, cad=cad, pk=f["peak_x"], features=f, dropped=dropped, imu=True)
+        self.speed.update(self.state["act"], self.state["cad"], self.state["pk"], now)
         return True
-
-    def payload(self):
-        s = self.state
-        return tft_payload(s["act"], s["m1"], s["cad"], s["pk"], prompt=self.recorder.prompt(),
-                       st="REC" if self.recorder.active else "")
 
     def snapshot(self):
         """Everything the phone page shows, as plain JSON-able types."""
         with self._lock:
-            recent = self.ring.window(1.5) or []
+            recent = self.ring.recent(4.0)
         s = self.state
-        return {"act": s["act"], "m1": s["m1"], "cad": s["cad"], "pk": s["pk"], "imu": s["imu"], "dropped": s["dropped"],
+        real = ("---", "NO IMU")
+        agree = None if s["act"] in real or s["m1"] in real else int(s["act"] == s["m1"])
+        return {"act": s["act"], "m1": s["m1"], "cad": s["cad"], "pk": s["pk"], "imu": s["imu"], "agree": agree, "dropped": s["dropped"],
+                "speed_kmh": round(self.speed.speed * 3.6, 1), "race": self.race.snapshot(),
                 "features": {k: round(v, 4) for k, v in s["features"].items()},
                 "wave": [round(r[X], 3) for r in recent],
                 "recorder": self.recorder.status(), "sessions": self.recorder.sessions()}
@@ -2139,6 +2149,7 @@ from pathlib import Path
 import pytest
 
 from models import Tree
+from seed_models import SEED1, SEED2
 from pipeline import Gait
 from recorder import Recorder
 from web import serve
@@ -2148,7 +2159,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def server(tmp_path):
-    g = Gait(Tree.load(ROOT / "models" / "model1.json"), Tree.load(ROOT / "models" / "model2.json"),
+    g = Gait(Tree(SEED1), Tree(SEED2),
              Recorder(tmp_path, rolling=False))
     (tmp_path / "20261023-120000-walk.csv").write_text("t,label\n0.0,WALK\n")
     s = serve(g, port=0)
@@ -2212,6 +2223,18 @@ def test_events_stream_sends_json_frames(server):
         line = r.fp.readline()
     assert json.loads(line[6:])["act"] == "---"
     c.close()
+
+
+def test_race_routes(server):
+    s, g = server
+    status, _, body = req(s, "POST", "/race/start?distance=400&who=ann")
+    snap = json.loads(body)
+    assert status == 200 and snap["race"]["phase"] == "countdown" and snap["race"]["distance"] == 400
+    assert g.race.who == "ann"
+    status, _, body = req(s, "POST", "/race/start?distance=123")
+    assert status == 400
+    status, _, body = req(s, "POST", "/race/abort")
+    assert status == 200 and json.loads(body)["race"]["phase"] == "idle"
 ```
 
 Run: `.venv/bin/python -m pytest tests/test_web.py -q`
@@ -2230,6 +2253,7 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'web'`
 <style>
   :root { color-scheme: dark; }
   body { margin: 0; padding: 16px; font-family: -apple-system, system-ui, sans-serif; background: #000; color: #eee; }
+  main { max-width: 720px; margin: 0 auto; }
   h1 { font-size: 18px; margin: 0 0 12px; color: #999; font-weight: 500; }
   .verdict { font-size: 56px; font-weight: 800; letter-spacing: 2px; line-height: 1; }
   .STAND { color: #fff; } .WALK { color: #16ec06; } .RUN { color: #ff7800; } .BIKE { color: #0093e7; } .NOIMU { color: #ff0026; }
@@ -2245,10 +2269,40 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'web'`
   #prompt { font-size: 28px; color: #fff; min-height: 34px; }
   ul { padding-left: 18px; } a { color: #0093e7; }
   .muted { color: #777; font-size: 13px; }
+  .race { background: #0d0d0d; border: 1px solid #222; border-radius: 12px; padding: 12px 14px; margin-bottom: 18px; }
+  .track { height: 360px; width: 100%; display: block; background: #8fbfe6; border-radius: 8px; margin: 10px 0 4px; }
+  .countdown { font-size: 64px; font-weight: 800; text-align: center; color: #fff; min-height: 0; }
+  .result { display: none; margin-top: 8px; }
+  .board { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
+  .board td, .board th { padding: 4px 6px; text-align: left; border-bottom: 1px solid #222; color: #ccc; }
+  .board th { color: #888; font-weight: 500; text-transform: uppercase; font-size: 11px; }
+  .dist.on { background: #0093e7; }
 </style>
 </head>
 <body>
+<main>
 <h1>Gait Wearable</h1>
+<section id="race" class="race">
+  <div class="row" style="align-items:center">
+    <h1 style="margin:0">Race</h1>
+    <span class="muted">run on the spot</span>
+    <span style="flex:1"></span>
+    <button class="sec dist" data-d="100">100 m</button>
+    <button class="sec dist" data-d="400">400 m</button>
+    <button class="sec dist" data-d="1000">1 km</button>
+    <button id="raceStart" onclick="raceStart()">Start</button>
+    <button id="raceAbort" class="stop" onclick="post('/race/abort')">Abort</button>
+  </div>
+  <canvas id="raceCanvas" class="track"></canvas>
+  <div class="muted">speed = cadence x stride, stride = 0.6 m + 0.5 m per g of impact above 1 g; WALK capped at 7 km/h, STAND and BIKE do not move</div>
+  <div class="row">
+    <div class="card"><small>Speed</small><b id="rSpeed">0.0</b> km/h</div>
+    <div class="card"><small>Distance</small><b id="rDist">0</b> m</div>
+    <div class="card"><small>Time</small><b id="rTime">0.0</b> s</div>
+  </div>
+  <div id="rResult" class="card result"></div>
+  <table id="rBoard" class="board"></table>
+</section>
 <div id="act" class="verdict">---</div>
 <div class="muted">Model 2: all six IMU channels</div>
 <div class="row">
@@ -2257,7 +2311,7 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'web'`
   <div class="card"><small>Peak g</small><b id="pk">--</b></div>
 </div>
 <canvas id="wave" width="640" height="160"></canvas>
-<div class="muted">thigh-axis acceleration, last 1.5 s; line = 1 g</div>
+<div class="muted">thigh-axis acceleration, last 4 s; line = 1 g</div>
 <div id="prompt"></div>
 <div class="row">
   <input id="who" placeholder="who (optional)">
@@ -2298,12 +2352,140 @@ function drawWave(w) {
   w.forEach((g, i) => { const x = i / (w.length - 1) * W; i ? ctx.lineTo(x, y(g)) : ctx.moveTo(x, y(g)); });
   ctx.stroke();
 }
+let raceDistance = 400;
+document.querySelectorAll(".dist").forEach(b => b.onclick = () => { raceDistance = +b.dataset.d; document.querySelectorAll(".dist").forEach(x => x.classList.toggle("on", x === b)); });
+document.querySelector('.dist[data-d="400"]').classList.add("on");
+function raceStart() { post("/race/start?distance=" + raceDistance); }
+const ghostColor = {Jogger: "#16ec06", Runner: "#ffde00", Sprinter: "#ff0026", "Your best": "#0093e7"};
+function renderRace(r, speedKmh) {
+  $("rSpeed").textContent = speedKmh.toFixed(1);
+  $("rDist").textContent = Math.round(r.dist);
+  $("rTime").textContent = r.elapsed.toFixed(1);
+  $("raceStart").style.display = r.phase === "idle" || r.phase === "finished" ? "" : "none";
+  $("raceAbort").style.display = r.phase === "countdown" || r.phase === "running" ? "" : "none";
+  raceSnap = r; raceSnapAt = performance.now();
+  if (r.result && r.phase === "finished") {
+    $("rResult").style.display = "block";
+    $("rResult").innerHTML = `<small>${r.who}, ${r.distance} m</small><b>${ordinal(r.result.place || 0)} of ${r.field || 0}</b> &nbsp; ${r.result.time.toFixed(2)} s &nbsp; ${r.result.avg_kmh.toFixed(1)} km/h` + (r.result.record ? `<div style="color:#ffde00;font-weight:700">NEW RECORD: you are the Champion ghost now</div>` : (r.champion ? `<div class="muted">Champion ${r.champion.who || ""} holds ${r.champion.time.toFixed(2)} s</div>` : ""));
+  } else { $("rResult").style.display = "none"; }
+  const rows = r.leaderboard.map((e, i) => `<tr><td>${i + 1}</td><td>${e.who}</td><td>${e.time.toFixed(2)} s</td><td>${e.avg_kmh.toFixed(1)} km/h</td><td class="muted">${e.when}</td></tr>`).join("");
+  const board = rows ? `<tr><th>#</th><th>who</th><th>${r.distance} m</th><th>avg</th><th>when</th></tr>` + rows : "";
+  if ($("rBoard").dataset.html !== board) { $("rBoard").innerHTML = board; $("rBoard").dataset.html = board; }
+}
+const ordinal = n => n + ({1: "st", 2: "nd", 3: "rd"}[n] || "th");
+// ---- London 2012 (SEGA) look: chase camera behind the runners on the stadium track ----
+const rc = $("raceCanvas"), rctx = rc.getContext("2d");
+let raceSnap = null, raceSnapAt = 0;
+const SCENE_H = 360, K = 9, BEND = 0.16, YOU_DEPTH = 5, VIEW_M = 110;
+const LANES = 6, YOU_LANE = 1.5, GHOST_LANES = [2.5, 3.5, 4.5, 0.5];
+const KIT = {YOU: ["#f2c230", "#1f3f8f"], Jogger: ["#1b8f3a", "#ffffff"], Runner: ["#d8d8d8", "#c8102e"], Sprinter: ["#1f3f8f", "#ffffff"], Champion: ["#c3338b", "#ffffff"]};
+const HAIR = {YOU: "#5a3a1e", Jogger: "#222", Runner: "#b5651d", Sprinter: "#1a1a1a", Champion: "#f5e6a8"};
+const crowd = Array.from({length: 1100}, (_, i) => [Math.random(), Math.random(), ["#d9c7d9", "#8c6fa6", "#f0e0c0", "#5a4a6a", "#e8a0b0", "#b0c4de"][i % 6]]);
+const flags = ["#c8102e", "#ffffff", "#1f3f8f", "#ffd100", "#007a33", "#000000", "#ff7f00", "#00a3e0"];
+function fitRace() { rc.width = rc.clientWidth * devicePixelRatio; rc.height = SCENE_H * devicePixelRatio; }
+window.addEventListener("resize", fitRace); fitRace();
+function runnerBack(ctx, x, y, s, kit, hair, phase) {   // seen from behind, feet at (x, y), height ~ 110 * s
+  const L = Math.sin(phase), skin = "#c98a62";
+  ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.beginPath(); ctx.ellipse(x + 14 * s, y + 1, 22 * s, 6 * s, 0, 0, 7); ctx.fill();   // shadow
+  ctx.lineCap = "round"; ctx.strokeStyle = skin; ctx.lineWidth = 8 * s;
+  ctx.beginPath(); ctx.moveTo(x - 7 * s, y - 50 * s); ctx.lineTo(x - 8 * s, y - 24 * s - 22 * s * Math.max(0, L)); ctx.lineTo(x - 9 * s, y - 2 * s - 26 * s * Math.max(0, L)); ctx.stroke();   // left leg
+  ctx.beginPath(); ctx.moveTo(x + 7 * s, y - 50 * s); ctx.lineTo(x + 8 * s, y - 24 * s - 22 * s * Math.max(0, -L)); ctx.lineTo(x + 9 * s, y - 2 * s - 26 * s * Math.max(0, -L)); ctx.stroke(); // right leg
+  ctx.fillStyle = "#1a1a1a"; ctx.fillRect(x - 15 * s, y - 8 * s - 26 * s * Math.max(0, L), 10 * s, 7 * s); ctx.fillRect(x + 5 * s, y - 8 * s - 26 * s * Math.max(0, -L), 10 * s, 7 * s);  // shoes
+  ctx.fillStyle = kit[1]; ctx.fillRect(x - 13 * s, y - 64 * s, 26 * s, 16 * s);                  // shorts
+  ctx.fillStyle = kit[0]; ctx.beginPath(); ctx.roundRect(x - 15 * s, y - 102 * s, 30 * s, 40 * s, 6 * s); ctx.fill();   // singlet
+  ctx.fillStyle = kit[1]; ctx.fillRect(x - 3 * s, y - 102 * s, 6 * s, 40 * s);                   // back stripe
+  ctx.strokeStyle = skin; ctx.lineWidth = 7 * s;
+  ctx.beginPath(); ctx.moveTo(x - 15 * s, y - 96 * s); ctx.lineTo(x - 22 * s, y - 80 * s + 12 * s * L); ctx.lineTo(x - 16 * s, y - 66 * s + 18 * s * L); ctx.stroke();   // arms swing opposite to the legs
+  ctx.beginPath(); ctx.moveTo(x + 15 * s, y - 96 * s); ctx.lineTo(x + 22 * s, y - 80 * s - 12 * s * L); ctx.lineTo(x + 16 * s, y - 66 * s - 18 * s * L); ctx.stroke();
+  ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(x, y - 112 * s, 10 * s, 0, 7); ctx.fill();      // head
+  ctx.fillStyle = hair; ctx.beginPath(); ctx.arc(x, y - 114 * s, 10 * s, Math.PI * 0.95, Math.PI * 2.05); ctx.fill(); ctx.fillRect(x - 10 * s, y - 114 * s, 20 * s, 7 * s);   // hair, seen from behind
+}
+function drawRace() {
+  requestAnimationFrame(drawRace);
+  const r = raceSnap; if (!r || rc.width === 0) return;
+  const ctx = rctx, dpr = devicePixelRatio, W = rc.width / dpr, H = SCENE_H;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const dt = r.phase === "running" ? (performance.now() - raceSnapAt) / 1000 : 0;
+  const you = Math.min(r.distance, r.dist + r.speed_kmh / 3.6 * dt);
+  const horizon = H * 0.42, vx = W * 0.5;
+  const laneX = i => W * (-0.32 + 1.55 * i / LANES);
+  const proj = (xb, d) => { d = Math.max(0.2, d); const t = d / (d + K); return [xb + (vx - xb) * t + BEND * W * t * t, H - (H - horizon) * t, 1 - t]; };
+  // sky, roof and trusses, flags, crowd tiers, purple wrap
+  const sky = ctx.createLinearGradient(0, 0, 0, horizon); sky.addColorStop(0, "#8fbfe6"); sky.addColorStop(1, "#d8ebf7");
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, horizon);
+  ctx.fillStyle = "#dfe3e8"; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(W, 0); ctx.lineTo(W, horizon * 0.30); ctx.quadraticCurveTo(W / 2, horizon * 0.55, 0, horizon * 0.30); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "#aeb6c2"; ctx.lineWidth = 1.5;
+  for (let i = 0; i < 14; i++) { const x = (i / 13) * W; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 30, horizon * 0.42); ctx.moveTo(x, 0); ctx.lineTo(x - 30, horizon * 0.42); ctx.stroke(); }
+  for (let i = 0; i < 24; i++) { ctx.fillStyle = flags[i % flags.length]; ctx.fillRect(14 + i * (W / 24), horizon * 0.40 - 2 * Math.sin(i), 12, 8); }
+  ctx.fillStyle = "#3a3348"; ctx.fillRect(0, horizon * 0.45, W, horizon * 0.5);
+  for (const [cx, cy, c] of crowd) { ctx.fillStyle = c; ctx.fillRect(cx * W, horizon * (0.46 + 0.47 * cy), 2.2, 2.2); }
+  ctx.fillStyle = "#6a2c91"; ctx.fillRect(0, horizon * 0.93, W, horizon * 0.09);
+  ctx.fillStyle = "#f3e9ff"; ctx.font = `bold ${Math.max(8, horizon * 0.055)}px system-ui`; ctx.textAlign = "left";
+  for (let x = 10; x < W; x += 150) ctx.fillText("LONDON 2012", x, horizon * 0.995);
+  // infield and track
+  ctx.fillStyle = "#4c9a3f"; ctx.fillRect(0, horizon, W, H - horizon);
+  ctx.fillStyle = "#c93a30";
+  { const pts = []; for (let d = 0; d <= VIEW_M; d += 2) pts.push(proj(laneX(0), d)); const rpts = []; for (let d = VIEW_M; d >= 0; d -= 2) rpts.push(proj(laneX(LANES), d));
+    ctx.beginPath(); ctx.moveTo(laneX(0), H); for (const [x, y] of pts) ctx.lineTo(x, y); for (const [x, y] of rpts) ctx.lineTo(x, y); ctx.lineTo(laneX(LANES), H); ctx.closePath(); ctx.fill(); }
+  ctx.strokeStyle = "#ffffff";
+  for (let l = 0; l <= LANES; l++) { ctx.lineWidth = l === 0 || l === LANES ? 3 : 2; ctx.beginPath(); ctx.moveTo(laneX(l), H); for (let d = 0; d <= VIEW_M; d += 2) { const [x, y] = proj(laneX(l), d); ctx.lineTo(x, y); } ctx.stroke(); }
+  for (let m = Math.ceil((you - YOU_DEPTH) / 10) * 10; m <= you + VIEW_M; m += 10) {   // 10 m marks and the finish line
+    const d = m - you + YOU_DEPTH; if (d < 0.3 || d > VIEW_M || m <= 0) continue;
+    const [xl, y, s] = proj(laneX(0), d), [xr] = proj(laneX(LANES), d);
+    if (m === r.distance) { ctx.lineWidth = Math.max(3, 14 * s); ctx.setLineDash([10 * s + 2, 10 * s + 2]); } else { ctx.lineWidth = 1; ctx.setLineDash([]); ctx.strokeStyle = "rgba(255,255,255,0.5)"; }
+    ctx.beginPath(); ctx.moveTo(xl, y); ctx.lineTo(xr, y); ctx.stroke(); ctx.setLineDash([]); ctx.strokeStyle = "#ffffff";
+    if (m === r.distance) { ctx.fillStyle = "#fff"; ctx.font = `bold ${Math.max(10, 22 * s)}px system-ui`; ctx.textAlign = "center"; ctx.fillText("FINISH", (xl + xr) / 2, y - 10 * s); }
+  }
+  // runners, far to near
+  const t = performance.now() / 1000;
+  const ghosts = r.ghosts.map((g, i) => ({name: g.name, who: g.who, kmh: g.kmh, lane: GHOST_LANES[i % GHOST_LANES.length], dist: Math.min(r.distance, g.dist + g.kmh / 3.6 * dt)}))
+    .filter(g => !(r.phase === "finished" && r.result && r.result.record && g.name === "Champion"));
+  const field = ghosts.map(g => ({...g, depth: YOU_DEPTH + g.dist - you})).concat([{name: "YOU", kmh: r.speed_kmh, lane: YOU_LANE, dist: you, depth: YOU_DEPTH}]);
+  field.sort((a, b) => b.depth - a.depth);
+  for (const f of field) {
+    if (f.depth < 0.6 || f.depth > VIEW_M) continue;
+    const [x, y, s] = proj(laneX(f.lane), f.depth);
+    const phase = f.name === "YOU" ? t * Math.PI * 2 * ((raceSnap.cadence || 0) / 120) : t * Math.PI * 2 * (f.kmh / 3.6 / 1.3);
+    runnerBack(ctx, x, y, s * 1.0, KIT[f.name] || ["#888", "#fff"], HAIR[f.name] || "#222", phase);
+    if (f.name !== "YOU") { ctx.fillStyle = "#fff"; ctx.font = `bold ${Math.max(9, 12 * s)}px system-ui`; ctx.textAlign = "center"; ctx.fillText(f.name === "Champion" ? "Champion " + (f.who || "") : f.name, x, y - 122 * s); }
+  }
+  for (const g of ghosts) if (g.dist - you < -YOU_DEPTH + 0.6) { ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.font = "bold 11px system-ui"; ctx.textAlign = "right"; ctx.fillText((g.name === "Champion" ? "Champion " + (g.who || "") : g.name) + " " + Math.round(g.dist - you) + " m", W - 12, H - 70 - 14 * ghosts.indexOf(g)); }
+  // scoreboard (top right), power bar (centre), position (bottom left), time bar with rings (bottom right)
+  ctx.fillStyle = "#15131c"; ctx.beginPath(); ctx.roundRect(W - 156, 12, 144, 46, 6); ctx.fill(); ctx.strokeStyle = "#444"; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = "#ffd100"; ctx.font = "bold 15px ui-monospace, Menlo, monospace"; ctx.textAlign = "left"; ctx.fillText(r.distance + "m", W - 146, 31); ctx.textAlign = "right"; ctx.fillText((r.elapsed + dt).toFixed(2), W - 22, 31);
+  ctx.fillStyle = "#9ad"; ctx.font = "11px system-ui"; ctx.textAlign = "left"; ctx.fillText(r.phase === "idle" ? "press START" : (Math.round(you) + " m   " + r.speed_kmh.toFixed(1) + " km/h"), W - 146, 50);
+  const bx = W * 0.70, by = horizon + 6, bw = 18, bh = 100, frac = Math.min(1, r.speed_kmh / 22);
+  ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.beginPath(); ctx.roundRect(bx - 3, by - 3, bw + 6, bh + 6, 6); ctx.fill();
+  const pg = ctx.createLinearGradient(0, by + bh, 0, by); pg.addColorStop(0, "#0b7a2a"); pg.addColorStop(1, "#6cff3a");
+  ctx.fillStyle = pg; ctx.fillRect(bx, by + bh * (1 - frac), bw, bh * frac);
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.strokeRect(bx, by, bw, bh); ctx.fillStyle = "#fff"; ctx.fillRect(bx - 4, by + bh * (1 - frac) - 1.5, bw + 8, 3);
+  for (let i = 1; i < 4; i++) ctx.fillRect(bx, by + bh * i / 4, bw, 1);
+  const place = 1 + field.filter(f => f.name !== "YOU" && f.dist > you).length;
+  ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 6; ctx.fillStyle = "#fff"; ctx.textAlign = "left";
+  ctx.font = "15px system-ui"; ctx.fillText("Position", 18, H - 56); ctx.font = "bold 58px system-ui"; ctx.fillText(String(r.phase === "idle" ? "-" : place), 18, H - 8);
+  ctx.shadowBlur = 0;
+  const tg = ctx.createLinearGradient(W - 230, 0, W - 10, 0); tg.addColorStop(0, "rgba(195,51,139,0.6)"); tg.addColorStop(1, "#c3338b");
+  ctx.fillStyle = tg; ctx.fillRect(W - 230, H - 44, 220, 34);
+  ctx.fillStyle = "#fff"; ctx.font = "bold 20px system-ui"; ctx.textAlign = "right"; ctx.fillText((r.elapsed + dt).toFixed(2), W - 90, H - 19);
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; for (const [dx, dy] of [[0, 0], [12, 0], [24, 0], [6, 7], [18, 7]]) { ctx.beginPath(); ctx.arc(W - 76 + dx, H - 30 + dy, 5.5, 0, 7); ctx.stroke(); }
+  // centre messages
+  ctx.textAlign = "center";
+  const big = r.phase === "countdown" ? String(Math.ceil(r.countdown)) : (r.phase === "running" && r.elapsed + dt < 1.2 ? "GO!" : "");
+  if (big) { ctx.font = "bold 80px system-ui"; ctx.lineWidth = 8; ctx.strokeStyle = "#1a1a1a"; ctx.strokeText(big, W / 2, H * 0.62); ctx.fillStyle = "#fff"; ctx.fillText(big, W / 2, H * 0.62); }
+  if (r.phase === "finished" && r.result) {
+    ctx.fillStyle = "rgba(20,16,30,0.88)"; ctx.beginPath(); ctx.roundRect(W / 2 - 170, 70, 340, 96, 10); ctx.fill();
+    ctx.fillStyle = "#c3338b"; ctx.fillRect(W / 2 - 170, 70, 340, 26); ctx.fillStyle = "#fff"; ctx.font = "bold 14px system-ui"; ctx.fillText("FINISH  " + r.distance + " m", W / 2, 88);
+    ctx.font = "bold 26px system-ui"; ctx.fillText(ordinal(r.result.place) + "   " + r.result.time.toFixed(2) + " s", W / 2, 128);
+    ctx.font = "13px system-ui"; ctx.fillStyle = r.result.record ? "#ffd100" : "#ddd"; ctx.fillText(r.result.record ? "NEW RECORD: you are the Champion ghost" : "beat " + (r.result.beat.length ? r.result.beat.join(", ") : "nobody"), W / 2, 152);
+  }
+}
+drawRace();
 function render(s) {
+  s.race.cadence = s.cad || 0;
+  renderRace(s.race, s.speed_kmh);
   const act = $("act"); act.textContent = s.act; act.className = "verdict " + s.act.replace(" ", "");
   $("m1").textContent = s.m1;
-  const real = !["---", "NO IMU"].includes(s.act) && !["---", "NO IMU"].includes(s.m1);
-  const same = s.act === s.m1 || !real;
-  $("agree").textContent = !real ? "" : (same ? "agrees" : "differs"); $("agree").className = same ? "agree" : "differ";
+  $("agree").textContent = s.agree == null ? "" : (s.agree ? "agrees" : "differs"); $("agree").className = s.agree ? "agree" : "differ";
   $("cad").textContent = s.cad == null ? "--" : s.cad;
   $("pk").textContent = s.pk == null ? "--" : s.pk.toFixed(1);
   drawWave(s.wave || []);
@@ -2323,6 +2505,7 @@ function connect() {
 document.addEventListener("visibilitychange", () => { if (!document.hidden && (!es || es.readyState === 2)) connect(); });
 connect();
 </script>
+</main>
 </body>
 </html>
 ```
@@ -2336,6 +2519,7 @@ connect();
 GET  /            the page            GET /events  SSE stream of Gait.snapshot() at 10 Hz
 GET  /state       one snapshot (JSON) GET /data/<session.csv>  download a recording
 POST /guided?who= start the guided script   POST /record?label=WALK&who=   POST /stop
+POST /race/start?distance=100|400|1000&who=   POST /race/abort
 """
 import json
 import threading
@@ -2397,6 +2581,13 @@ class Handler(BaseHTTPRequestHandler):
                 rec.start_single(label, who=who)
             elif url.path == "/stop":
                 rec.stop()
+            elif url.path == "/race/start":
+                try:
+                    self.gait.race.start(int(q.get("distance", ["400"])[0]), who)
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 400)
+            elif url.path == "/race/abort":
+                self.gait.race.abort()
             else:
                 return self._send(404, "text/plain", b"not found")
             self._json(self.gait.snapshot())
@@ -3343,32 +3534,66 @@ def test_race_runs_countdown_distance_finish_and_saves(tmp_path):
     assert s["phase"] == "finished" and s["dist"] == 100
     assert s["result"]["time"] == pytest.approx(20.0) and s["result"]["avg_kmh"] == pytest.approx(18.0)
     assert s["result"]["beat"] == ["Jogger", "Runner"] and s["result"]["rank"] == 1
+    assert s["result"]["place"] == 2 and s["result"]["record"] is True
+    assert s["champion"]["who"] == "ann"
     assert store.leaderboard(100)[0]["who"] == "ann"
     assert json.loads((tmp_path / "races.json").read_text())[0]["distance"] == 100
 
 
-def test_second_race_gets_the_best_ghost_and_abort_resets(tmp_path):
+def _finish(r, clk, speed):
+    clk.t += COUNTDOWN_S
+    r.tick(speed, clk.t)
+    while r.snapshot()["phase"] == "running":
+        clk.t += 1.0
+        r.tick(speed, clk.t)
+
+
+def test_champion_ghost_is_the_fastest_of_anyone(tmp_path):
     clk = Clock()
     store = ResultStore(tmp_path / "races.json")
     r = Race(store, clock=clk)
     r.start(100, "ann")
-    clk.t += COUNTDOWN_S
-    r.tick(4.0, clk.t)
-    for _ in range(25):
-        clk.t += 1.0
-        r.tick(4.0, clk.t)
+    _finish(r, clk, 4.0)
     assert r.snapshot()["phase"] == "finished"
-    r.start(100, "ann")
-    names = [g["name"] for g in r.snapshot()["ghosts"]]
-    assert names == [n for n, _ in GHOSTS] + ["Your best"]
+    r.start(100, "bob")
+    gh = r.snapshot()["ghosts"]
+    assert [g["name"] for g in gh] == [n for n, _ in GHOSTS] + ["Champion"] and gh[-1]["who"] == "ann"
     clk.t += COUNTDOWN_S + 2.0
-    r.tick(4.0, clk.t)
-    best = next(g for g in r.snapshot()["ghosts"] if g["name"] == "Your best")
-    assert 0 < best["dist"] <= 100
+    r.tick(5.0, clk.t)
+    champ = next(g for g in r.snapshot()["ghosts"] if g["name"] == "Champion")
+    assert champ["dist"] == pytest.approx(8.0)
+    while r.snapshot()["phase"] == "running":
+        clk.t += 1.0
+        r.tick(5.0, clk.t)
+    res = r.snapshot()["result"]
+    assert res["record"] is True and "Champion" in res["beat"]
+    r.start(100, "ann")
+    assert r.snapshot()["ghosts"][-1]["who"] == "bob"
     r.abort()
-    assert r.snapshot()["phase"] == "idle" and len(store.leaderboard(100)) == 1
-    r.start(400, "bob")                       # another distance: no best yet, only the fixed ghosts
+    assert r.snapshot()["phase"] == "idle"
+    r.start(400, "bob")
     assert [g["name"] for g in r.snapshot()["ghosts"]] == [n for n, _ in GHOSTS]
+
+
+def test_anon_can_hold_the_record(tmp_path):
+    clk = Clock()
+    r = Race(ResultStore(tmp_path / "races.json"), clock=clk)
+    r.start(100, "")
+    _finish(r, clk, 4.0)
+    assert r.snapshot()["phase"] == "finished"
+    r.start(100, "")
+    assert r.snapshot()["ghosts"][-1]["who"] == "anon"
+
+
+def test_slower_than_the_champion_is_no_record(tmp_path):
+    clk = Clock()
+    r = Race(ResultStore(tmp_path / "races.json"), clock=clk)
+    r.start(100, "ann")
+    _finish(r, clk, 5.0)
+    r.start(100, "bob")
+    _finish(r, clk, 4.0)
+    res = r.snapshot()["result"]
+    assert res["record"] is False and "Champion" not in res["beat"] and res["place"] == 3
 
 
 def test_result_store_persists_and_ranks(tmp_path):
@@ -3380,8 +3605,72 @@ def test_result_store_persists_and_ranks(tmp_path):
     s2 = ResultStore(p)                        # re-read from disk
     board = s2.leaderboard(400)
     assert [e["who"] for e in board] == ["bob", "ann"] and board[0]["avg_kmh"] == pytest.approx(16.0)
-    assert s2.best(400, "ann")["time"] == 120.0 and s2.best(1000, "ann") is None
+    assert s2.champion(400)["who"] == "bob" and s2.champion(400)["time"] == 90.0 and s2.champion(1000) is None
     assert DISTANCES == (100, 400, 1000)
+
+
+def test_no_distance_during_countdown_and_handoff_counts_from_t0(tmp_path):
+    clk = Clock()
+    r = Race(ResultStore(tmp_path / "races.json"), clock=clk)
+    r.start(100, "ann")
+    t0 = clk.t + COUNTDOWN_S
+    r.tick(5.0, t0 - 1.0)
+    assert r.snapshot()["dist"] == 0.0
+    r.tick(5.0, t0 + 0.4)
+    assert r.snapshot()["dist"] == pytest.approx(2.0)
+
+
+def test_profile_is_decimated_to_half_seconds(tmp_path):
+    clk = Clock()
+    store = ResultStore(tmp_path / "races.json")
+    r = Race(store, clock=clk)
+    r.start(100, "ann")
+    t0 = clk.t + COUNTDOWN_S
+    i = 0
+    while r.snapshot()["phase"] != "finished":
+        i += 1
+        r.tick(5.0, t0 + i * 0.05)
+    entry = json.loads((tmp_path / "races.json").read_text())[0]
+    assert 38 <= len(entry["profile"]) <= 44
+    assert entry["profile"][-1][0] == pytest.approx(entry["time"], abs=0.01)
+
+
+def test_start_during_save_does_not_leak_the_result(tmp_path):
+    clk = Clock()
+    store = ResultStore(tmp_path / "races.json")
+    r = Race(store, clock=clk)
+    orig = store.save
+
+    def save(*a, **k):
+        out = orig(*a, **k)
+        r.start(100, "bob")
+        return out
+
+    store.save = save
+    r.start(100, "ann")
+    clk.t += COUNTDOWN_S
+    r.tick(50.0, clk.t)
+    clk.t += 5.0
+    r.tick(50.0, clk.t)
+    s = r.snapshot()
+    assert s["phase"] == "countdown" and s["result"] is None
+
+
+def test_corrupt_results_file_is_kept_aside(tmp_path):
+    p = tmp_path / "races.json"
+    p.write_text("{not json")
+    store = ResultStore(p)
+    assert store.leaderboard(100) == []
+    bad = list(tmp_path.glob("races.json.bad-*"))
+    assert len(bad) == 1 and bad[0].read_text() == "{not json"
+    store.save(100, "ann", 20.0, [(0.5, 5.0)])
+    assert json.loads(p.read_text())[0]["who"] == "ann"
+
+
+def test_start_accepts_a_string_distance(tmp_path):
+    r = Race(ResultStore(tmp_path / "races.json"), clock=Clock())
+    r.start("400", "ann")
+    assert r.snapshot()["distance"] == 400
 ```
 
 Run: `.venv/bin/python -m pytest tests/test_race.py -q`
@@ -3401,6 +3690,7 @@ profile for that distance. ResultStore keeps every finish in a JSON file and ser
 """
 import json
 import math
+import os
 import threading
 import time
 from pathlib import Path
@@ -3412,6 +3702,7 @@ COUNTDOWN_S = 3.0
 DISTANCES = (100, 400, 1000)
 GHOSTS = (("Jogger", 9.0), ("Runner", 13.0), ("Sprinter", 22.0))   # name, km/h
 LEADERBOARD_N = 10
+PROFILE_STEP_S = 0.5
 
 
 def stride_m(peak_g):
@@ -3460,10 +3751,22 @@ class ResultStore:
     def __init__(self, path):
         self.path = Path(path)
         self._lock = threading.Lock()
-        try:
-            self._entries = json.loads(self.path.read_text()) if self.path.exists() else []
-        except (ValueError, OSError):
-            self._entries = []
+        self._boards = {}
+        self._entries = []
+        if self.path.exists():
+            try:
+                data = json.loads(self.path.read_text())
+                ok = isinstance(data, list) and all(
+                    isinstance(e, dict) and "distance" in e and "time" in e and "who" in e for e in data)
+            except (ValueError, OSError):
+                ok = False
+            if ok:
+                self._entries = data
+            else:
+                try:
+                    self.path.rename(self.path.with_name(self.path.name + ".bad-" + time.strftime("%Y%m%d-%H%M%S")))
+                except OSError:
+                    pass
 
     def save(self, distance, who, seconds, profile):
         entry = {"who": who or "anon", "distance": int(distance), "time": round(float(seconds), 2),
@@ -3472,18 +3775,25 @@ class ResultStore:
         with self._lock:
             self._entries.append(entry)
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(self._entries))
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._entries))
+            os.replace(str(tmp), str(self.path))
+            self._boards = {}
             rank = 1 + sum(1 for e in self._entries if e["distance"] == entry["distance"] and e["time"] < entry["time"])
         return dict(entry, rank=rank)
 
     def leaderboard(self, distance, n=LEADERBOARD_N):
         with self._lock:
-            rows = sorted((e for e in self._entries if e["distance"] == distance), key=lambda e: e["time"])[:n]
-        return [{k: e[k] for k in ("who", "time", "avg_kmh", "when")} for e in rows]
+            key = (distance, n)
+            if key not in self._boards:
+                rows = sorted((e for e in self._entries if e["distance"] == distance), key=lambda e: e["time"])[:n]
+                self._boards[key] = [{k: e[k] for k in ("who", "time", "avg_kmh", "when")} for e in rows]
+            return [dict(r) for r in self._boards[key]]
 
-    def best(self, distance, who):
+    def champion(self, distance):
+        """The fastest finish by anyone at this distance, or None."""
         with self._lock:
-            mine = [e for e in self._entries if e["distance"] == distance and e["who"] == (who or "anon")]
+            mine = [e for e in self._entries if e["distance"] == distance]
         return min(mine, key=lambda e: e["time"]) if mine else None
 
 
@@ -3494,9 +3804,12 @@ class Race:
         self.store = store
         self._clock = clock
         self.distance = DISTANCES[1]
+        self._lock = threading.RLock()
+        self._gen = 0
         self._reset()
 
     def _reset(self):
+        self._gen += 1
         self.phase = "idle"
         self.who = ""
         self.t0 = None
@@ -3505,59 +3818,91 @@ class Race:
         self.speed = 0.0
         self.profile = []
         self.result = None
-        self.best = None
+        self.champion = None
         self._last = None
 
     def start(self, distance, who=""):
-        if distance not in DISTANCES:
-            raise ValueError("distance must be one of %s" % (DISTANCES,))
-        self._reset()
-        self.distance = int(distance)
-        self.who = who or "anon"
-        self.best = self.store.best(self.distance, self.who)
-        self.t0 = self._clock() + COUNTDOWN_S
-        self.phase = "countdown"
+        with self._lock:
+            try:
+                distance = int(distance)
+            except (TypeError, ValueError):
+                raise ValueError("distance must be one of %s" % (DISTANCES,))
+            if distance not in DISTANCES:
+                raise ValueError("distance must be one of %s" % (DISTANCES,))
+            self._reset()
+            self.distance = distance
+            self.who = who or "anon"
+            self.champion = self.store.champion(self.distance)
+            self.t0 = self._clock() + COUNTDOWN_S
+            self.phase = "countdown"
 
     def abort(self):
-        self._reset()
+        with self._lock:
+            self._reset()
 
     def tick(self, speed, now):
         """Advance with the current smoothed speed (m/s); call every loop pass."""
-        self.speed = speed
-        if self.phase == "countdown":
-            if now >= self.t0:
-                self.phase = "running"
-                self._last = self.t0
-                self.tick(speed, now)
-        elif self.phase == "running":
-            dt = max(0.0, now - self._last)
-            self._last = now
-            self.dist += speed * dt
-            self.elapsed = now - self.t0
-            self.profile.append((round(self.elapsed, 2), round(speed, 3)))
-            if self.dist >= self.distance:
-                if speed > 0:
-                    self.elapsed -= (self.dist - self.distance) / speed
-                self.dist = float(self.distance)
-                self.phase = "finished"
-                saved = self.store.save(self.distance, self.who, self.elapsed, self.profile)
-                beat = [n for n, kmh in GHOSTS if self.distance / (kmh / 3.6) > self.elapsed]
-                self.result = {"time": saved["time"], "avg_kmh": saved["avg_kmh"], "rank": saved["rank"], "beat": beat}
+        pending = None
+        with self._lock:
+            self.speed = speed
+            if self.phase == "countdown":
+                if now >= self.t0:
+                    self.phase = "running"
+                    self._last = self.t0
+                    self.tick(speed, now)
+            elif self.phase == "running":
+                dt = max(0.0, now - self._last)
+                self._last = now
+                self.dist += speed * dt
+                self.elapsed = now - self.t0
+                if self.dist >= self.distance:
+                    if speed > 0:
+                        self.elapsed -= (self.dist - self.distance) / speed
+                    self.dist = float(self.distance)
+                    self.phase = "finished"
+                    self.profile.append((round(self.elapsed, 2), round(speed, 3)))
+                    ghost_times = [(n, self.distance / (kmh / 3.6)) for n, kmh in GHOSTS]
+                    if self.champion:
+                        ghost_times.append(("Champion", self.champion["time"]))
+                    beat = [n for n, gt in ghost_times if gt > self.elapsed]
+                    place = 1 + sum(1 for _, gt in ghost_times if gt < self.elapsed)
+                    record = self.champion is None or self.elapsed < self.champion["time"]
+                    pending = (self._gen, self.distance, self.who, self.elapsed, list(self.profile), beat, place, record)
+                elif not self.profile or self.elapsed - self.profile[-1][0] >= PROFILE_STEP_S:
+                    self.profile.append((round(self.elapsed, 2), round(speed, 3)))
+        if pending:
+            gen, distance, who, elapsed, profile, beat, place, record = pending
+            saved = self.store.save(distance, who, elapsed, profile)
+            with self._lock:
+                if self._gen == gen:
+                    self.result = {"time": saved["time"], "avg_kmh": saved["avg_kmh"], "rank": saved["rank"],
+                                   "beat": beat, "place": place, "record": record}
+                    if record:
+                        self.champion = saved
 
     def ghosts(self):
+        with self._lock:
+            return self._ghosts()
+
+    def _ghosts(self):
         t = max(0.0, self.elapsed) if self.phase in ("running", "finished") else 0.0
         out = [{"name": n, "kmh": k, "dist": min(float(self.distance), k / 3.6 * t)} for n, k in GHOSTS]
-        if self.best:
-            out.append({"name": "Your best", "kmh": self.best["avg_kmh"],
-                        "dist": min(float(self.distance), replay_distance(self.best["profile"], t))})
+        if self.champion:
+            out.append({"name": "Champion", "who": self.champion["who"], "kmh": self.champion["avg_kmh"],
+                        "dist": min(float(self.distance), replay_distance(self.champion["profile"], t))})
         return out
 
     def snapshot(self):
+        with self._lock:
+            return self._snapshot()
+
+    def _snapshot(self):
         now = self._clock()
         return {"phase": self.phase, "distance": self.distance, "who": self.who,
-                "countdown": max(0.0, self.t0 - now) if self.phase == "countdown" else None,
+                "countdown": round(max(0.0, self.t0 - now), 1) if self.phase == "countdown" else None,
                 "elapsed": round(self.elapsed, 2), "dist": round(self.dist, 1), "speed_kmh": round(self.speed * 3.6, 1),
-                "ghosts": self.ghosts(), "result": self.result, "leaderboard": self.store.leaderboard(self.distance)}
+                "ghosts": self._ghosts(), "field": len(GHOSTS) + (1 if self.champion else 0) + 1,
+                "champion": ({k: self.champion[k] for k in ("who", "time", "avg_kmh")} if self.champion else None), "result": self.result, "leaderboard": self.store.leaderboard(self.distance)}
 ```
 
 - [ ] **Step 3: Run tests**
@@ -3880,3 +4225,8 @@ drawRace();
 
 - [ ] **Step 2:** sanity: `.venv/bin/python -c "import html.parser; html.parser.HTMLParser().feed(open('app/python/page.html').read()); print('ok')"`, the suite stays green (`tests/test_web.py` only checks for `EventSource`), then commit as
   `P6-Gait-Wearable: race view is a first-person Olympic final on a canvas: perspective lanes, crowd, scrolling marks, approaching finish line, competitors as animated figures in the lanes beside you, HUD with positions and time, the Champion ghost named`.
+
+
+### Task 25 (done in-session, 2026-10-26): race view in the SEGA London 2012 look
+
+Spec Revision 6. `page.html`'s race script block was rewritten twice after Task 24 (doodle side view, then the chase-camera stadium view) directly in the file; the Task 11 `page.html` block above is synced to the final file, so read the file, not Tasks 22-24, for the current view.

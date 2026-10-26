@@ -230,3 +230,15 @@ A race mode on the page: the runner runs on the spot, the gait drives a runner a
   the Champion (or there was none). Leaderboard unchanged.
 - Code: `race.py` gains `ResultStore.champion(distance)`, `Race.champion`, `result["place"]`, `result["record"]`;
   the page replaces the lane bars with the canvas view.
+
+## Revision 6 (2026-10-26): the race view copies London 2012 The Official Video Game
+
+The first-person view (Revision 5) was replaced the same day, first by the Google hurdles-doodle side view and
+then, at the user's request with a reference screenshot, by the SEGA game's look: a chase camera behind the
+runners on a red six-lane track bending to the right inside the stadium (white roof trusses, a row of flags, two
+crowd tiers, the purple "LONDON 2012" wrap), back-view runners in national-style kits with shadows, the finish line
+approaching ahead, a scoreboard top-right (distance, time, metres and speed), a vertical green power bar (speed as a
+fraction of the Sprinter's 22 km/h), "Position N" bottom-left, and the time in a magenta bar with the five rings
+bottom-right. Countdown and GO in the centre; the finish card lists place, time and record. Runners behind the
+camera are listed with their gap bottom-right. After a record the Champion ghost (now you) is hidden until the
+next race. Everything else from Revisions 4 and 5 (speed model, ghosts, champion, leaderboard, routes) is unchanged.
