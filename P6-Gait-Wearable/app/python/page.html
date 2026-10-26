@@ -191,7 +191,10 @@ function drawRace() {
   // you, bottom centre, legs driven by cadence
   const cad = (raceSnap.cadence || 0);
   runnerFigure(ctx, vx, H - 6 * dpr, 1.15 * dpr, "#fff", performance.now() / 1000 * Math.PI * 2 * (cad / 60));
-  // HUD
+  // HUD on translucent panels so it reads over the crowd
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(0, 0, 200 * dpr, (48 + 16 * (r.ghosts.length + 1)) * dpr);
+  ctx.fillRect(W - 120 * dpr, 0, 120 * dpr, 54 * dpr);
   ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = `bold ${14 * dpr}px system-ui`;
   ctx.fillText(`OLYMPIC FINAL  ${r.distance} m`, 10 * dpr, 20 * dpr);
   const order = [{name: "YOU", dist: you}].concat(runners).sort((a, b) => b.dist - a.dist);
