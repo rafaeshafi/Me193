@@ -128,7 +128,7 @@ function renderRace(r, speedKmh) {
 }
 const ordinal = n => n + ({1: "st", 2: "nd", 3: "rd"}[n] || "th");
 // ---- London 2012 (SEGA) look: chase camera behind the runners on the stadium track ----
-// World in metres: x east, y up, z north. The oval is run clockwise so the bends turn right, as in the reference.
+// World in metres: x east, y up, z north. The oval is run anticlockwise, as on a real track: the bends turn left, lane 1 is on the inside (left).
 // u = metres along the inside kerb (bend radius R), w = metres outward from it. A pinhole chase camera sits 6 m behind and
 // 2.2 m above you. Textures (crowd, wraps, boards, roof, flags, grain), the sky and the HUD plates are pre-rendered; per frame
 // the stands are texture-mapped segment by segment far to near, the ground is batched into a few fills, runners are 3D skeletons.
@@ -145,7 +145,7 @@ const FONT = "-apple-system, system-ui, Helvetica, Arial, sans-serif", COND = '"
 let TX = 0, TZ = 0, HX = 0, HZ = 1;
 function trackPt(u, w) { u -= Math.floor(u / LOOP) * LOOP; let a;
   if (u < STR) { HX = 0; HZ = 1; TX = 0; TZ = u; } else if (u < STR + BND) { a = (u - STR) / R; HX = Math.sin(a); HZ = Math.cos(a); TX = R - R * HZ; TZ = STR + R * HX; } else if (u < 2 * STR + BND) { HX = 0; HZ = -1; TX = 2 * R; TZ = 2 * STR + BND - u; }
-  else { a = (u - 2 * STR - BND) / R; HX = -Math.sin(a); HZ = -Math.cos(a); TX = R - R * HZ; TZ = R * HX; } TX -= w * HZ; TZ += w * HX;   // outward is to the left of the heading
+  else { a = (u - 2 * STR - BND) / R; HX = -Math.sin(a); HZ = -Math.cos(a); TX = R - R * HZ; TZ = R * HX; } TX = w * HZ - TX; TZ += w * HX; HX = -HX;   // mirror x so the oval runs anticlockwise; outward is to the right of the heading
 }
 function arcS(u, w) {   // arc length along the line w (texture coordinate along the stands)
   const f = (R + w) / R; u -= Math.floor(u / LOOP) * LOOP; return u < STR ? u : u < STR + BND ? STR + (u - STR) * f : u < 2 * STR + BND ? u - BND + BND * f : 2 * STR + BND * f + (u - 2 * STR - BND) * f;
@@ -229,7 +229,7 @@ const TEX = {lo: texSet(512, 192, 32, crowd(false)), up: texSet(512, 192, 32, cr
   roof: texSet(256, 64, 16, roofDraw), flags: texSet(512, 40, 24, flagsDraw)};
 const GRAIN = cnv(128, 128); grainDraw(GRAIN.getContext("2d"), 128, 128); const GRAINP = rctx.createPattern(GRAIN, "repeat");
 const SCR = cnv(256, 128), SCRG = SCR.getContext("2d");
-TEX.scr = {pat: [null, null, null], w: [256, 256, 256], h: [128, 128, 128], period: arcS((SCR0 + 2) * SEG, 32.5) - arcS(SCR0 * SEG, 32.5), org: SCR0 * SEG};
+TEX.scr = {pat: [null, null, null], w: [256, 256, 256], h: [128, 128, 128], period: arcS((SCR0 + 2) * SEG, 32.5) - arcS(SCR0 * SEG, 32.5), org: SCR0 * SEG, end: (SCR0 + 2) * SEG};
 const HAZE = [];   // overlay per stand segment: [shade 0..4][haze 0..10], one rgba string each, built once
 for (let s = 0; s <= 4; s++) { HAZE.push([]); for (let k = 0; k <= 10; k++) { const h = k * 0.05, as = s * 0.09, a = h + as * (1 - h); HAZE[s].push(a < 0.005 ? "" : `rgba(${Math.round((h * 196 + as * (1 - h) * 22) / a)},${Math.round((h * 208 + as * (1 - h) * 14) / a)},${Math.round((h * 226 + as * (1 - h) * 44) / a)},${a.toFixed(3)})`); } }
 // a stand band: the quad between two lines along the ring (edge A = texture top), texture-mapped with an affine pattern transform
@@ -240,8 +240,9 @@ function band(T, u0, u1, wA, yA, wB, yB, depth) { if (!pq(0, u0, wA, yA) || !pq(
     const um = (u0 + u1) / 2, d = (depth || 0) + 1; band(T, u0, um, wA, yA, wB, yB, d); band(T, um, u1, wA, yA, wB, yB, d); return; } const ax = PQ[0], ay = PQ[1], bx = PQ[3], by = PQ[4], cx = PQ[6], cy = PQ[7], dx = PQ[9], dy = PQ[10];
   if ((ax < 0 && bx < 0 && cx < 0 && dx < 0) || (ax > VW && bx > VW && cx > VW && dx > VW)) return; const ctx = rctx; if (typeof T === "string") { if (!T) return; ctx.fillStyle = T; } else {
     const lod = PQ[2] < LODZ ? 0 : PQ[2] < 2 * LODZ ? 1 : 2, pat = T.pat[lod]; if (!pat) return; const tw = T.w[lod], th = T.h[lod], k = tw / T.period, sa = arcS(u0, wA), sb = u1 >= LOOP ? 2 * STR + 2 * BND * (R + wA) / R : arcS(u1, wA);
-    const s0 = T.org ? (sa - arcS(T.org, wA)) * k : (sa * k) % tw, s1 = s0 + (sb - sa) * k; MAT.a = (bx - ax) / (s1 - s0); MAT.b = (by - ay) / (s1 - s0); MAT.c = (dx - ax) / th; MAT.d = (dy - ay) / th; MAT.e = ax - MAT.a * s0; MAT.f = ay - MAT.b * s0;
-    pat.setTransform(MAT); ctx.fillStyle = pat; } ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.lineTo(cx, cy); ctx.lineTo(dx, dy); ctx.closePath(); ctx.fill();
+    const s0 = T.org ? (arcS(T.end, wA) - sa) * k : ((-sa * k) % tw + tw) % tw, s1 = s0 - (sb - sa) * k;   // u runs right to left on the stands seen from inside
+    MAT.a = (bx - ax) / (s1 - s0); MAT.b = (by - ay) / (s1 - s0); MAT.c = (dx - ax) / th; MAT.d = (dy - ay) / th; MAT.e = ax - MAT.a * s0; MAT.f = ay - MAT.b * s0; pat.setTransform(MAT); ctx.fillStyle = pat; }
+  ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.lineTo(cx, cy); ctx.lineTo(dx, dy); ctx.closePath(); ctx.fill();
 }
 function truss(u) {   // a triangular floodlight tower on the roof edge, leaning in over the track
   if (!pq(0, u - 1.6, 31, 31) || !pq(1, u + 1.6, 31, 31) || !pq(2, u, 33.5, 31) || !pq(3, u, 26, 45)) return; const ctx = rctx, k = FOC / PQ[11]; ctx.strokeStyle = "#e3e7ee"; ctx.lineWidth = Math.max(0.6, 0.35 * k); ctx.beginPath();
@@ -293,11 +294,13 @@ const LEG = [[8, 10, 0.094, 0.06, 10, 34, 0.052, 0.062, 34, 12, 0.06, 0.036, 12,
 const ARM = [[2, 4, 0.06, 0.044, 4, 6, 0.044, 0.033], [3, 5, 0.06, 0.044, 5, 7, 0.044, 0.033]];
 const TORSO = [24, 25, 27, 20, 18, 23, 22, 17, 19, 26], BACK = [2, 1, 3, 20, 19], SEAT = [22, 23, 29, 28];
 function drawRunner(e) { const B = e.b.J, L = LOOK[e.name] || LOOK.Jogger, g = rctx, sk = L[3];
-  const leg = s => { limb(B, LEG[s], [sk, sk, sk, L[5]]); for (let c = 0; c < 3; c++) { TMP[c] = B[3 * (8 + s) + c]; TMP[3 + c] = TMP[c] + (B[3 * (10 + s) + c] - TMP[c]) * 0.24; } g.fillStyle = L[2]; g.beginPath(); cap(g, TMP, 0, 1, 0.102, 0.098, 0); g.fill(); };
+  const leg = s => { limb(B, LEG[s], [sk, sk, sk, L[5]]); for (let c = 0; c < 3; c++) { TMP[c] = B[3 * (8 + s) + c]; TMP[3 + c] = TMP[c] + (B[3 * (10 + s) + c] - TMP[c]) * 0.24; }
+    g.fillStyle = L[2]; g.beginPath(); cap(g, TMP, 0, 1, 0.102, 0.098, 0); g.fill(); g.fillStyle = s ? DARK : LIT; g.fill(); };
   const arm = s => { limb(B, ARM[s], [sk, sk]); g.fillStyle = sk; g.beginPath(); g.arc(B[3 * (6 + s)], B[3 * (6 + s) + 1], 0.045 * B[3 * (6 + s) + 2], 0, TAU); g.fill(); }; const torso = () => {
     g.fillStyle = sk; g.beginPath(); polyJ(g, B, BACK); g.fill(); g.beginPath(); cap(g, B, 2, 19, 0.06, 0.05, 0); cap(g, B, 3, 20, 0.06, 0.05, 0); g.fill();
-    g.fillStyle = L[0]; g.beginPath(); polyJ(g, B, TORSO); g.fill(); g.fillStyle = DARK; g.beginPath(); polyJ(g, B, [1, 25, 27, 20, 18, 23, 16]); g.fill();
-    g.strokeStyle = L[1]; g.lineWidth = Math.max(0.8, 0.025 * B[50]); g.beginPath(); polyL(g, B, [24, 26, 19]); polyL(g, B, [25, 27, 20]); g.stroke(); g.fillStyle = L[2]; g.beginPath(); polyJ(g, B, SEAT); g.fill(); const bw = Math.hypot(B[93] - B[90], B[94] - B[91]);
+    g.fillStyle = L[0]; g.beginPath(); polyJ(g, B, TORSO); g.fill(); g.fillStyle = DARK; g.beginPath(); polyJ(g, B, [1, 25, 27, 20, 18, 23, 16]); g.fill(); g.beginPath(); polyJ(g, B, [25, 27, 20, 18, 23]); g.fill();
+    g.fillStyle = LIT; g.beginPath(); polyJ(g, B, [24, 26, 19, 17, 22]); g.fill(); g.strokeStyle = L[1]; g.lineWidth = Math.max(0.8, 0.025 * B[50]); g.beginPath(); polyL(g, B, [24, 26, 19]); polyL(g, B, [25, 27, 20]); g.stroke();
+    g.fillStyle = L[2]; g.beginPath(); polyJ(g, B, SEAT); g.fill(); g.fillStyle = DARK; g.beginPath(); polyJ(g, B, [16, 23, 29]); g.fill(); g.fillStyle = LIT; g.beginPath(); polyJ(g, B, [22, 16, 28]); g.fill(); const bw = Math.hypot(B[93] - B[90], B[94] - B[91]);
     if (bw > 5) { g.fillStyle = "#fafafa"; g.beginPath(); polyJ(g, B, [30, 31, 32, 33]); g.fill(); if (bw > 11) { PQ[0] = B[90]; PQ[1] = B[91]; PQ[3] = B[93]; PQ[4] = B[94]; PQ[6] = B[99]; PQ[7] = B[100]; affine(g, 0, 1, 2, 100, 60);
         g.fillStyle = "#111"; g.font = `bold 48px ${FONT}`; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(String(BIB[e.name] || 0), 50, 33); g.setTransform(DPR, 0, 0, DPR, 0, 0); } } }; const head = () => {
     const x = B[0], y = B[1], s = B[2]; g.fillStyle = sk; g.beginPath(); cap(g, B, 1, 0, 0.056, 0.05, 0); g.fill();
@@ -357,7 +360,7 @@ function runner(e, name, who, kmh, dist, total, live, el0, tclk, fdt, cad, tf) {
   st.d = !live || Math.abs(target - st.d) > 12 ? target : st.d + (target - st.d) * (1 - Math.exp(-fdt * 8)); const kt = va > 0.3 ? Math.min(1, 0.22 + va / 7.5) : 0; st.k += (kt - st.k) * (1 - Math.exp(-fdt * 3));
   const f = cad > 0 && !(ts > 0) ? cad / 120 : va > 0.3 ? va / (2 * (0.6 + 0.16 * va)) : 0; st.ph = (st.ph + TAU * f * fdt) % TAU; e.name = name; e.who = who; e.kmh = kmh; e.d = st.d; e.ph = st.ph; e.k = st.k; e.u = U0 + st.d; e.w = (LANE[name] - 0.5) * LW; return e;
 }
-const TAGS = new Float64Array(18), SV = new Int16Array(NSEG), SK = new Float64Array(NSEG), ORD = [0, 0, 0, 0, 0, 0, 0, 0];
+const TAGS = new Float64Array(18), BAR = new Float64Array(6), SV = new Int16Array(NSEG), SK = new Float64Array(NSEG), ORD = [0, 0, 0, 0, 0, 0, 0, 0];
 function drawRace() { requestAnimationFrame(drawRace);
   const r = raceSnap; if (!r || rc.width === 0 || rc.clientWidth === 0) return; const now = performance.now(), fdt = Math.min(0.1, lastT ? (now - lastT) / 1000 : 0.016); lastT = now;
   if (Math.abs(rc.clientWidth * Math.min(2, window.devicePixelRatio || 1) - rc.width) > 2) fitRace(); const dpr = rc.height / SCENE_H, W = rc.width / dpr, H = SCENE_H, ctx = rctx; if (sizedW !== rc.width) setupSize(W, H, dpr); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -371,7 +374,7 @@ function drawRace() { requestAnimationFrame(drawRace);
   const sw = SKY.width, sx = -((YAW * FOC) % sw + sw) % sw; ctx.drawImage(SKY, sx, HOR - SKY0); ctx.drawImage(SKY, sx + sw, HOR - SKY0); const tanH = W2 / FOC * 1.15; let nv = 0; for (let i = 0; i < NSEG; i++) { let front = 0, left = 0, right = 0;
     for (let c = 0; c < 4; c++) { trackPt(i * SEG + (c & 1 ? SEG : 0), c & 2 ? 58 : 10.5); const dx = TX - CX, dz = TZ - CZ, f = dx * CHX + dz * CHZ, x = dx * RX + dz * RZ; if (f > 1) { front++; if (x > f * tanH) right++; else if (x < -f * tanH) left++; } }
     if (!front || right === 4 || left === 4) continue; trackPt(i * SEG + SEG / 2, 24); const dx = TX - CX, dz = TZ - CZ; SK[i] = dx * dx + dz * dz; let j = nv++; while (j > 0 && SK[SV[j - 1]] < SK[i]) { SV[j] = SV[j - 1]; j--; } SV[j] = i; } for (let v = 0; v < nv; v++) {
-    const i = SV[v], u = i * SEG + SEG / 2; trackPt(u, 0); const face = (HZ * SUN[0] - HX * SUN[2]) / 0.85;   // inward normal . sun
+    const i = SV[v], u = i * SEG + SEG / 2; trackPt(u, 0); const face = (HX * SUN[2] - HZ * SUN[0]) / 0.85;   // inward normal (left of the heading) . sun
     drawSeg(i, HAZE[Math.max(0, Math.min(4, Math.round(2 - 2.6 * face)))][Math.min(10, Math.round(10 * (1 - Math.exp(-Math.sqrt(SK[i]) / 230))))]); } // ground: infield with mowing stripes, track with grain, markings, kerb
   ctx.fillStyle = "#58a043"; ctx.beginPath(); strip(-0.9, -R, 0); ctx.fill(); ctx.fillStyle = "rgba(24,70,16,0.22)"; ctx.beginPath(); for (let w = -4.9; w > -R + 4; w -= 8) strip(w, w - 4, 0); ctx.fill();
   ctx.fillStyle = "#8c8784"; ctx.beginPath(); strip(-0.12, -0.9, 0); ctx.fill(); ctx.fillStyle = "#8a8f98"; ctx.beginPath(); strip(9.5, 10.5, 0); ctx.fill(); ctx.fillStyle = "#4b4d56"; ctx.beginPath(); strip(10.5, 12.5, 0); ctx.fill();
@@ -382,7 +385,7 @@ function drawRace() { requestAnimationFrame(drawRace);
   const uF = U0 + r.distance; ctx.beginPath(); quadUW(U0 - 0.05, U0 + 0.05, 0, 7.32, 0, 7.32, 0); quadUW(uF - 0.32, uF, 0, 7.32, 0, 7.32, 0); ctx.fill();
   for (const [du, col] of [[10, "#f5d000"], [20, "#2f7ad8"], [30, "#2fb84a"], [40, "#2f7ad8"]]) { ctx.fillStyle = col; ctx.beginPath(); for (let l = 1; l < 6; l++) quadUW(U0 + du, U0 + du + 0.45, l * LW - 0.06, l * LW + 0.06, l * LW - 0.06, l * LW + 0.06, 0); ctx.fill(); }
   ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `bold 100px ${FONT}`;
-  for (let l = 1; l <= 6; l++) { const w = (l - 0.5) * LW; if (pq(0, U0 - 1.2, w + 0.32, 0) && pq(1, U0 - 1.2, w - 0.32, 0) && pq(2, U0 - 1.9, w + 0.32, 0)) { affine(ctx, 0, 1, 2, 100, 100); ctx.fillText(String(l), 50, 52); } } ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  for (let l = 1; l <= 6; l++) { const w = (l - 0.5) * LW; if (pq(0, U0 - 1.2, w - 0.32, 0) && pq(1, U0 - 1.2, w + 0.32, 0) && pq(2, U0 - 1.9, w - 0.32, 0)) { affine(ctx, 0, 1, 2, 100, 100); ctx.fillText(String(l), 50, 52); } } ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   for (let c = 0; c < 2; c++) { ctx.fillStyle = c ? "#d8343a" : "#f6f4f0"; ctx.beginPath(); for (let d = 0; d < 70; d++) if (((Math.floor(CAMU + d) % 2) + 2) % 2 === c) quadUW(Math.floor(CAMU) + d, Math.floor(CAMU) + d + 1, -0.12, 0, -0.12, 0, 0.07); ctx.fill(); }
   ctx.fillStyle = "#e8dcd8"; ctx.beginPath(); for (let d = 70; d < LOOP - 8;) { const s = stepAt(d); quadUW(CAMU + d, CAMU + d + s, -0.12, 0, -0.12, 0, 0.07); d += s; } ctx.fill();
   ctx.fillStyle = "#8e8681"; ctx.beginPath(); for (let d = 0; d < 70; d += 1.5) quadV(CAMU + d, CAMU + d + 1.5, 0, 0, 0.07); ctx.fill();
@@ -393,10 +396,12 @@ function drawRace() { requestAnimationFrame(drawRace);
   ctx.globalAlpha = 0.4; ctx.drawImage(SHC, 0, 0, W, H); ctx.globalAlpha = 1; const props = [[uF, "gantry"], [U0 + 28, "board"]]; let pz = [0, 0]; for (let p = 0; p < 2; p++) { trackPt(props[p][0], 3); pz[p] = (TX - CX) * CHX + (TZ - CZ) * CHZ; }
   for (let i = 1; i < nr; i++) { const k = ORD[i]; let j = i; while (j > 0 && FIELD[ORD[j - 1]].z < FIELD[k].z) { ORD[j] = ORD[j - 1]; j--; } ORD[j] = k; } let pi = pz[0] > pz[1] ? [0, 1] : [1, 0], q = 0;
   const prop = p => props[p][1] === "gantry" ? gantry(props[p][0], el) : scoreboard(props[p][0], r, el); for (let i = 0; i < nr; i++) { const e = FIELD[ORD[i]]; while (q < 2 && pz[pi[q]] > e.z) prop(pi[q++]); drawRunner(e); } while (q < 2) prop(pi[q++]);
-  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; let nt = 0;
+  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  let nt = 0; { const bw = Math.max(12, 15 * UI), bh = Math.max(70, 0.24 * H), bx = W * 0.6, by = HOR - bh * 0.78; BAR[0] = bx - 4; BAR[1] = by - 4; BAR[2] = bx + bw * 1.55 + 13; BAR[3] = by + bh + 4; BAR[4] = bw; BAR[5] = bh; }   // power bar rectangle
   for (let i = nr - 1; i >= 0; i--) { const e = FIELD[ORD[i]]; if (e.name === "YOU" || e.z > 90) continue; const B = e.b.J, fs = Math.max(9, Math.min(13 * UI, B[2] * 0.11)), label = e.name === "Champion" ? "Champion " + (e.who || "") : e.name;
-    ctx.font = `600 ${fs}px ${FONT}`; const tw = ctx.measureText(label).width + fs * 0.9, x = Math.max(tw / 2 + 3, Math.min(W - tw / 2 - 3, B[63])); let y = B[64] - fs * 1.1;
+    ctx.font = `600 ${fs}px ${FONT}`; const tw = ctx.measureText(label).width + fs * 0.9; let x = Math.max(tw / 2 + 3, Math.min(W - tw / 2 - 3, B[63])); let y = B[64] - fs * 1.1;
     for (let t = 0; t < nt; t++) if (Math.abs(TAGS[3 * t] - x) < (TAGS[3 * t + 2] + tw) / 2 && Math.abs(TAGS[3 * t + 1] - y) < fs * 1.4) { y = TAGS[3 * t + 1] - fs * 1.45; t = -1; }   // nearer tags keep their place, farther ones step up
+    if (run && y + fs * 0.4 > BAR[1] && y - fs * 0.95 < BAR[3] && x + tw / 2 > BAR[0] && x - tw / 2 < BAR[2]) x = x < (BAR[0] + BAR[2]) / 2 ? BAR[0] - tw / 2 - 2 : BAR[2] + tw / 2 + 2;   // keep tags off the power bar
     if (nt < 6) { TAGS[3 * nt] = x; TAGS[3 * nt + 1] = y; TAGS[3 * nt + 2] = tw; nt++; } ctx.fillStyle = "rgba(20,14,30,0.55)"; ctx.beginPath(); rrect(ctx, x - tw / 2, y - fs * 0.95, tw, fs * 1.35, fs * 0.4); ctx.fill(); ctx.fillStyle = "#fff"; ctx.fillText(label, x, y); }
   ctx.fillStyle = GR.key; ctx.fillRect(0, 0, W, H); ctx.fillStyle = GR.vig; ctx.fillRect(0, 0, W, H); hud(ctx, r, W, H, el, me, n); frameMs = frameMs * 0.95 + (performance.now() - now) * 0.05; rc.dataset.ms = frameMs.toFixed(2);
 }
@@ -404,12 +409,12 @@ function gantry(u, el) {   // the finish: a post pair carrying the photo-finish 
   const ctx = rctx; ctx.fillStyle = "#eef0f4"; ctx.beginPath(); for (const w of [-0.9, 9.9]) { setQ(0, u, w - 0.06, 0); setQ(1, u, w + 0.06, 0); setQ(2, u, w + 0.06, 1.75); setQ(3, u, w - 0.06, 1.75); polyW(4); } ctx.fill();
   ctx.fillStyle = "#1e2026"; ctx.beginPath(); for (const w of [-0.9, 9.9]) { setQ(0, u, w - 0.24, 1.7); setQ(1, u, w + 0.24, 1.7); setQ(2, u, w + 0.24, 2.08); setQ(3, u, w - 0.24, 2.08); polyW(4); } ctx.fill();
   ctx.fillStyle = "#c3338b"; ctx.beginPath(); setQ(0, u, 10.9, 0.55); setQ(1, u, 9.96, 0.55); setQ(2, u, 9.96, 1.25); setQ(3, u, 10.9, 1.25); polyW(4); ctx.fill();
-  if (pq(0, u, 10.9, 1.25) && pq(1, u, 9.96, 1.25) && pq(2, u, 10.9, 0.55) && PQ[3] - PQ[0] > 14) { affine(ctx, 0, 1, 2, 100, 74); ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `bold 26px ${FONT}`; ctx.fillText("FINISH", 50, 38); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
-  if (pq(0, u, -0.68, 2.02) && pq(1, u, -1.12, 2.02) && pq(2, u, -0.68, 1.76) && PQ[3] - PQ[0] > 10) { affine(ctx, 0, 1, 2, 100, 60); ctx.fillStyle = "#ffc20e"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `bold 34px ui-monospace, Menlo, monospace`; ctx.fillText(el.toFixed(1), 50, 32); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
+  if (pq(0, u, 9.96, 1.25) && pq(1, u, 10.9, 1.25) && pq(2, u, 9.96, 0.55) && PQ[3] - PQ[0] > 14) { affine(ctx, 0, 1, 2, 100, 74); ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `bold 26px ${FONT}`; ctx.fillText("FINISH", 50, 38); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
+  if (pq(0, u, -1.12, 2.02) && pq(1, u, -0.68, 2.02) && pq(2, u, -1.12, 1.76) && PQ[3] - PQ[0] > 10) { affine(ctx, 0, 1, 2, 100, 60); ctx.fillStyle = "#ffc20e"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `bold 34px ui-monospace, Menlo, monospace`; ctx.fillText(el.toFixed(1), 50, 32); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
 }
 function scoreboard(u, r, el) {   // the infield board by the kerb, as in the reference
   const ctx = rctx; ctx.fillStyle = "#3c3f46"; ctx.beginPath(); for (const w of [-4.6, -7.4]) { setQ(0, u, w - 0.07, 0); setQ(1, u, w + 0.07, 0); setQ(2, u, w + 0.07, 1); setQ(3, u, w - 0.07, 1); polyW(4); } ctx.fill();
-  if (!pq(0, u, -4.0, 2.4) || !pq(1, u, -8.0, 2.4) || !pq(2, u, -4.0, 0.9)) return;
+  if (!pq(0, u, -8.0, 2.4) || !pq(1, u, -4.0, 2.4) || !pq(2, u, -8.0, 0.9)) return;
   ctx.fillStyle = "#16171c"; ctx.beginPath(); setQ(0, u, -4, 2.4); setQ(1, u, -8, 2.4); setQ(2, u, -8, 0.9); setQ(3, u, -4, 0.9); polyW(4); ctx.fill(); ctx.strokeStyle = "#8d9099"; ctx.lineWidth = Math.max(1, 0.06 * FOC / PQ[2]); ctx.stroke();
   affine(ctx, 0, 1, 2, 400, 150); ctx.fillStyle = "#ffc20e"; ctx.textBaseline = "middle"; ctx.font = `bold 52px ui-monospace, Menlo, monospace`;
   ctx.textAlign = "right"; ctx.fillText(r.distance + "m", 370, 42); ctx.fillText(el.toFixed(2), 370, 108); ctx.fillStyle = "#c3338b"; ctx.fillRect(30, 70, 120, 8); ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -418,8 +423,7 @@ function hud(ctx, r, W, H, el, me, n) { const U = UI, pad = 14 * U, idle = r.pha
   // scoreboard, top right: LED dots
   const p = LEDPP, pw = 34 * p + 10, px = W - pw - pad, py = pad; ctx.drawImage(LEDP, px, py, pw, 19 * p + 10); ctx.save(); ctx.translate(px + 5, py + 5); ctx.beginPath(); ledText(ctx, r.distance + "M", 0, 0, p, false); ledText(ctx, el.toFixed(2), 33, 11, p, true);
   ctx.strokeStyle = "rgba(255,160,40,0.3)"; ctx.lineWidth = p * 0.6; ctx.stroke(); ctx.fillStyle = "#ffb627"; ctx.fill(); ctx.restore(); // power bar: speed as a fraction of 22 km/h, plus a cadence meter
-  if (r.phase === "running") { const bw = Math.max(12, 15 * U), bh = Math.max(70, 0.24 * H), bx = W * 0.57, by = HOR - bh * 0.78, frac = Math.min(1, Math.max(0, r.speed_kmh / 22));
-  ctx.fillStyle = "rgba(10,14,10,0.5)"; ctx.beginPath(); rrect(ctx, bx - 3, by - 3, bw + 6, bh + 6, 4); ctx.fill();
+  if (r.phase === "running") { const bw = BAR[4], bh = BAR[5], bx = BAR[0] + 4, by = BAR[1] + 4, frac = Math.min(1, Math.max(0, r.speed_kmh / 22)); ctx.fillStyle = "rgba(10,14,10,0.5)"; ctx.beginPath(); rrect(ctx, bx - 3, by - 3, bw + 6, bh + 6, 4); ctx.fill();
   const pg = ctx.createLinearGradient(0, by + bh, 0, by); pg.addColorStop(0, "#0a6b22"); pg.addColorStop(0.6, "#2fd23f"); pg.addColorStop(1, "#b6ff5a"); ctx.fillStyle = pg; ctx.fillRect(bx, by + bh * (1 - frac), bw, bh * frac);
   ctx.fillStyle = "rgba(255,255,255,0.32)"; ctx.fillRect(bx + 1.5, by + bh * (1 - frac), bw * 0.35, bh * frac);
   ctx.strokeStyle = "#f4f4f4"; ctx.lineWidth = 2; ctx.strokeRect(bx, by, bw, bh); ctx.fillStyle = "#f4f4f4"; for (let i = 1; i < 4; i++) ctx.fillRect(bx - 4, by + bh * i / 4 - 0.5, 6, 1);
