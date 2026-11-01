@@ -1,5 +1,7 @@
 import csv
 
+import pytest
+
 from recorder import GAP_S, HEADER, SCRIPT, Recorder
 
 
@@ -95,3 +97,53 @@ def test_rolling_log_runs_only_while_idle(tmp_path):
     rows = read(files[0])
     assert len(rows) == 4 and rows[1][1] == "-"
     assert r.sessions() == [r.path.name]             # rolling logs are not sessions
+
+
+from recorder import STEP_ACTIVITIES, parse_counted
+
+
+def test_parse_counted():
+    assert parse_counted("20261101-101500-steps-walk-42-Rafae.csv") == ("WALK", 42, "Rafae")
+    assert parse_counted("20261101-101500-steps-bike-0.csv") == ("BIKE", 0, "")
+    assert parse_counted("20261101-101500-steps-walk-42-Rafae-2.csv") == ("WALK", 42, "Rafae")
+    assert parse_counted("20261101-101500-steps-walk-Rafae.csv") is None      # stopped without a count
+    assert parse_counted("20261026-135026-guided-Rafae.csv") is None
+    assert parse_counted("20261101-101500-steps-hop-5.csv") is None            # not an activity
+    assert STEP_ACTIVITIES == ("WALK", "RUN", "STAND", "BIKE", "MIXED")
+
+
+def test_counted_take_is_renamed_with_its_count(tmp_path):
+    clk = Clock()
+    r = Recorder(tmp_path, clock=clk, rolling=False)
+    r.start_counted("walk", who="Rafae")
+    assert r.active and r.path.name.endswith("-steps-walk-Rafae.csv")
+    st = r.status()
+    assert st["kind"] == "counted" and st["elapsed_s"] == 0.0 and st["label"] == "WALK" and st["prompt"].startswith("WALK")
+    clk.t += 12.3
+    r.on_samples(clk.t, [SAMPLE] * 10, rate=100)
+    assert r.status()["elapsed_s"] == 12.3
+    rows = read(r.path)
+    assert [row[1] for row in rows[1:]] == ["WALK"] * 10          # no get-ready gap: every row carries the activity
+    r.stop(steps=42)
+    assert not r.active
+    assert r.path.name.endswith("-steps-walk-42-Rafae.csv") and r.path.exists()
+    assert r.sessions() == [r.path.name]
+    assert r.status()["kind"] is None and r.status()["elapsed_s"] is None
+
+
+def test_counted_take_without_a_count_keeps_its_name(tmp_path):
+    r = Recorder(tmp_path, clock=Clock(), rolling=False)
+    r.start_counted("MIXED")
+    name = r.path.name
+    r.stop()
+    assert r.path.name == name and name.endswith("-steps-mixed.csv") and parse_counted(name) is None
+
+
+def test_steps_are_ignored_for_other_kinds_and_bad_activities_rejected(tmp_path):
+    r = Recorder(tmp_path, clock=Clock(), rolling=False)
+    r.start_single("WALK", seconds=10)
+    name = r.path.name
+    r.stop(steps=7)
+    assert r.path.name == name
+    with pytest.raises(ValueError):
+        r.start_counted("HOP")
