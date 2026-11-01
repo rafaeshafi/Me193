@@ -89,6 +89,7 @@
       <input id="takeSteps" type="number" min="0" step="1" inputmode="numeric">
       <button onclick="takeSave()">Save</button><button class="sec" onclick="takeDiscard()">Discard</button>
     </div>
+    <div id="takeErr" class="muted"></div>
     <div class="muted">pre-filled with the device's own count for this take; correct it to what you counted</div>
   </div>
 </div>
@@ -124,12 +125,13 @@
 <script>
 const $ = id => document.getElementById(id);
 const canvas = $("wave"), ctx = canvas.getContext("2d");
-function post(path) {
+function post(path) {   // -> the request's promise; it rejects with the server's error text, which also shows in #rec
   const who = encodeURIComponent($("who").value.trim());
-  fetch(path + (path.includes("?") ? "&" : "?") + "who=" + who, {method: "POST"})
-    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-    .then(render)
-    .catch(e => { $("rec").textContent = "error: " + e.message; });
+  const req = fetch(path + (path.includes("?") ? "&" : "?") + "who=" + who, {method: "POST"})
+    .then(r => r.ok ? r.json() : r.json().catch(() => ({})).then(b => { throw new Error(b.error || "HTTP " + r.status); }))
+    .then(render);
+  req.catch(e => { $("rec").textContent = "error: " + e.message; });
+  return req;
 }
 function sizeCanvas() {
   canvas.width = canvas.clientWidth * devicePixelRatio; canvas.height = 160 * devicePixelRatio;
@@ -159,35 +161,36 @@ function drawRate(w) {
   w.forEach((r, i) => { const x = i / (w.length - 1) * W; i ? rctx2.lineTo(x, y(r)) : rctx2.moveTo(x, y(r)); });
   rctx2.stroke();
 }
-let takeActivity = "WALK", takeMode = "idle", takeStartCount = 0, lastSteps = null;
+let takeActivity = "WALK", takeMode = "idle", lastSteps = null;
+["who", "who2"].forEach((id, i, ids) => $(id).addEventListener("input", () => { $(ids[1 - i]).value = $(id).value; }));   // one name for both tabs
 document.querySelectorAll(".take .act").forEach(b => b.onclick = () => { takeActivity = b.dataset.a; document.querySelectorAll(".take .act").forEach(x => x.classList.toggle("on", x === b)); });
 function setTakeMode(m) { takeMode = m; ["Idle", "Live", "Ask"].forEach(k => $("take" + k).classList.toggle("hidden", m !== k.toLowerCase())); }
 function takeStart() {
-  $("who").value = $("who2").value;                 // one name for both tabs
-  takeStartCount = lastSteps ? lastSteps.exact : 0;
+  $("takeErr").textContent = "";
   post("/record?label=" + takeActivity + "&steps=1"); setTakeMode("live");
 }
 function takeStop() {                               // the file keeps recording (standing still) until Save or Discard
-  $("takeSteps").value = lastSteps ? Math.max(0, Math.round(lastSteps.exact - takeStartCount)) : 0;
+  $("takeSteps").value = lastSteps ? Math.max(0, Math.round(lastSteps.take)) : 0;
   setTakeMode("ask"); $("takeSteps").focus();
 }
 function takeSave() {
   const n = parseInt($("takeSteps").value, 10);
   if (!(n >= 0)) { $("takeSteps").focus(); return; }
-  post("/stop?steps=" + n); setTakeMode("idle");
+  post("/stop?steps=" + n).then(() => setTakeMode("idle"))   // a failed save stays on the ask row with the reason
+    .catch(e => { $("takeErr").textContent = e.message; });
 }
 function takeDiscard() { post("/stop"); setTakeMode("idle"); }
 function renderSteps(st, rec, act) {
   lastSteps = st;
+  const counted = rec.active && rec.kind === "counted";   // the take controls work with or without a step model
+  $("takeClock").textContent = counted ? rec.elapsed_s.toFixed(0) + " s" : "--";
+  $("takeInfo").textContent = counted ? `${rec.label} · ${rec.elapsed_s.toFixed(0)} s · ${rec.rows} rows` + (st ? ` · device so far ${Math.max(0, Math.round(st.take))}` : "") : "";
+  if (counted && takeMode === "idle") setTakeMode("live");
+  if (!rec.active && takeMode === "live") setTakeMode("idle");
   if (!st) { $("stepCount").textContent = "--"; $("stepPm").textContent = ""; $("stepAct").textContent = "no step model"; return; }
   $("stepAct").textContent = act + (st.trained ? "" : " · untrained seed weights");   // do not trust the count before training
   $("stepCount").textContent = st.count; $("stepPm").textContent = st.count ? "± " + st.pm : "";
   $("spm").textContent = st.spm; $("pmPct").textContent = "± " + st.pm_pct + " %";
-  const counted = rec.active && rec.kind === "counted";
-  $("takeClock").textContent = counted ? rec.elapsed_s.toFixed(0) + " s" : "--";
-  $("takeInfo").textContent = counted ? `${rec.label} · ${rec.elapsed_s.toFixed(0)} s · ${rec.rows} rows · device so far ${Math.max(0, Math.round(st.exact - takeStartCount))}` : "";
-  if (counted && takeMode === "idle") setTakeMode("live");
-  if (!rec.active && takeMode === "live") setTakeMode("idle");
   drawRate(st.wave || []);
 }
 let raceDistance = 400;
@@ -224,6 +227,7 @@ connect();
 function showTab(name) {
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
   ["gait", "race", "steps"].forEach(t => $(t).classList.toggle("hidden", t !== name));
+  if (name === "gait") sizeCanvas();
   if (name === "race") fitRace();
   if (name === "steps") sizeRate();
   history.replaceState(null, "", name === "gait" ? "/" : "/" + name);

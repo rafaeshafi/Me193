@@ -192,6 +192,25 @@ def test_steps_advance_on_walking_and_reset(tmp_path):
     assert g.snapshot()["steps"]["count"] == 0 and g.snapshot()["steps"]["wave"] == []
 
 
+def test_counted_take_reports_steps_since_its_start(tmp_path):
+    clk = Clock()
+    g = make_steps(tmp_path, clk)
+    feed(g, clk, "WALK", 2.0)
+    clk.t += 0.5
+    g.tick()
+    start = g.steps.count
+    g.start_counted("WALK", who="ann")
+    assert g.snapshot()["steps"]["take"] == 0 and g.recorder.kind == "counted"
+    feed(g, clk, "WALK", 2.0)
+    clk.t += 0.5
+    g.tick()
+    s = g.snapshot()["steps"]
+    assert start > 0 and 0 <= s["take"] < s["exact"] and s["take"] == round(g.steps.count - start, 2)
+    g.reset_steps()
+    assert g.snapshot()["steps"]["take"] == 0
+    g.recorder.stop()
+
+
 def test_fifo_reset_clears_the_step_context_but_keeps_the_count(tmp_path):
     clk = Clock()
     g = make_steps(tmp_path, clk)

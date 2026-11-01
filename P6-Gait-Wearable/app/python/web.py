@@ -70,7 +70,7 @@ class Handler(BaseHTTPRequestHandler):
                 if q.get("steps", ["0"])[0] == "1":
                     if label not in STEP_ACTIVITIES:
                         return self._json({"error": "activity must be one of %s" % ", ".join(STEP_ACTIVITIES)}, 400)
-                    rec.start_counted(label, who=who)
+                    self.gait.start_counted(label, who=who)
                 else:
                     if label not in LABELS:
                         return self._json({"error": "label must be one of %s" % ", ".join(LABELS)}, 400)
@@ -81,6 +81,8 @@ class Handler(BaseHTTPRequestHandler):
                     if not steps.isdigit():
                         return self._json({"error": "steps must be a whole number >= 0"}, 400)
                     steps = int(steps)
+                    if rec.kind != "counted":   # a stray count must never end a plain take
+                        return self._json({"error": "no counted take is open; count not saved"}, 400)
                 name = rec.stop(steps=steps)
                 if steps is not None and (name is None or parse_counted(name) is None):
                     # the take had already ended at its cap, or none was open: the count has nowhere to go

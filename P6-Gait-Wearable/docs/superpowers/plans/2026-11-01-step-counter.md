@@ -746,7 +746,7 @@ git commit -m "P6-Gait-Wearable: the pipeline feeds StepCounter every hop, reset
 - Modify: `app/python/pipeline.py` (`Gait.reset_steps()`)
 - Modify: `app/python/page.html`
 - Create: `app/python/race.js` (the race drawing script, moved out of `page.html` to keep it under 500 lines)
-- Modify: `tests/test_web.py` (fixture + page test + append)
+- Modify: `tests/test_web.py` (fixture + page test + append), `tests/test_pipeline.py` (append)
 
 - [ ] **Step 1: Give the test server a step model and append failing tests to `tests/test_web.py`**
 
@@ -771,6 +771,9 @@ def test_steps_routes(server):
     status, _, body = req(s, "POST", "/record?label=MIXED&steps=1&who=ann")
     rec = json.loads(body)["recorder"]
     assert status == 200 and rec["active"] and rec["kind"] == "counted" and rec["file"].endswith("-steps-mixed-ann.csv")
+    assert json.loads(body)["steps"]["take"] == 0
+    g.steps.count = 7.0
+    assert json.loads(req(s, "GET", "/state")[2])["steps"]["take"] == 7
     status, _, body = req(s, "POST", "/stop?steps=abc")
     assert status == 400 and "steps" in json.loads(body)["error"]
     status, _, body = req(s, "POST", "/stop?steps=-1")
@@ -786,13 +789,39 @@ def test_steps_routes(server):
     assert status == 400
     g.steps.count = 5.0
     status, _, body = req(s, "POST", "/steps/reset")
-    assert status == 200 and json.loads(body)["steps"]["count"] == 0
+    assert status == 200 and json.loads(body)["steps"]["count"] == 0 and json.loads(body)["steps"]["take"] == 0
+    req(s, "POST", "/record?label=WALK")                            # a plain take: a stray count must not end it
+    status, _, body = req(s, "POST", "/stop?steps=3")
+    assert status == 400 and "not saved" in json.loads(body)["error"] and g.recorder.active
+    g.recorder.stop()
+```
+
+Append to `tests/test_pipeline.py` (the take's start count is kept on the board, so a reload or a second phone shows the same "device so far"):
+```python
+def test_counted_take_reports_steps_since_its_start(tmp_path):
+    clk = Clock()
+    g = make_steps(tmp_path, clk)
+    feed(g, clk, "WALK", 2.0)
+    clk.t += 0.5
+    g.tick()
+    start = g.steps.count
+    g.start_counted("WALK", who="ann")
+    assert g.snapshot()["steps"]["take"] == 0 and g.recorder.kind == "counted"
+    feed(g, clk, "WALK", 2.0)
+    clk.t += 0.5
+    g.tick()
+    s = g.snapshot()["steps"]
+    assert start > 0 and 0 <= s["take"] < s["exact"] and s["take"] == round(g.steps.count - start, 2)
+    g.reset_steps()
+    assert g.snapshot()["steps"]["take"] == 0
+    g.recorder.stop()
+
 ```
 
 - [ ] **Step 2: Run them**
 
 Run: `.venv/bin/python -m pytest tests/test_web.py -q`
-Expected: `test_steps_routes` fails (404 on `/steps`).
+Expected: `test_steps_routes` fails (404 on `/steps`), `test_counted_take_reports_steps_since_its_start` fails (no `Gait.start_counted`).
 
 - [ ] **Step 3: Edit `app/python/web.py`**
 
@@ -810,7 +839,7 @@ Read the race script next to the page: `HERE = Path(__file__).resolve().parent`,
                 if q.get("steps", ["0"])[0] == "1":
                     if label not in STEP_ACTIVITIES:
                         return self._json({"error": "activity must be one of %s" % ", ".join(STEP_ACTIVITIES)}, 400)
-                    rec.start_counted(label, who=who)
+                    self.gait.start_counted(label, who=who)
                 else:
                     if label not in LABELS:
                         return self._json({"error": "label must be one of %s" % ", ".join(LABELS)}, 400)
@@ -821,6 +850,8 @@ Read the race script next to the page: `HERE = Path(__file__).resolve().parent`,
                     if not steps.isdigit():
                         return self._json({"error": "steps must be a whole number >= 0"}, 400)
                     steps = int(steps)
+                    if rec.kind != "counted":   # a stray count must never end a plain take
+                        return self._json({"error": "no counted take is open; count not saved"}, 400)
                 name = rec.stop(steps=steps)
                 if steps is not None and (name is None or parse_counted(name) is None):
                     # the take had already ended at its cap, or none was open: the count has nowhere to go
@@ -830,13 +861,21 @@ Read the race script next to the page: `HERE = Path(__file__).resolve().parent`,
 ```
 Docstring: add `GET /steps`, `GET /race.js` and the new POST forms.
 
-`app/python/pipeline.py`: `StepCounter.reset()` must run under the Gait lock (the Bridge thread feeds the counter under it), so add to `Gait`:
+`app/python/pipeline.py`: `self._take_start = 0.0` in `Gait.__init__`; add the two methods below (`StepCounter.reset()` must run under the Gait lock, since the Bridge thread feeds the counter under it); in `snapshot()`, under the lock, `steps["take"] = round(self.steps.count - self._take_start, 2)` when there is a step model.
 ```python
+    def start_counted(self, activity, who=""):
+        """Open a counted take and remember the count at its start, so every phone shows the steps since then."""
+        with self._lock:
+            self._take_start = self.steps.count if self.steps else 0.0
+        self.recorder.start_counted(activity, who=who)
+
     def reset_steps(self):
         if self.steps:
             with self._lock:
                 self.steps.reset()
+                self._take_start = 0.0
 ```
+`/stop?steps=N` refuses before stopping when the open take is not a counted one (a stray count never ends a plain take); the check after `stop()` covers a take that hit its cap in between.
 
 - [ ] **Step 4: Edit `app/python/page.html`**
 
@@ -885,13 +924,25 @@ Insert this section right after `<section id="race" ...>...</section>` (before `
       <input id="takeSteps" type="number" min="0" step="1" inputmode="numeric">
       <button onclick="takeSave()">Save</button><button class="sec" onclick="takeDiscard()">Discard</button>
     </div>
+    <div id="takeErr" class="muted"></div>
     <div class="muted">pre-filled with the device's own count for this take; correct it to what you counted</div>
   </div>
 </div>
 </section>
 ```
 
-Script additions (put after `drawWave`):
+`post(path)` returns its request promise; a non-OK response rejects with the server's `error` text (fallback `HTTP <status>`), which also shows in `#rec` as before:
+```js
+function post(path) {   // -> the request's promise; it rejects with the server's error text, which also shows in #rec
+  const who = encodeURIComponent($("who").value.trim());
+  const req = fetch(path + (path.includes("?") ? "&" : "?") + "who=" + who, {method: "POST"})
+    .then(r => r.ok ? r.json() : r.json().catch(() => ({})).then(b => { throw new Error(b.error || "HTTP " + r.status); }))
+    .then(render);
+  req.catch(e => { $("rec").textContent = "error: " + e.message; });
+  return req;
+}
+```
+Script additions (put after `drawWave`). The take's start count lives on the board (`steps.take`); a failed Save stays on the ask row and shows the reason in `#takeErr`; the take controls sync even with no step model; `who` and `who2` mirror each other:
 ```js
 // ---- steps tab ----
 const rateCanvas = $("rateWave"), rctx2 = rateCanvas.getContext("2d");
@@ -907,43 +958,45 @@ function drawRate(w) {
   w.forEach((r, i) => { const x = i / (w.length - 1) * W; i ? rctx2.lineTo(x, y(r)) : rctx2.moveTo(x, y(r)); });
   rctx2.stroke();
 }
-let takeActivity = "WALK", takeMode = "idle", takeStartCount = 0, lastSteps = null;
+let takeActivity = "WALK", takeMode = "idle", lastSteps = null;
+["who", "who2"].forEach((id, i, ids) => $(id).addEventListener("input", () => { $(ids[1 - i]).value = $(id).value; }));   // one name for both tabs
 document.querySelectorAll(".take .act").forEach(b => b.onclick = () => { takeActivity = b.dataset.a; document.querySelectorAll(".take .act").forEach(x => x.classList.toggle("on", x === b)); });
 function setTakeMode(m) { takeMode = m; ["Idle", "Live", "Ask"].forEach(k => $("take" + k).classList.toggle("hidden", m !== k.toLowerCase())); }
 function takeStart() {
-  $("who").value = $("who2").value;                 // one name for both tabs
-  takeStartCount = lastSteps ? lastSteps.exact : 0;
+  $("takeErr").textContent = "";
   post("/record?label=" + takeActivity + "&steps=1"); setTakeMode("live");
 }
 function takeStop() {                               // the file keeps recording (standing still) until Save or Discard
-  $("takeSteps").value = lastSteps ? Math.max(0, Math.round(lastSteps.exact - takeStartCount)) : 0;
+  $("takeSteps").value = lastSteps ? Math.max(0, Math.round(lastSteps.take)) : 0;
   setTakeMode("ask"); $("takeSteps").focus();
 }
 function takeSave() {
   const n = parseInt($("takeSteps").value, 10);
   if (!(n >= 0)) { $("takeSteps").focus(); return; }
-  post("/stop?steps=" + n); setTakeMode("idle");
+  post("/stop?steps=" + n).then(() => setTakeMode("idle"))   // a failed save stays on the ask row with the reason
+    .catch(e => { $("takeErr").textContent = e.message; });
 }
 function takeDiscard() { post("/stop"); setTakeMode("idle"); }
 function renderSteps(st, rec, act) {
   lastSteps = st;
+  const counted = rec.active && rec.kind === "counted";   // the take controls work with or without a step model
+  $("takeClock").textContent = counted ? rec.elapsed_s.toFixed(0) + " s" : "--";
+  $("takeInfo").textContent = counted ? `${rec.label} · ${rec.elapsed_s.toFixed(0)} s · ${rec.rows} rows` + (st ? ` · device so far ${Math.max(0, Math.round(st.take))}` : "") : "";
+  if (counted && takeMode === "idle") setTakeMode("live");
+  if (!rec.active && takeMode === "live") setTakeMode("idle");
   if (!st) { $("stepCount").textContent = "--"; $("stepPm").textContent = ""; $("stepAct").textContent = "no step model"; return; }
   $("stepAct").textContent = act + (st.trained ? "" : " · untrained seed weights");   // do not trust the count before training
   $("stepCount").textContent = st.count; $("stepPm").textContent = st.count ? "± " + st.pm : "";
   $("spm").textContent = st.spm; $("pmPct").textContent = "± " + st.pm_pct + " %";
-  const counted = rec.active && rec.kind === "counted";
-  $("takeClock").textContent = counted ? rec.elapsed_s.toFixed(0) + " s" : "--";
-  $("takeInfo").textContent = counted ? `${rec.label} · ${rec.elapsed_s.toFixed(0)} s · ${rec.rows} rows · device so far ${Math.max(0, Math.round(st.exact - takeStartCount))}` : "";
-  if (counted && takeMode === "idle") setTakeMode("live");
-  if (!rec.active && takeMode === "live") setTakeMode("idle");
   drawRate(st.wave || []);
 }
 ```
-In `render(s)` add `renderSteps(s.steps, s.recorder, s.act);`. Replace `showTab`:
+In `render(s)` add `renderSteps(s.steps, s.recorder, s.act);`. Replace `showTab` (the Gait canvas is resized when its tab opens):
 ```js
 function showTab(name) {
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
   ["gait", "race", "steps"].forEach(t => $(t).classList.toggle("hidden", t !== name));
+  if (name === "gait") sizeCanvas();
   if (name === "race") fitRace();
   if (name === "steps") sizeRate();
   history.replaceState(null, "", name === "gait" ? "/" : "/" + name);
@@ -952,7 +1005,7 @@ document.querySelectorAll(".tab").forEach(b => b.onclick = () => showTab(b.datas
 const p = location.pathname.slice(1) || location.hash.slice(1);
 showTab(["race", "steps"].includes(p) ? p : "gait");
 ```
-Keep `page.html` under 500 lines: the Steps tab pushes it over, so move the race drawing script (everything from `const ghostColor = ...` through `drawRace();`: `renderRace`, `ordinal`, the stadium, runners, HUD, `fitRace`, `drawRace`) into `app/python/race.js`, served at `GET /race.js`, and load it with `<script src="/race.js"></script>` just before the main `<script>`. Both are classic scripts sharing one global scope, so every function the page calls stays global. race.js runs first, so its one load-time element lookup uses `document.getElementById("raceCanvas")`; its other `$(...)` calls are inside functions that run after the main script defines `$`. (Result: `page.html` ~237 lines, `race.js` ~340.) Check syntax and duplicate top-level names with `node --check` on `race.js`, on the inline script, and on the two concatenated.
+Keep `page.html` under 500 lines: the Steps tab pushes it over, so move the race drawing script (everything from `const ghostColor = ...` through `drawRace();`: `renderRace`, `ordinal`, the stadium, runners, HUD, `fitRace`, `drawRace`) into `app/python/race.js`, served at `GET /race.js`, and load it with `<script src="/race.js"></script>` just before the main `<script>`. Both are classic scripts sharing one global scope, so every function the page calls stays global. race.js runs first, so its one load-time element lookup uses `document.getElementById("raceCanvas")`; its other `$(...)` calls are inside functions that run after the main script defines `$`. (Result: `page.html` ~241 lines, `race.js` ~340.) Check syntax and duplicate top-level names with `node --check` on `race.js`, on the inline script, and on the two concatenated.
 
 - [ ] **Step 5: Run the tests and look at the page**
 
@@ -975,7 +1028,7 @@ Open `http://127.0.0.1:8090/steps` in the browser: the count ticks, the yellow r
 - [ ] **Step 6: Commit**
 
 ```bash
-git add app/python/web.py app/python/pipeline.py app/python/page.html app/python/race.js tests/test_web.py docs/superpowers/plans/2026-11-01-step-counter.md
+git add app/python/web.py app/python/pipeline.py app/python/page.html app/python/race.js tests/test_web.py tests/test_pipeline.py docs/superpowers/plans/2026-11-01-step-counter.md
 git commit -m "P6-Gait-Wearable: Steps tab (count ± half-width, rate trace, reset, counted-take controls) and routes /steps, /record?steps=1, /stop?steps=, /steps/reset; race drawing script moved to race.js"
 ```
 

@@ -104,6 +104,9 @@ def test_steps_routes(server):
     status, _, body = req(s, "POST", "/record?label=MIXED&steps=1&who=ann")
     rec = json.loads(body)["recorder"]
     assert status == 200 and rec["active"] and rec["kind"] == "counted" and rec["file"].endswith("-steps-mixed-ann.csv")
+    assert json.loads(body)["steps"]["take"] == 0
+    g.steps.count = 7.0
+    assert json.loads(req(s, "GET", "/state")[2])["steps"]["take"] == 7
     status, _, body = req(s, "POST", "/stop?steps=abc")
     assert status == 400 and "steps" in json.loads(body)["error"]
     status, _, body = req(s, "POST", "/stop?steps=-1")
@@ -119,4 +122,8 @@ def test_steps_routes(server):
     assert status == 400
     g.steps.count = 5.0
     status, _, body = req(s, "POST", "/steps/reset")
-    assert status == 200 and json.loads(body)["steps"]["count"] == 0
+    assert status == 200 and json.loads(body)["steps"]["count"] == 0 and json.loads(body)["steps"]["take"] == 0
+    req(s, "POST", "/record?label=WALK")                            # a plain take: a stray count must not end it
+    status, _, body = req(s, "POST", "/stop?steps=3")
+    assert status == 400 and "not saved" in json.loads(body)["error"] and g.recorder.active
+    g.recorder.stop()

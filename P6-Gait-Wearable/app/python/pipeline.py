@@ -22,6 +22,7 @@ class Gait:
         self.speed = SpeedModel()
         self.race = Race(ResultStore(races_path or (Path(recorder.dir) / "races.json")), clock=clock)
         self.steps = StepCounter(stepnet) if stepnet is not None else None
+        self._take_start = 0.0   # the step count when the current counted take started
         self.ring = Ring(5.0, rate)
         self.vote1, self.vote2 = Vote(3), Vote(3)
         self._lock = threading.Lock()
@@ -92,16 +93,25 @@ class Gait:
         self.speed.update(self.state["act"], self.state["cad"], self.state["pk"], now)
         return True
 
+    def start_counted(self, activity, who=""):
+        """Open a counted take and remember the count at its start, so every phone shows the steps since then."""
+        with self._lock:
+            self._take_start = self.steps.count if self.steps else 0.0
+        self.recorder.start_counted(activity, who=who)
+
     def reset_steps(self):
         if self.steps:
             with self._lock:
                 self.steps.reset()
+                self._take_start = 0.0
 
     def snapshot(self):
         """Everything the phone page shows, as plain JSON-able types."""
         with self._lock:
             recent = self.ring.recent(4.0)
             steps = self.steps.snapshot() if self.steps else None
+            if steps is not None:
+                steps["take"] = round(self.steps.count - self._take_start, 2)
         s = self.state
         real = ("---", "NO IMU")
         agree = None if s["act"] in real or s["m1"] in real else int(s["act"] == s["m1"])
