@@ -1,8 +1,11 @@
 """The phone page: live verdicts and waveform over Server-Sent Events, recorder controls, CSV downloads. Stdlib only.
 
-GET  /            the page            GET /events  SSE stream of Gait.snapshot() at 10 Hz
-GET  /state       one snapshot (JSON) GET /data/<session.csv>  download a recording
+GET  /, /race, /steps  the page (opens on that tab)   GET /race.js  the race drawing script
+GET  /events      SSE stream of Gait.snapshot() at 10 Hz   GET /state  one snapshot (JSON)
+GET  /data/<session.csv>  download a recording
 POST /guided?who= start the guided script   POST /record?label=WALK&who=   POST /stop
+POST /record?label=MIXED&steps=1&who=  start a counted take   POST /stop?steps=N  close it with the wearer's count
+POST /steps/reset  zero the step count
 POST /race/start?distance=100|400|1000&who=   POST /race/abort
 """
 import json
@@ -12,9 +15,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from recorder import LABELS, clean
+from recorder import LABELS, STEP_ACTIVITIES, clean, parse_counted
 
-PAGE = (Path(__file__).resolve().parent / "page.html").read_bytes()
+HERE = Path(__file__).resolve().parent
+PAGE = (HERE / "page.html").read_bytes()
+RACE_JS = (HERE / "race.js").read_bytes()
 EVENT_PERIOD_S = 0.1
 
 
@@ -39,8 +44,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
-        if url.path in ("/", "/race"):  # one page; /race opens on the race tab
+        if url.path in ("/", "/race", "/steps"):  # one page; /race and /steps open on their tabs
             self._send(200, "text/html; charset=utf-8", PAGE)
+        elif url.path == "/race.js":
+            self._send(200, "text/javascript; charset=utf-8", RACE_JS)
         elif url.path == "/state":
             self._json(self.gait.snapshot())
         elif url.path == "/events":
@@ -60,11 +67,26 @@ class Handler(BaseHTTPRequestHandler):
                 rec.start_guided(who=who)
             elif url.path == "/record":
                 label = q.get("label", [""])[0].upper()
-                if label not in LABELS:
-                    return self._json({"error": "label must be one of %s" % ", ".join(LABELS)}, 400)
-                rec.start_single(label, who=who)
+                if q.get("steps", ["0"])[0] == "1":
+                    if label not in STEP_ACTIVITIES:
+                        return self._json({"error": "activity must be one of %s" % ", ".join(STEP_ACTIVITIES)}, 400)
+                    rec.start_counted(label, who=who)
+                else:
+                    if label not in LABELS:
+                        return self._json({"error": "label must be one of %s" % ", ".join(LABELS)}, 400)
+                    rec.start_single(label, who=who)
             elif url.path == "/stop":
-                rec.stop()
+                steps = q.get("steps", [None])[0]
+                if steps is not None:
+                    if not steps.isdigit():
+                        return self._json({"error": "steps must be a whole number >= 0"}, 400)
+                    steps = int(steps)
+                name = rec.stop(steps=steps)
+                if steps is not None and (name is None or parse_counted(name) is None):
+                    # the take had already ended at its cap, or none was open: the count has nowhere to go
+                    return self._json({"error": "no counted take was open; count not saved"}, 400)
+            elif url.path == "/steps/reset":
+                self.gait.reset_steps()
             elif url.path == "/race/start":
                 try:
                     self.gait.race.start(int(q.get("distance", ["400"])[0]), who)

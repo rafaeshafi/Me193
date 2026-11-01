@@ -743,8 +743,10 @@ git commit -m "P6-Gait-Wearable: the pipeline feeds StepCounter every hop, reset
 
 **Files:**
 - Modify: `app/python/web.py`
+- Modify: `app/python/pipeline.py` (`Gait.reset_steps()`)
 - Modify: `app/python/page.html`
-- Modify: `tests/test_web.py` (fixture + append)
+- Create: `app/python/race.js` (the race drawing script, moved out of `page.html` to keep it under 500 lines)
+- Modify: `tests/test_web.py` (fixture + page test + append)
 
 - [ ] **Step 1: Give the test server a step model and append failing tests to `tests/test_web.py`**
 
@@ -754,6 +756,11 @@ from seed_models import SEED1, SEED2, seed_stepnet
 from stepnet import StepNet
 ...
     g = Gait(Tree(SEED1), Tree(SEED2), Recorder(tmp_path, rolling=False), stepnet=StepNet(seed_stepnet()))
+```
+In `test_page_and_state`, the `/race` assertion also checks `b'src="/race.js"' in body`, then:
+```python
+    status, ctype, body = req(s, "GET", "/race.js")
+    assert status == 200 and "javascript" in ctype and b"function drawRace" in body
 ```
 Append:
 ```python
@@ -771,6 +778,8 @@ def test_steps_routes(server):
     status, _, body = req(s, "POST", "/stop?steps=17")
     snap = json.loads(body)
     assert status == 200 and not snap["recorder"]["active"] and any(n.endswith("-steps-mixed-n17-ann.csv") for n in snap["sessions"])
+    status, _, body = req(s, "POST", "/stop?steps=5")              # nothing open: the count would be lost, so say so
+    assert status == 400 and "not saved" in json.loads(body)["error"]
     status, _, body = req(s, "POST", "/record?label=HOP&steps=1")
     assert status == 400
     status, _, body = req(s, "POST", "/record?label=MIXED")          # MIXED is only a counted activity
@@ -787,9 +796,12 @@ Expected: `test_steps_routes` fails (404 on `/steps`).
 
 - [ ] **Step 3: Edit `app/python/web.py`**
 
-Import: `from recorder import LABELS, STEP_ACTIVITIES, clean`.
+Import: `from recorder import LABELS, STEP_ACTIVITIES, clean, parse_counted`.
 
-`do_GET`: `if url.path in ("/", "/race", "/steps"):  # one page; /race and /steps open on their tabs`.
+Read the race script next to the page: `HERE = Path(__file__).resolve().parent`, `PAGE = (HERE / "page.html").read_bytes()`, `RACE_JS = (HERE / "race.js").read_bytes()`.
+
+`do_GET`: `if url.path in ("/", "/race", "/steps"):  # one page; /race and /steps open on their tabs`, then
+`elif url.path == "/race.js": self._send(200, "text/javascript; charset=utf-8", RACE_JS)`.
 
 `do_POST` `/record` branch:
 ```python
@@ -809,12 +821,22 @@ Import: `from recorder import LABELS, STEP_ACTIVITIES, clean`.
                     if not steps.isdigit():
                         return self._json({"error": "steps must be a whole number >= 0"}, 400)
                     steps = int(steps)
-                rec.stop(steps=steps)
+                name = rec.stop(steps=steps)
+                if steps is not None and (name is None or parse_counted(name) is None):
+                    # the take had already ended at its cap, or none was open: the count has nowhere to go
+                    return self._json({"error": "no counted take was open; count not saved"}, 400)
             elif url.path == "/steps/reset":
-                if self.gait.steps:
-                    self.gait.steps.reset()
+                self.gait.reset_steps()
 ```
-Docstring: add `GET /steps` and the two new POST forms.
+Docstring: add `GET /steps`, `GET /race.js` and the new POST forms.
+
+`app/python/pipeline.py`: `StepCounter.reset()` must run under the Gait lock (the Bridge thread feeds the counter under it), so add to `Gait`:
+```python
+    def reset_steps(self):
+        if self.steps:
+            with self._lock:
+                self.steps.reset()
+```
 
 - [ ] **Step 4: Edit `app/python/page.html`**
 
@@ -827,7 +849,9 @@ CSS, add:
   .take { background: #111; border-radius: 10px; padding: 12px 14px; margin: 10px 0; }
   .take button.act.on { background: #0093e7; } .take button.act { background: #333; }
   .take input { width: 110px; }
+  .take .hidden { display: none; }
 ```
+(the page's existing `section.hidden` rule does not hide the take's `div`s, and `.row` would otherwise win.)
 
 Insert this section right after `<section id="race" ...>...</section>` (before `<section id="gait">`):
 ```html
@@ -904,7 +928,7 @@ function takeDiscard() { post("/stop"); setTakeMode("idle"); }
 function renderSteps(st, rec, act) {
   lastSteps = st;
   if (!st) { $("stepCount").textContent = "--"; $("stepPm").textContent = ""; $("stepAct").textContent = "no step model"; return; }
-  $("stepAct").textContent = act;
+  $("stepAct").textContent = act + (st.trained ? "" : " · untrained seed weights");   // do not trust the count before training
   $("stepCount").textContent = st.count; $("stepPm").textContent = st.count ? "± " + st.pm : "";
   $("spm").textContent = st.spm; $("pmPct").textContent = "± " + st.pm_pct + " %";
   const counted = rec.active && rec.kind === "counted";
@@ -928,7 +952,7 @@ document.querySelectorAll(".tab").forEach(b => b.onclick = () => showTab(b.datas
 const p = location.pathname.slice(1) || location.hash.slice(1);
 showTab(["race", "steps"].includes(p) ? p : "gait");
 ```
-Keep `page.html` under 500 lines: if it crosses, move the race drawing script into `app/python/race.js` served by `web.py` at `/race.js` (`GET /race.js` → `text/javascript`, read next to the page like `PAGE`) and add a `<script src="/race.js"></script>` line before the main script. Do this only if needed and test `GET /race.js` in `test_web.py`.
+Keep `page.html` under 500 lines: the Steps tab pushes it over, so move the race drawing script (everything from `const ghostColor = ...` through `drawRace();`: `renderRace`, `ordinal`, the stadium, runners, HUD, `fitRace`, `drawRace`) into `app/python/race.js`, served at `GET /race.js`, and load it with `<script src="/race.js"></script>` just before the main `<script>`. Both are classic scripts sharing one global scope, so every function the page calls stays global. race.js runs first, so its one load-time element lookup uses `document.getElementById("raceCanvas")`; its other `$(...)` calls are inside functions that run after the main script defines `$`. (Result: `page.html` ~237 lines, `race.js` ~340.) Check syntax and duplicate top-level names with `node --check` on `race.js`, on the inline script, and on the two concatenated.
 
 - [ ] **Step 5: Run the tests and look at the page**
 
@@ -951,8 +975,8 @@ Open `http://127.0.0.1:8090/steps` in the browser: the count ticks, the yellow r
 - [ ] **Step 6: Commit**
 
 ```bash
-git add app/python/web.py app/python/page.html tests/test_web.py
-git commit -m "P6-Gait-Wearable: Steps tab (count ± half-width, rate trace, reset, counted-take controls) and routes /steps, /record?steps=1, /stop?steps=, /steps/reset"
+git add app/python/web.py app/python/pipeline.py app/python/page.html app/python/race.js tests/test_web.py docs/superpowers/plans/2026-11-01-step-counter.md
+git commit -m "P6-Gait-Wearable: Steps tab (count ± half-width, rate trace, reset, counted-take controls) and routes /steps, /record?steps=1, /stop?steps=, /steps/reset; race drawing script moved to race.js"
 ```
 
 ---

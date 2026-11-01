@@ -92,6 +92,11 @@ class Gait:
         self.speed.update(self.state["act"], self.state["cad"], self.state["pk"], now)
         return True
 
+    def reset_steps(self):
+        if self.steps:
+            with self._lock:
+                self.steps.reset()
+
     def snapshot(self):
         """Everything the phone page shows, as plain JSON-able types."""
         with self._lock:

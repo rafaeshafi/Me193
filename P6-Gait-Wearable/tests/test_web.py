@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from models import Tree
-from seed_models import SEED1, SEED2
+from seed_models import SEED1, SEED2, seed_stepnet
+from stepnet import StepNet
 from pipeline import Gait
 from recorder import Recorder
 from web import serve
@@ -15,8 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def server(tmp_path):
-    g = Gait(Tree(SEED1), Tree(SEED2),
-             Recorder(tmp_path, rolling=False))
+    g = Gait(Tree(SEED1), Tree(SEED2), Recorder(tmp_path, rolling=False), stepnet=StepNet(seed_stepnet()))
     (tmp_path / "20261023-120000-walk.csv").write_text("t,label\n0.0,WALK\n")
     s = serve(g, port=0)
     yield s, g
@@ -41,7 +41,9 @@ def test_page_and_state(server):
     status, ctype, body = req(s, "GET", "/state")
     assert status == 200 and json.loads(body)["act"] == "---"
     status, ctype, body = req(s, "GET", "/race")
-    assert status == 200 and "text/html" in ctype and b"raceCanvas" in body
+    assert status == 200 and "text/html" in ctype and b"raceCanvas" in body and b'src="/race.js"' in body
+    status, ctype, body = req(s, "GET", "/race.js")
+    assert status == 200 and "javascript" in ctype and b"function drawRace" in body
 
 
 def test_recorder_controls(server):
@@ -93,3 +95,28 @@ def test_race_routes(server):
     assert status == 400
     status, _, body = req(s, "POST", "/race/abort")
     assert status == 200 and json.loads(body)["race"]["phase"] == "idle"
+
+
+def test_steps_routes(server):
+    s, g = server
+    status, ctype, body = req(s, "GET", "/steps")
+    assert status == 200 and "text/html" in ctype and b"stepCount" in body
+    status, _, body = req(s, "POST", "/record?label=MIXED&steps=1&who=ann")
+    rec = json.loads(body)["recorder"]
+    assert status == 200 and rec["active"] and rec["kind"] == "counted" and rec["file"].endswith("-steps-mixed-ann.csv")
+    status, _, body = req(s, "POST", "/stop?steps=abc")
+    assert status == 400 and "steps" in json.loads(body)["error"]
+    status, _, body = req(s, "POST", "/stop?steps=-1")
+    assert status == 400
+    status, _, body = req(s, "POST", "/stop?steps=17")
+    snap = json.loads(body)
+    assert status == 200 and not snap["recorder"]["active"] and any(n.endswith("-steps-mixed-n17-ann.csv") for n in snap["sessions"])
+    status, _, body = req(s, "POST", "/stop?steps=5")              # nothing open: the count would be lost, so say so
+    assert status == 400 and "not saved" in json.loads(body)["error"]
+    status, _, body = req(s, "POST", "/record?label=HOP&steps=1")
+    assert status == 400
+    status, _, body = req(s, "POST", "/record?label=MIXED")          # MIXED is only a counted activity
+    assert status == 400
+    g.steps.count = 5.0
+    status, _, body = req(s, "POST", "/steps/reset")
+    assert status == 200 and json.loads(body)["steps"]["count"] == 0
