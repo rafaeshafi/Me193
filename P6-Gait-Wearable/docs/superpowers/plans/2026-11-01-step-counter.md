@@ -1664,7 +1664,7 @@ def scatter(path, results, m):
         ax.fill_between(xs, xs * (1 - m["pm_pct95"] / 100), xs * (1 + m["pm_pct95"] / 100), color="#ddd", alpha=0.6, label="±%.0f %% (95th pct)" % m["pm_pct95"])
     for act in sorted({r["activity"] for r in results}):
         pts = [r for r in results if r["activity"] == act]
-        ax.scatter([r["true"] for r in pts], [r["pred"] for r in pts], color=COLORS.get(act, "k"), label=act, zorder=3, s=36, edgecolor="white", linewidth=0.8)
+        ax.scatter([r["true"] for r in pts], [r["pred"] for r in pts], color=COLORS.get(act, "k"), label=act, zorder=3, s=36, edgecolor="white", linewidth=0.8, clip_on=False)
     ax.set_xlabel("counted steps (true)")
     ax.set_ylabel("StepNet steps (leave-one-recording-out)")
     ax.set_title("MAE %.1f steps, MAPE %.1f %%" % (m["mae_steps"], m["mape_pct"]))
