@@ -124,3 +124,13 @@ def test_load_recordings_skips_gaps_and_sorts_out_demo_takes(tmp_path):
     assert [(r.name[14], r.demo) for r in recs] == [("1", False), ("2", True), ("3", True), ("4", False)]
     assert len(logged) == 1 and "5-steps" in logged[0]
     assert metrics([{"activity": "STAND", "true": 0, "pred": 0.4}])["pm_pct95"] is None
+
+
+def test_figures_are_written(tmp_path):
+    from steps_plots import figures
+    recs = synthetic_recordings()
+    model, losses, mean, std = fit(recs, epochs=3, seed=0)
+    res = [{"name": r.name, "activity": r.activity, "who": r.who, "true": r.steps, "pred": r.steps + 1.0} for r in recs]
+    figures(tmp_path, res, metrics(res), recs, model, mean, std, losses)
+    for n in ("steps_scatter.png", "steps_errors.png", "steps_rate.png", "steps_training.png"):
+        assert (tmp_path / n).stat().st_size > 1000
