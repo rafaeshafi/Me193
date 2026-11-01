@@ -1202,9 +1202,9 @@ def steps_take(n_steps, cadence_hz=1.8, rate=100, still_s=1.0, kind="WALK"):
 ```python
 import numpy as np                                                  # noqa: E402
 
-from synth import steps_take                                        # noqa: E402
-from steps import (EPOCHS, Recording, augment_pair, fit, gain, load_recordings, loro, metrics, normalisation,  # noqa: E402
-                   predict, rates, rotate, stretch, to_array)
+from synth import steps_take, synth                                 # noqa: E402
+from steps import (EPOCHS, Recording, augment_pair, fit, gain, load_recordings, load_zero_segments, loro, metrics,  # noqa: E402
+                   normalisation, predict, rates, rotate, stretch, to_array)
 
 
 def synthetic_recordings():
@@ -1226,7 +1226,7 @@ def test_augmentations_preserve_what_they_should():
     assert np.allclose(np.linalg.norm(r[:3], axis=0), np.linalg.norm(x[:3], axis=0), atol=1e-6)   # a rotation keeps |a|
     assert np.allclose(np.linalg.norm(r[3:], axis=0), np.linalg.norm(x[3:], axis=0), atol=1e-6)
     g = gain(x, rng)
-    assert g.shape == x.shape and 0.85 < (g[0].std() / x[0].std()) < 1.15
+    assert g.shape == x.shape and 0.49 < (g[0].std() / x[0].std()) < 1.51
     s = stretch(x, rng)
     assert 0.69 * x.shape[1] < s.shape[1] < 1.31 * x.shape[1]
     a, b = synthetic_recordings()[:2]
@@ -1285,6 +1285,24 @@ def test_load_recordings_skips_gaps_and_sorts_out_demo_takes(tmp_path):
     assert [(r.name[14], r.demo) for r in recs] == [("1", False), ("2", True), ("3", True), ("4", False)]
     assert len(logged) == 1 and "5-steps" in logged[0]
     assert metrics([{"activity": "STAND", "true": 0, "pred": 0.4}])["pm_pct95"] is None
+
+
+def test_load_zero_segments(tmp_path):
+    rows, t = ["t,label,ax,ay,az,gx,gy,gz"], 0.0
+    for label, secs, gap in [("STAND", 6, 0), ("WALK", 6, 0), ("BIKE", 6, 0), ("STAND", 2, 0), ("STAND", 6, 1.0)]:
+        t += gap                                                      # a 1 s break in t splits the two STAND runs
+        for smp in synth(label, secs):
+            t += 0.01
+            rows.append("%.3f,%s," % (t, label) + ",".join("%.4f" % v for v in smp))
+    (tmp_path / "20261026-135026-guided-Rafae.csv").write_text("\n".join(rows) + "\n")
+    (tmp_path / "20261101-120001-steps-walk-n6-Rafae.csv").write_text(rows[0] + "\n")   # not a guided session
+    recs = load_zero_segments(tmp_path)
+    assert [r.activity for r in recs] == ["STAND", "BIKE", "STAND"]  # WALK has no count, the 2 s STAND is too short
+    for r in recs:
+        assert r.steps == 0 and r.who == "guided" and not r.demo and r.x.shape == (6, 150)
+        assert r.name == "20261026-135026-guided-Rafae.csv:" + r.activity
+    draws = [gain(np.ones((6, 1), dtype=np.float32), np.random.default_rng(s))[0, 0] for s in range(50)]
+    assert min(draws) < 0.85 or max(draws) > 1.15                     # the gain range is wider than 0.9 to 1.1
 ```
 
 - [ ] **Step 3: Run them**
@@ -1304,8 +1322,10 @@ A take's true count is in its file name (recorder.parse_counted). Takes whose `w
 never trained on: they are the fresh takes the video shows and are reported separately. A take with a break in t over
 0.8 s (samples lost) is skipped. Decimation is the board's own (stepnet.decimate), normalisation is fit on the training
 fold only. Loss: smooth-L1 between the integrated rate and the typed count; augmentation keeps the count true (pairing
-two takes, frame rotation, gain, and on every pass a time-stretch by U(0.7, 1.3): the same count over a new duration,
-which is what makes the rate follow the cadence instead of the time spent moving).
+two takes, frame rotation, gain by U(0.5, 1.5) so amplitude is no shortcut, and on every pass a time-stretch by
+U(0.7, 1.3): the same count over a new duration, which is what makes the rate follow the cadence instead of the time
+spent moving). The STAND and BIKE runs of the older guided sessions (data/*-guided-*.csv) are added as exact 0-step
+takes: leg motion without footfalls.
 """
 import argparse
 import csv
@@ -1329,6 +1349,7 @@ from stepnet_torch import StepNetTorch  # noqa: E402
 DATA, MODELS, FIGS = ROOT / "data", ROOT / "models", ROOT / "docs" / "figures"
 EPOCHS, LR, LR_DROP_AT, SEEDS, BOOT = 400, 3e-3, 0.75, 5, 2000
 P_AUG, STRETCH = 0.5, (0.7, 1.3)   # pairing/rotation/gain each half the time; a time-stretch in STRETCH on every pass
+GAIN = (0.5, 1.5)  # wide, so signal amplitude stops being a usable shortcut for the count
 MAX_GAP_S = 0.8    # a break in t this long (FIFO overflow, re-probe; train.py's threshold) loses steps: skip the take
 
 
@@ -1386,6 +1407,30 @@ def load_recordings(data_dir=DATA, log=print):
     return recs
 
 
+def load_zero_segments(data_dir=DATA, labels=("STAND", "BIKE"), min_s=5.0, max_break_s=0.3):
+    """Each run of rows labelled STAND or BIKE in a guided session, lasting min_s or more, as a 0-step Recording.
+    A run is consecutive rows with the same label and no break in t over max_break_s. WALK/RUN runs have no count."""
+    recs = []
+    for p in sorted(Path(data_dir).glob("*-guided-*.csv")):
+        runs, last = [], None    # runs: [label, [t], [samples]]
+        with open(p) as f:
+            for r in csv.DictReader(f):
+                try:
+                    t, smp = float(r["t"]), tuple(float(r[k]) for k in ("ax", "ay", "az", "gx", "gy", "gz"))
+                except (TypeError, ValueError):
+                    continue   # a truncated last row (power pulled)
+                lab = r["label"]
+                if not runs or runs[-1][0] != lab or t - last > max_break_s:
+                    runs.append([lab, [], []])
+                runs[-1][1].append(t)
+                runs[-1][2].append(smp)
+                last = t
+        for lab, ts, rows in runs:
+            if lab in labels and ts[-1] - ts[0] >= min_s:
+                recs.append(Recording("%s:%s" % (p.name, lab), lab, 0, "guided", to_array(rows), False))
+    return recs
+
+
 # --- augmentation (count-preserving) -----------------------------------------------------------------------------
 def rotate(x, rng, max_deg=15.0):
     axis = rng.normal(size=3)
@@ -1397,7 +1442,7 @@ def rotate(x, rng, max_deg=15.0):
 
 
 def gain(x, rng):
-    return (x * rng.uniform(0.9, 1.1)).astype(np.float32)
+    return (x * rng.uniform(*GAIN)).astype(np.float32)
 
 
 def stretch(x, rng, lo=STRETCH[0], hi=STRETCH[1]):
@@ -1504,8 +1549,9 @@ def metrics(results, rng=None):
 
 
 # --- the report ---------------------------------------------------------------------------------------------------
-def write_results(path, m, results, demo, seed_std, losses, n_train):
-    lines = ["# Step counter results", "", "Generated by `train/steps.py --report` on %s from %d counted takes." % (time.strftime("%Y-%m-%d %H:%M"), n_train), "",
+def write_results(path, m, results, demo, seed_std, losses, n_train, n_zero):
+    lines = ["# Step counter results", "", "Generated by `train/steps.py --report` on %s from %d counted takes and %d zero segments from guided sessions."
+             % (time.strftime("%Y-%m-%d %H:%M"), n_train, n_zero), "",
              "## Leave-one-recording-out", "", "| metric | value |", "|---|---|",
              "| takes | %d |" % m["n"], "| mean absolute error | %.2f steps |" % m["mae_steps"], "| mean absolute percentage error | %.1f %% |" % m["mape_pct"],
              "| bias (predicted − true) | %+.2f steps |" % m["bias_steps"], "| 95 %% bootstrap interval of the mean %% error | %+.1f %% to %+.1f %% |" % tuple(m["ci95_pct"]),
@@ -1529,14 +1575,16 @@ def main(argv=None):
     ap.add_argument("--data", default=str(DATA))
     a = ap.parse_args(argv)
     recs = load_recordings(a.data)
-    train, demo = [r for r in recs if not r.demo], [r for r in recs if r.demo]
-    print("%d counted takes (%d training, %d demo)" % (len(recs), len(train), len(demo)))
-    if len(train) < 3:
+    zeros = load_zero_segments(a.data)
+    counted, demo = [r for r in recs if not r.demo], [r for r in recs if r.demo]
+    train = counted + zeros   # the counted takes are the real supervision; the zero segments only say "not a step"
+    print("%d counted takes (%d training, %d demo) + %d zero segments from guided sessions" % (len(recs), len(counted), len(demo), len(zeros)))
+    if len(counted) < 3:
         sys.exit("need at least 3 counted takes in %s (names like ...-steps-walk-n42-Rafae.csv)" % a.data)
     meta = {"trained": time.strftime("%Y-%m-%dT%H:%M:%S"), "recordings": len(train), "epochs": a.epochs, "loro": None, "seed_std_steps": None}
     results = None
     if a.report:
-        if len(train) < 4:
+        if len(counted) < 4:
             sys.exit("--report needs at least 4 training takes")
         results = loro(train, epochs=a.epochs, seed=a.seed, log=print)
         m = metrics(results)
@@ -1556,7 +1604,7 @@ def main(argv=None):
     model.export(MODELS / "stepnet.json", mean, std, meta)
     print("wrote", MODELS / "stepnet.json")
     if a.report:   # the results first, so a figure error cannot lose them
-        write_results(ROOT / "docs" / "steps_results.md", m, results, demo_res, meta["seed_std_steps"], losses, len(train))
+        write_results(ROOT / "docs" / "steps_results.md", m, results, demo_res, meta["seed_std_steps"], losses, len(counted), len(zeros))
         print("wrote docs/steps_results.md")
         from steps_plots import figures
         figures(FIGS, results, m, train, model, mean, std, losses)
@@ -1572,7 +1620,7 @@ if __name__ == "__main__":
 - [ ] **Step 5: Run the tests**
 
 Run: `.venv/bin/python -m pytest tests/test_steps_train.py -q -x`
-Expected: `6 passed` in about 5 s (one shared 400-epoch fit). The cadence probe is the test that matters: without
+Expected: `7 passed` in about 5 s (one shared 400-epoch fit). The cadence probe is the test that matters: without
 the always-on wide time-stretch the net learns "time spent moving × ~1.85 steps/s" (44-step walks at 1.6/1.8/2.1/2.3 Hz
 read 52.5/46.6/39.8/36.2), and it needs the full EPOCHS (a 60- or 150-epoch fit is still a duration counter).
 
@@ -1751,7 +1799,8 @@ git commit -m "P6-Gait-Wearable: step-counter figures (LORO scatter with ± band
 - [ ] **Step 1: Full report run** (takes a few minutes: ~25 LORO fits + 5 seeds + the final fit)
 
 Run: `cd ~/ME193/P6-Gait-Wearable && .venv/bin/python train/steps.py --report 2>&1 | tee /tmp/steps-report.log | tail -40`
-Expected: LORO lines, a metrics JSON, `wrote models/stepnet.json`, `wrote docs/steps_results.md ...`.
+Expected: LORO lines, a metrics JSON, `wrote models/stepnet.json`, `wrote docs/steps_results.md ...`. The STAND/BIKE
+zero segments of the guided sessions (`data/*-guided-*.csv`) are included automatically, in the fit and in LORO.
 
 - [ ] **Step 2: Judge it.** Open `docs/steps_results.md`. Good: MAPE under ~8 %, 0-step takes under 2 steps, no activity with a large bias. If WALK is fine but 0-step takes count steps, or MAPE is above 15 %: try `--epochs 600`; if still poor, report the table to the user and stop (the spec names the fallback: an auxiliary gyro-peak target; that is a design change, not a plan step).
 

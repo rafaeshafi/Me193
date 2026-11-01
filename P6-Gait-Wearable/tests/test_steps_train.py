@@ -41,9 +41,9 @@ def test_export_matches_the_pure_python_forward(tmp_path):
 
 import numpy as np                                                  # noqa: E402
 
-from synth import steps_take                                        # noqa: E402
-from steps import (EPOCHS, Recording, augment_pair, fit, gain, load_recordings, loro, metrics, normalisation,  # noqa: E402
-                   predict, rates, rotate, stretch, to_array)
+from synth import steps_take, synth                                 # noqa: E402
+from steps import (EPOCHS, Recording, augment_pair, fit, gain, load_recordings, load_zero_segments, loro, metrics,  # noqa: E402
+                   normalisation, predict, rates, rotate, stretch, to_array)
 
 
 def synthetic_recordings():
@@ -65,7 +65,7 @@ def test_augmentations_preserve_what_they_should():
     assert np.allclose(np.linalg.norm(r[:3], axis=0), np.linalg.norm(x[:3], axis=0), atol=1e-6)   # a rotation keeps |a|
     assert np.allclose(np.linalg.norm(r[3:], axis=0), np.linalg.norm(x[3:], axis=0), atol=1e-6)
     g = gain(x, rng)
-    assert g.shape == x.shape and 0.85 < (g[0].std() / x[0].std()) < 1.15
+    assert g.shape == x.shape and 0.49 < (g[0].std() / x[0].std()) < 1.51
     s = stretch(x, rng)
     assert 0.69 * x.shape[1] < s.shape[1] < 1.31 * x.shape[1]
     a, b = synthetic_recordings()[:2]
@@ -124,6 +124,24 @@ def test_load_recordings_skips_gaps_and_sorts_out_demo_takes(tmp_path):
     assert [(r.name[14], r.demo) for r in recs] == [("1", False), ("2", True), ("3", True), ("4", False)]
     assert len(logged) == 1 and "5-steps" in logged[0]
     assert metrics([{"activity": "STAND", "true": 0, "pred": 0.4}])["pm_pct95"] is None
+
+
+def test_load_zero_segments(tmp_path):
+    rows, t = ["t,label,ax,ay,az,gx,gy,gz"], 0.0
+    for label, secs, gap in [("STAND", 6, 0), ("WALK", 6, 0), ("BIKE", 6, 0), ("STAND", 2, 0), ("STAND", 6, 1.0)]:
+        t += gap                                                      # a 1 s break in t splits the two STAND runs
+        for smp in synth(label, secs):
+            t += 0.01
+            rows.append("%.3f,%s," % (t, label) + ",".join("%.4f" % v for v in smp))
+    (tmp_path / "20261026-135026-guided-Rafae.csv").write_text("\n".join(rows) + "\n")
+    (tmp_path / "20261101-120001-steps-walk-n6-Rafae.csv").write_text(rows[0] + "\n")   # not a guided session
+    recs = load_zero_segments(tmp_path)
+    assert [r.activity for r in recs] == ["STAND", "BIKE", "STAND"]  # WALK has no count, the 2 s STAND is too short
+    for r in recs:
+        assert r.steps == 0 and r.who == "guided" and not r.demo and r.x.shape == (6, 150)
+        assert r.name == "20261026-135026-guided-Rafae.csv:" + r.activity
+    draws = [gain(np.ones((6, 1), dtype=np.float32), np.random.default_rng(s))[0, 0] for s in range(50)]
+    assert min(draws) < 0.85 or max(draws) > 1.15                     # the gain range is wider than 0.9 to 1.1
 
 
 def test_figures_are_written(tmp_path):

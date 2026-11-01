@@ -149,6 +149,12 @@ Page, Steps tab (third tab in the bar; `showTab("steps")`):
 re-probe, samples lost, so the typed count no longer matches) is skipped with a printed warning. Rows are decimated with `stepnet.decimate`, normalised with mean/std computed over the training
 fold only. Each item: `x` of shape `(6, T)`, target `N`, activity, who.
 
+**Zero segments.** Each run of STAND or BIKE rows lasting 5 s or more in the older guided session files
+(`data/*-guided-*.csv`, a label per row; a run ends at a label change or a break in `t` over 0.3 s) is added as an exact
+zero-step recording (`load_zero_segments`, name `file:LABEL`, who `guided`), in training and in LORO like a counted take;
+WALK/RUN runs have no count and are not used. They teach that leg motion without footfalls is not a step. Measured on 6
+counted takes, together with the wider gain: held-out walk MAE 4.06 → 2.33 steps (mean of 3 seeds).
+
 **Model.** `StepNetTorch(channels=12, kernel=5, dilations=(1, 2, 4))` with the same layers as §3, left padding via
 `F.pad`, `Softplus` head; `forward(x: (B, 6, T)) -> rate (B, 1, T)`; `count = rate.sum(-1) * dt`.
 `export(path, mean, std, meta)` writes the JSON of §3. A test loads the export into `stepnet.StepNet` and checks the
@@ -163,7 +169,8 @@ that order, then the time-stretch on every item):
 - *pairing*: concatenate with another random recording, targets add;
 - *frame rotation*: one random rotation of up to 15° about a random axis applied to both the accel and the gyro
   vectors (the strap sits differently each day);
-- *gain*: multiply all channels by `U(0.9, 1.1)`;
+- *gain*: multiply all channels by `U(0.5, 1.5)` (wide, so signal amplitude stops being a usable shortcut for the
+  count);
 - *time-stretch*, always: linear resampling by a factor `U(0.7, 1.3)` at 25 Hz. The same count over a new duration
   is the signal that makes the rate follow the cadence; without it (or at probability 0.5 with `U(0.85, 1.15)`) the
   net learns "time spent moving × ~1.85 steps/s" and a 44-step walk at 1.6 / 2.3 Hz reads 52 / 36.
