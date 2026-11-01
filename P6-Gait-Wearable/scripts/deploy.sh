@@ -15,7 +15,7 @@ STAGE="$(mktemp -d -t gait-stage)"
 TGZ="$(mktemp -t gait-app).tgz"
 trap 'rm -rf "$STAGE" "$TGZ"' EXIT
 cp -R app/. "$STAGE"/
-mkdir -p "$STAGE/models" && cp models/model1.json models/model2.json "$STAGE/models/"
+mkdir -p "$STAGE/models" && cp models/model1.json models/model2.json models/stepnet.json "$STAGE/models/"
 COPYFILE_DISABLE=1 tar -C "$STAGE" --exclude .cache --exclude __pycache__ -czf "$TGZ" .
 # adb shell does not carry stdin reliably: push the tarball, then unpack it.
 "$ADB" push "$TGZ" /tmp/gait-app.tgz
