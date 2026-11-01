@@ -1,4 +1,6 @@
 """Hand-set seed trees for the tests (the files in models/ are the trained ones and change with every session)."""
+import random
+
 SEED1 = {
     "features": ["peak_x"],
     "classes": ["RUN", "STAND", "WALK"],
@@ -12,9 +14,6 @@ SEED2 = {
              "r": {"f": "tilt", "t": 0.6, "l": {"label": "BIKE"},
                    "r": {"f": "mag_peak", "t": 2.2, "l": {"label": "WALK"}, "r": {"label": "RUN"}}}},
 }
-
-
-import random
 
 
 def seed_stepnet(seed=0, channels=12, kernel=5, dilations=(1, 2, 4), pm_pct95=100.0):

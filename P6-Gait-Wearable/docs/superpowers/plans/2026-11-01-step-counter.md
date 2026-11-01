@@ -49,12 +49,9 @@
 
 - [ ] **Step 1: Add the seed weight generator to `tests/seed_models.py`**
 
-Append to the end of `tests/seed_models.py`:
+Add `import random` at the top of `tests/seed_models.py` (after the docstring) and append to the end:
 
 ```python
-import random
-
-
 def seed_stepnet(seed=0, channels=12, kernel=5, dilations=(1, 2, 4), pm_pct95=100.0):
     """A StepNet spec with small deterministic random weights: the right shape, no skill (tests and the first deploy)."""
     rng = random.Random(seed)
@@ -116,13 +113,12 @@ def test_forward_is_nonnegative_and_streaming_equals_offline():
     rng = random.Random(3)
     ctr = StepCounter(net)
     raw = [s for s in x for _ in range(DECIMATE)]      # decimating this gives back exactly x
-    i = 0
+    i, got = 0, []
     while i < len(raw):
         n = rng.randint(1, 37)                         # batches of random size, like the real stream
         ctr.on_samples(raw[i:i + n])
-        ctr.process()
+        got += ctr.process()
         i += n
-    got = list(ctr.wave_all)
     assert len(got) == len(offline)
     assert all(abs(a - b) < 1e-9 for a, b in zip(got, offline))
     assert ctr.count == pytest.approx(sum(offline) * DT)
@@ -134,8 +130,16 @@ def test_reset_keeps_or_clears_the_right_things():
     ctr.process()
     assert ctr.count > 0 and len(ctr._ctx) == 28
     c = ctr.count
+    ctr.on_samples(rnd_samples(10, seed=7))   # pending at the restart: still the old stream, so it is processed first
     ctr.reset_context()                 # sensor stream restarted: forget the past, keep the count
-    assert ctr.count == c and ctr._ctx == [] and ctr._rem == []
+    assert ctr.count > c and ctr._ctx == [] and ctr._rem == [] and ctr._pending == []
+    c = ctr.count
+    fresh = rnd_samples(40, seed=9)
+    ctr.on_samples(fresh)
+    new = ctr.process()
+    want = ctr.net.forward(decimate(fresh)[0])
+    assert len(new) == len(want) and all(abs(a - b) < 1e-9 for a, b in zip(new, want))
+    assert ctr.count == pytest.approx(c + sum(want) * DT)
     ctr.reset()                         # the wearer tapped Reset
     assert ctr.count == 0.0 and ctr.rate == 0.0 and ctr.snapshot()["wave"] == []
 
@@ -143,21 +147,37 @@ def test_reset_keeps_or_clears_the_right_things():
 def test_snapshot_has_the_live_fields_and_the_half_width():
     ctr = StepCounter(StepNet(seed_stepnet(pm_pct95=10.0)))
     s = ctr.snapshot()
-    assert s == {"count": 0, "exact": 0.0, "rate": 0.0, "spm": 0, "pm": 0, "pm_pct": 10.0, "wave": []}
+    assert s == {"count": 0, "exact": 0.0, "rate": 0.0, "spm": 0, "pm": 0, "pm_pct": 10.0, "trained": False, "wave": []}
     ctr.count = 38.4
     s = ctr.snapshot()
     assert s["count"] == 38 and s["pm"] == 4          # ceil(38 * 10 / 100)
     ctr.count = 1.2
     assert ctr.snapshot()["pm"] == 1                  # never less than 1 once counting
+    ctr.on_samples(rnd_samples(400))
+    ctr.process()
+    assert ctr.snapshot()["spm"] == round(60 * sum(list(ctr.wave)[-25:]) / 25)
 
 
-def test_load_validates(tmp_path):
+def _bad(mut):
+    spec = seed_stepnet()
+    mut(spec)
+    return spec
+
+
+@pytest.mark.parametrize("mut", [
+    lambda s: s["layers"][1].update(w=s["layers"][1]["w"][:-1]),   # wrong number of input channels
+    lambda s: s["std"].__setitem__(0, 0.0),
+    lambda s: s["std"].__setitem__(0, "nan"),
+    lambda s: s["layers"][0].update(w=[[[] for _ in oc] for oc in s["layers"][0]["w"]]),   # kernel []
+    lambda s: s.update(decimate=2),
+    lambda s: s["layers"][-1].update(act="relu"),
+    lambda s: s.pop("layers"),
+], ids=["channels", "std0", "stdnan", "kernel0", "decimate2", "headrelu", "nolayers"])
+def test_load_validates(tmp_path, mut):
     p = tmp_path / "s.json"
     p.write_text(json.dumps(seed_stepnet()))
     assert StepNet.load(p).pm_pct95 == 100.0
-    bad = seed_stepnet()
-    bad["layers"][1]["w"] = bad["layers"][1]["w"][:-1]   # wrong number of input channels
-    p.write_text(json.dumps(bad))
+    p.write_text(json.dumps(_bad(mut)))
     with pytest.raises(ValueError):
         StepNet.load(p)
 ```
@@ -237,13 +257,16 @@ class StepNet:
     def __init__(self, spec):
         try:
             self.mean, self.std = [float(v) for v in spec["mean"]], [float(v) for v in spec["std"]]
-            self.layers = [(l["w"], l["b"], int(l["dilation"]), l["act"]) for l in spec["layers"]]
+            self.layers = [([[[float(v) for v in wc] for wc in wo] for wo in l["w"]], [float(v) for v in l["b"]],
+                            int(l["dilation"]), l["act"]) for l in spec["layers"]]
             self.meta = spec.get("meta", {}) or {}
-        except (KeyError, TypeError, ValueError) as e:
+            dec, dt = int(spec.get("decimate", DECIMATE)), float(spec.get("dt", DT))
+            self.pm_pct95 = float((self.meta.get("loro") or {}).get("pm_pct95", 100.0))
+        except (KeyError, TypeError, ValueError, AttributeError) as e:
             raise ValueError("bad StepNet spec: %s" % e)
-        if len(self.mean) != CHANNELS or len(self.std) != CHANNELS or any(s <= 0 for s in self.std):
-            raise ValueError("mean/std must have %d entries and std > 0" % CHANNELS)
-        if int(spec.get("decimate", DECIMATE)) != DECIMATE or abs(float(spec.get("dt", DT)) - DT) > 1e-9:
+        if len(self.mean) != CHANNELS or len(self.std) != CHANNELS or any(not (s > 0) or not math.isfinite(s) for s in self.std):
+            raise ValueError("mean/std must have %d entries and finite std > 0" % CHANNELS)
+        if dec != DECIMATE or abs(dt - DT) > 1e-9:
             raise ValueError("spec decimation does not match the board (%d, %.3f)" % (DECIMATE, DT))
         cin = CHANNELS
         self.pad = 0
@@ -251,13 +274,12 @@ class StepNet:
             if act not in ACTS or d < 1 or not w or any(len(wo) != cin for wo in w) or len(b) != len(w):
                 raise ValueError("layer shapes do not chain (%d in)" % cin)
             K = len(w[0][0])
-            if any(len(wc) != K for wo in w for wc in wo):
-                raise ValueError("ragged kernel")
+            if K < 1 or any(len(wc) != K for wo in w for wc in wo):
+                raise ValueError("empty or ragged kernel")
             self.pad += (K - 1) * d
             cin = len(w)
         if cin != 1 or self.layers[-1][3] != "softplus":
             raise ValueError("the head must be one softplus channel")
-        self.pm_pct95 = float((self.meta.get("loro") or {}).get("pm_pct95", 100.0))
 
     @classmethod
     def load(cls, path):
@@ -265,7 +287,8 @@ class StepNet:
             return cls(json.load(f))
 
     def forward(self, x):
-        """x: [T] decimated raw 6-tuples -> [T] step rates (steps/s); the history before x[0] is taken as silence."""
+        """x: [T] decimated raw 6-tuples -> [T] step rates (steps/s); the zero padding comes after standardising, so the
+        history before x[0] is taken as the mean posture, not as zero signal."""
         if not x:
             return []
         h = [[(s[c] - self.mean[c]) / self.std[c] for s in x] for c in range(CHANNELS)]
@@ -283,7 +306,6 @@ class StepCounter:
         self._pending, self._rem, self._ctx = [], [], []
         self.count, self.rate = 0.0, 0.0
         self.wave = deque(maxlen=int(WAVE_S * RATE_HZ))
-        self.wave_all = []  # every rate ever produced (tests compare it with the offline pass); bounded by reset()
 
     def on_samples(self, samples):
         self._pending.extend(samples)
@@ -296,29 +318,32 @@ class StepCounter:
         self._pending = []
         if not dec:
             return []
-        rates = self.net.forward(self._ctx + dec)[len(self._ctx):]
-        self._ctx = (self._ctx + dec)[-self.net.pad:] if self.net.pad else []
+        seq = self._ctx + dec
+        rates = self.net.forward(seq)[len(self._ctx):]
+        self._ctx = seq[-self.net.pad:] if self.net.pad else []
         self.count += sum(rates) * DT
         self.rate = rates[-1]
         self.wave.extend(rates)
-        if len(self.wave_all) < 100000:
-            self.wave_all.extend(rates)
         return rates
 
     def reset_context(self):
-        """The sensor stream restarted: the next samples are not contiguous with the past. The count stays."""
-        self._pending, self._rem, self._ctx = [], [], []
+        """The sensor stream restarted: the next samples are not contiguous with the past. Pending samples still belong
+        to the old stream, so they are processed first; then the leftover and the context are dropped. The count stays."""
+        self.process()
+        self._rem, self._ctx = [], []
 
     def reset(self):
         self.count, self.rate = 0.0, 0.0
         self.wave.clear()
-        self.wave_all = []
 
     def snapshot(self):
         n = int(self.count)
         pm = max(1, int(math.ceil(n * self.pm_pct95 / 100.0))) if n >= 1 else 0
-        return {"count": n, "exact": round(self.count, 2), "rate": round(self.rate, 3), "spm": int(round(self.rate * 60)),
-                "pm": pm, "pm_pct": self.pm_pct95, "wave": [round(r, 3) for r in self.wave]}
+        last = list(self.wave)[-RATE_HZ:]  # the newest second, so the steps-per-minute figure is steady
+        spm = int(round(60 * sum(last) / len(last))) if last else 0
+        return {"count": n, "exact": round(self.count, 2), "rate": round(self.rate, 3), "spm": spm,
+                "pm": pm, "pm_pct": self.pm_pct95, "trained": bool(self.net.meta.get("trained")),
+                "wave": [round(r, 3) for r in self.wave]}
 
     @property
     def pm_pct95(self):

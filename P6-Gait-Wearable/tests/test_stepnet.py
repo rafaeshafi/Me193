@@ -42,13 +42,12 @@ def test_forward_is_nonnegative_and_streaming_equals_offline():
     rng = random.Random(3)
     ctr = StepCounter(net)
     raw = [s for s in x for _ in range(DECIMATE)]      # decimating this gives back exactly x
-    i = 0
+    i, got = 0, []
     while i < len(raw):
         n = rng.randint(1, 37)                         # batches of random size, like the real stream
         ctr.on_samples(raw[i:i + n])
-        ctr.process()
+        got += ctr.process()
         i += n
-    got = list(ctr.wave_all)
     assert len(got) == len(offline)
     assert all(abs(a - b) < 1e-9 for a, b in zip(got, offline))
     assert ctr.count == pytest.approx(sum(offline) * DT)
@@ -60,8 +59,16 @@ def test_reset_keeps_or_clears_the_right_things():
     ctr.process()
     assert ctr.count > 0 and len(ctr._ctx) == 28
     c = ctr.count
+    ctr.on_samples(rnd_samples(10, seed=7))   # pending at the restart: still the old stream, so it is processed first
     ctr.reset_context()                 # sensor stream restarted: forget the past, keep the count
-    assert ctr.count == c and ctr._ctx == [] and ctr._rem == []
+    assert ctr.count > c and ctr._ctx == [] and ctr._rem == [] and ctr._pending == []
+    c = ctr.count
+    fresh = rnd_samples(40, seed=9)
+    ctr.on_samples(fresh)
+    new = ctr.process()
+    want = ctr.net.forward(decimate(fresh)[0])
+    assert len(new) == len(want) and all(abs(a - b) < 1e-9 for a, b in zip(new, want))
+    assert ctr.count == pytest.approx(c + sum(want) * DT)
     ctr.reset()                         # the wearer tapped Reset
     assert ctr.count == 0.0 and ctr.rate == 0.0 and ctr.snapshot()["wave"] == []
 
@@ -69,20 +76,36 @@ def test_reset_keeps_or_clears_the_right_things():
 def test_snapshot_has_the_live_fields_and_the_half_width():
     ctr = StepCounter(StepNet(seed_stepnet(pm_pct95=10.0)))
     s = ctr.snapshot()
-    assert s == {"count": 0, "exact": 0.0, "rate": 0.0, "spm": 0, "pm": 0, "pm_pct": 10.0, "wave": []}
+    assert s == {"count": 0, "exact": 0.0, "rate": 0.0, "spm": 0, "pm": 0, "pm_pct": 10.0, "trained": False, "wave": []}
     ctr.count = 38.4
     s = ctr.snapshot()
     assert s["count"] == 38 and s["pm"] == 4          # ceil(38 * 10 / 100)
     ctr.count = 1.2
     assert ctr.snapshot()["pm"] == 1                  # never less than 1 once counting
+    ctr.on_samples(rnd_samples(400))
+    ctr.process()
+    assert ctr.snapshot()["spm"] == round(60 * sum(list(ctr.wave)[-25:]) / 25)
 
 
-def test_load_validates(tmp_path):
+def _bad(mut):
+    spec = seed_stepnet()
+    mut(spec)
+    return spec
+
+
+@pytest.mark.parametrize("mut", [
+    lambda s: s["layers"][1].update(w=s["layers"][1]["w"][:-1]),   # wrong number of input channels
+    lambda s: s["std"].__setitem__(0, 0.0),
+    lambda s: s["std"].__setitem__(0, "nan"),
+    lambda s: s["layers"][0].update(w=[[[] for _ in oc] for oc in s["layers"][0]["w"]]),   # kernel []
+    lambda s: s.update(decimate=2),
+    lambda s: s["layers"][-1].update(act="relu"),
+    lambda s: s.pop("layers"),
+], ids=["channels", "std0", "stdnan", "kernel0", "decimate2", "headrelu", "nolayers"])
+def test_load_validates(tmp_path, mut):
     p = tmp_path / "s.json"
     p.write_text(json.dumps(seed_stepnet()))
     assert StepNet.load(p).pm_pct95 == 100.0
-    bad = seed_stepnet()
-    bad["layers"][1]["w"] = bad["layers"][1]["w"][:-1]   # wrong number of input channels
-    p.write_text(json.dumps(bad))
+    p.write_text(json.dumps(_bad(mut)))
     with pytest.raises(ValueError):
         StepNet.load(p)
