@@ -1548,7 +1548,7 @@ def main(argv=None):
             old = json.loads((MODELS / "stepnet.json").read_text())["meta"]
             meta["loro"] = old.get("loro")
             if meta["loro"]:
-                meta["loro_from"] = old.get("trained")
+                meta["loro_from"] = old.get("loro_from") or old.get("trained")
         except (OSError, ValueError, KeyError, TypeError):
             pass
     model, losses, mean, std = fit(train, epochs=a.epochs, seed=a.seed, log=print)
