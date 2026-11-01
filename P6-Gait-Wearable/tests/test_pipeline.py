@@ -166,3 +166,46 @@ def test_race_distance_does_not_grow_while_standing(tmp_path):
     feed(g, clk, "STAND", 6.0)
     snap = g.snapshot()
     assert snap["race"]["phase"] == "running" and snap["race"]["dist"] == 0.0 and snap["speed_kmh"] == 0.0
+
+
+from seed_models import seed_stepnet
+from stepnet import StepNet
+
+
+def make_steps(tmp_path, clk):
+    return Gait(Tree(SEED1), Tree(SEED2), Recorder(tmp_path, clock=clk, rolling=False), clock=clk,
+                stepnet=StepNet(seed_stepnet()))
+
+
+def test_steps_advance_on_walking_and_reset(tmp_path):
+    clk = Clock()
+    g = make_steps(tmp_path, clk)
+    assert g.snapshot()["steps"]["count"] == 0
+    feed(g, clk, "WALK", 4.0)
+    clk.t += 0.5
+    g.tick()                                       # one more hop flushes the samples that arrived since the last one
+    s = g.snapshot()["steps"]
+    assert s["exact"] > 0 and len(s["wave"]) == 100 and s["pm_pct"] == 100.0
+    if s["count"]:
+        assert s["pm"] >= 1
+    g.steps.reset()
+    assert g.snapshot()["steps"]["count"] == 0 and g.snapshot()["steps"]["wave"] == []
+
+
+def test_fifo_reset_clears_the_step_context_but_keeps_the_count(tmp_path):
+    clk = Clock()
+    g = make_steps(tmp_path, clk)
+    feed(g, clk, "WALK", 2.0)
+    g.steps.process()                              # flush what arrived since the last hop; the reset must not change the count
+    before = g.steps.count
+    clk.t += 0.1
+    g.on_batch(to_batch(99, synth("WALK", 0.1), resets=1))
+    assert g.steps._ctx == [] and len(g.steps._pending) == 10   # context gone, the new batch waits for the next hop
+    assert g.steps.count == before
+
+
+def test_without_a_step_model_the_snapshot_says_none(tmp_path):
+    clk = Clock()
+    g = make(tmp_path, clk)
+    feed(g, clk, "WALK", 1.0)
+    assert g.snapshot()["steps"] is None

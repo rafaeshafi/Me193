@@ -8,6 +8,7 @@ from arduino.app_utils import App, Bridge
 from models import Tree
 from pipeline import Gait
 from recorder import Recorder
+from stepnet import StepNet
 from web import serve
 
 ROOT = Path(__file__).resolve().parent.parent  # /app on the board = ~/ArduinoApps/gait-wearable on its Linux host
@@ -17,7 +18,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
                     handlers=[logging.StreamHandler(), logging.FileHandler(DATA / "app.log")])
 log = logging.getLogger("gait")
 
-gait = Gait(Tree.load(MODELS / "model1.json"), Tree.load(MODELS / "model2.json"), Recorder(DATA))
+
+def load_stepnet(path):
+    try:
+        return StepNet.load(path)
+    except (OSError, ValueError) as e:
+        log.warning("no step model: %s", e)
+        return None
+
+
+gait = Gait(Tree.load(MODELS / "model1.json"), Tree.load(MODELS / "model2.json"), Recorder(DATA),
+            stepnet=load_stepnet(MODELS / "stepnet.json"))
 Bridge.provide("imu", gait.on_batch)
 serve(gait, port=8080)
 log.info("models loaded (depth %d and %d), web on 8080, data in %s", gait.m1.depth(), gait.m2.depth(), DATA)
@@ -32,8 +43,9 @@ def loop():
     if now - _last_log > 10:
         _last_log = now
         s = gait.state
-        log.info("act=%s m1=%s cad=%s pk=%s dropped=%d imu=%s", s["act"], s["m1"], s["cad"],
-                 None if s["pk"] is None else round(s["pk"], 2), s["dropped"], s["imu"])
+        log.info("act=%s m1=%s cad=%s pk=%s dropped=%d imu=%s steps=%s", s["act"], s["m1"], s["cad"],
+                 None if s["pk"] is None else round(s["pk"], 2), s["dropped"], s["imu"],
+                 gait.steps.snapshot()["count"] if gait.steps else None)
     time.sleep(0.05)
 
 
