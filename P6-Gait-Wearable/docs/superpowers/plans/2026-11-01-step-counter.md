@@ -1200,11 +1200,13 @@ def steps_take(n_steps, cadence_hz=1.8, rate=100, still_s=1.0, kind="WALK"):
 - [ ] **Step 2: Append the failing tests to `tests/test_steps_train.py`**
 
 ```python
+import re                                                           # noqa: E402
+
 import numpy as np                                                  # noqa: E402
 
 from synth import steps_take, synth                                 # noqa: E402
-from steps import (EPOCHS, Recording, augment_pair, fit, gain, load_recordings, load_zero_segments, loro, metrics,  # noqa: E402
-                   normalisation, predict, rates, rotate, stretch, to_array)
+from steps import (EPOCHS, Recording, augment_pair, fit, gain, load_recordings, load_rows, load_zero_segments, loro,  # noqa: E402
+                   metrics, normalisation, predict, rates, rotate, seed_spread, stretch, to_array)
 
 
 def synthetic_recordings():
@@ -1227,6 +1229,8 @@ def test_augmentations_preserve_what_they_should():
     assert np.allclose(np.linalg.norm(r[3:], axis=0), np.linalg.norm(x[3:], axis=0), atol=1e-6)
     g = gain(x, rng)
     assert g.shape == x.shape and 0.49 < (g[0].std() / x[0].std()) < 1.51
+    draws = [gain(np.ones((6, 1), dtype=np.float32), np.random.default_rng(s))[0, 0] for s in range(50)]
+    assert 0.5 <= min(draws) < 0.6 and 1.4 < max(draws) <= 1.5        # the whole GAIN range is used
     s = stretch(x, rng)
     assert 0.69 * x.shape[1] < s.shape[1] < 1.31 * x.shape[1]
     a, b = synthetic_recordings()[:2]
@@ -1250,8 +1254,9 @@ def test_fit_learns_synthetic_counts_and_loro_runs(fitted):
     assert losses[-1] < losses[0]
     worst = max(abs(predict(model, mean, std, r.x) - r.steps) for r in recs)
     assert worst < 6, worst                                           # a tiny net, synthetic data
-    res = loro(recs[:4], epochs=15, seed=0)
+    res = loro(recs[:4], recs[5:7], epochs=15, seed=0)              # the extra (0-step) takes train every fold, never held out
     assert len(res) == 4 and {r["name"] for r in res} == {r.name for r in recs[:4]}
+    assert seed_spread(recs[:2], recs[5:6], n=2, epochs=2) >= 0.0
     m = metrics(res)
     assert set(m) >= {"n", "mae_steps", "mape_pct", "bias_steps", "ci95_pct", "pm_pct95", "by_activity"}
 
@@ -1289,20 +1294,24 @@ def test_load_recordings_skips_gaps_and_sorts_out_demo_takes(tmp_path):
 
 def test_load_zero_segments(tmp_path):
     rows, t = ["t,label,ax,ay,az,gx,gy,gz"], 0.0
-    for label, secs, gap in [("STAND", 6, 0), ("WALK", 6, 0), ("BIKE", 6, 0), ("STAND", 2, 0), ("STAND", 6, 1.0)]:
-        t += gap                                                      # a 1 s break in t splits the two STAND runs
+    runs = [("STAND", 6, 0), ("WALK", 6, 0), ("BIKE", 6, 0), ("STAND", 2, 0), ("STAND", 6, 1.0),   # 1 s break: two runs
+            ("WALK", 1, 0), ("STAND", 5.0, 0), ("WALK", 1, 0), ("STAND", 4.99, 0)]               # 500 rows kept, 499 not
+    for label, secs, gap in runs:
+        t += gap
         for smp in synth(label, secs):
             t += 0.01
             rows.append("%.3f,%s," % (t, label) + ",".join("%.4f" % v for v in smp))
     (tmp_path / "20261026-135026-guided-Rafae.csv").write_text("\n".join(rows) + "\n")
     (tmp_path / "20261101-120001-steps-walk-n6-Rafae.csv").write_text(rows[0] + "\n")   # not a guided session
     recs = load_zero_segments(tmp_path)
-    assert [r.activity for r in recs] == ["STAND", "BIKE", "STAND"]  # WALK has no count, the 2 s STAND is too short
+    assert [r.activity for r in recs] == ["STAND", "BIKE", "STAND", "STAND"]   # no WALK (no count), no run under 5 s
+    assert [r.x.shape for r in recs] == [(6, 150), (6, 150), (6, 150), (6, 125)]
+    assert len({r.name for r in recs}) == 4                                   # one name per segment
     for r in recs:
-        assert r.steps == 0 and r.who == "guided" and not r.demo and r.x.shape == (6, 150)
-        assert r.name == "20261026-135026-guided-Rafae.csv:" + r.activity
-    draws = [gain(np.ones((6, 1), dtype=np.float32), np.random.default_rng(s))[0, 0] for s in range(50)]
-    assert min(draws) < 0.85 or max(draws) > 1.15                     # the gain range is wider than 0.9 to 1.1
+        assert r.steps == 0 and r.who == "guided" and not r.demo
+        assert re.fullmatch(r"20261026-135026-guided-Rafae\.csv:%s@\d+s" % r.activity, r.name), r.name
+    (tmp_path / "nolabel.csv").write_text("t,ax,ay,az,gx,gy,gz\n0.01,1,0,0,0,0,0\n0.02,1,0,0,0,0,x\n")
+    assert load_rows(tmp_path / "nolabel.csv") == ([0.01], [(1.0, 0.0, 0.0, 0.0, 0.0, 0.0)], [""])   # no label column
 ```
 
 - [ ] **Step 3: Run them**
@@ -1364,8 +1373,8 @@ class Recording:
 
 
 def load_rows(path):
-    """-> (t list, [(ax, ay, az, gx, gy, gz), ...]) in file order."""
-    ts, out = [], []
+    """-> (t list, [(ax, ay, az, gx, gy, gz), ...], label list) in file order; label "" when there is no label column."""
+    ts, out, labels = [], [], []
     with open(path) as f:
         for r in csv.DictReader(f):
             try:
@@ -1374,7 +1383,8 @@ def load_rows(path):
                 continue   # a truncated last row (power pulled)
             ts.append(row[0])
             out.append(row[1])
-    return ts, out
+            labels.append(r.get("label") or "")
+    return ts, out, labels
 
 
 def to_array(samples):
@@ -1395,7 +1405,7 @@ def load_recordings(data_dir=DATA, log=print):
         if not parsed:
             continue
         act, n, who = parsed
-        ts, rows = load_rows(p)
+        ts, rows, _ = load_rows(p)
         gap = float(np.diff(ts).max()) if len(ts) > 1 else 0.0
         if gap > MAX_GAP_S:
             log("skipping %s: a %.1f s gap in t (samples lost, the count would not match)" % (p.name, gap))
@@ -1410,24 +1420,19 @@ def load_recordings(data_dir=DATA, log=print):
 def load_zero_segments(data_dir=DATA, labels=("STAND", "BIKE"), min_s=5.0, max_break_s=0.3):
     """Each run of rows labelled STAND or BIKE in a guided session, lasting min_s or more, as a 0-step Recording.
     A run is consecutive rows with the same label and no break in t over max_break_s. WALK/RUN runs have no count."""
+    # 0.3 s, not MAX_GAP_S: no count is at stake here, a break only splices the signal, so split the run rather than skip it
     recs = []
     for p in sorted(Path(data_dir).glob("*-guided-*.csv")):
-        runs, last = [], None    # runs: [label, [t], [samples]]
-        with open(p) as f:
-            for r in csv.DictReader(f):
-                try:
-                    t, smp = float(r["t"]), tuple(float(r[k]) for k in ("ax", "ay", "az", "gx", "gy", "gz"))
-                except (TypeError, ValueError):
-                    continue   # a truncated last row (power pulled)
-                lab = r["label"]
-                if not runs or runs[-1][0] != lab or t - last > max_break_s:
-                    runs.append([lab, [], []])
-                runs[-1][1].append(t)
-                runs[-1][2].append(smp)
-                last = t
-        for lab, ts, rows in runs:
-            if lab in labels and ts[-1] - ts[0] >= min_s:
-                recs.append(Recording("%s:%s" % (p.name, lab), lab, 0, "guided", to_array(rows), False))
+        ts, rows, labs = load_rows(p)
+        runs = []    # [label, first row, end row]
+        for i, lab in enumerate(labs):
+            if not runs or runs[-1][0] != lab or ts[i] - ts[i - 1] > max_break_s:
+                runs.append([lab, i, i + 1])
+            else:
+                runs[-1][2] = i + 1
+        for lab, a, b in runs:
+            if lab in labels and (b - a) / 100.0 >= min_s:   # 100 Hz rows: exactly 500 rows is 5 s
+                recs.append(Recording("%s:%s@%.0fs" % (p.name, lab, ts[a]), lab, 0, "guided", to_array(rows[a:b]), False))
     return recs
 
 
@@ -1511,11 +1516,12 @@ def rates(model, mean, std, x):
         return model(tensor(x, mean, std))[0, 0].numpy()
 
 
-def loro(recs, epochs=EPOCHS, seed=0, log=None):
-    """Leave-one-recording-out: fit without each take and predict it. -> [{name, activity, who, true, pred}]."""
+def loro(recs, extra=(), epochs=EPOCHS, seed=0, log=None):
+    """Leave-one-recording-out: fit without each take and predict it. -> [{name, activity, who, true, pred}].
+    The `extra` takes (the zero segments) are in every training fold and never held out."""
     out = []
     for i, held in enumerate(recs):
-        rest = recs[:i] + recs[i + 1:]
+        rest = recs[:i] + recs[i + 1:] + list(extra)
         model, _, mean, std = fit(rest, epochs=epochs, seed=seed)
         pred = predict(model, mean, std, held.x)
         out.append({"name": held.name, "activity": held.activity, "who": held.who, "true": held.steps, "pred": round(pred, 2)})
@@ -1524,11 +1530,11 @@ def loro(recs, epochs=EPOCHS, seed=0, log=None):
     return out
 
 
-def seed_spread(recs, n=SEEDS, epochs=EPOCHS):
-    """Fit n times with different seeds on all takes; -> per-take std of the predicted count (mean over takes)."""
+def seed_spread(recs, extra=(), n=SEEDS, epochs=EPOCHS):
+    """Fit n times with different seeds on recs + extra; -> per-take std of the predicted count (mean over recs only)."""
     preds = []
     for s in range(n):
-        model, _, mean, std = fit(recs, epochs=epochs, seed=s)
+        model, _, mean, std = fit(list(recs) + list(extra), epochs=epochs, seed=s)
         preds.append([predict(model, mean, std, r.x) for r in recs])
     return float(np.mean(np.std(np.array(preds), axis=0)))
 
@@ -1549,9 +1555,9 @@ def metrics(results, rng=None):
 
 
 # --- the report ---------------------------------------------------------------------------------------------------
-def write_results(path, m, results, demo, seed_std, losses, n_train, n_zero):
-    lines = ["# Step counter results", "", "Generated by `train/steps.py --report` on %s from %d counted takes and %d zero segments from guided sessions."
-             % (time.strftime("%Y-%m-%d %H:%M"), n_train, n_zero), "",
+def write_results(path, m, results, demo, seed_std, losses, n_counted, n_zero):
+    lines = ["# Step counter results", "", "Generated by `train/steps.py --report` on %s from %d counted takes and %d zero segments from guided sessions "
+             "(the zero segments in every training fold, never held out)." % (time.strftime("%Y-%m-%d %H:%M"), n_counted, n_zero), "",
              "## Leave-one-recording-out", "", "| metric | value |", "|---|---|",
              "| takes | %d |" % m["n"], "| mean absolute error | %.2f steps |" % m["mae_steps"], "| mean absolute percentage error | %.1f %% |" % m["mape_pct"],
              "| bias (predicted − true) | %+.2f steps |" % m["bias_steps"], "| 95 %% bootstrap interval of the mean %% error | %+.1f %% to %+.1f %% |" % tuple(m["ci95_pct"]),
@@ -1581,15 +1587,15 @@ def main(argv=None):
     print("%d counted takes (%d training, %d demo) + %d zero segments from guided sessions" % (len(recs), len(counted), len(demo), len(zeros)))
     if len(counted) < 3:
         sys.exit("need at least 3 counted takes in %s (names like ...-steps-walk-n42-Rafae.csv)" % a.data)
-    meta = {"trained": time.strftime("%Y-%m-%dT%H:%M:%S"), "recordings": len(train), "epochs": a.epochs, "loro": None, "seed_std_steps": None}
+    meta = {"trained": time.strftime("%Y-%m-%dT%H:%M:%S"), "recordings": len(counted), "zero_segments": len(zeros), "epochs": a.epochs, "loro": None, "seed_std_steps": None}
     results = None
     if a.report:
         if len(counted) < 4:
             sys.exit("--report needs at least 4 training takes")
-        results = loro(train, epochs=a.epochs, seed=a.seed, log=print)
+        results = loro(counted, zeros, epochs=a.epochs, seed=a.seed, log=print)
         m = metrics(results)
         meta["loro"] = m
-        meta["seed_std_steps"] = round(seed_spread(train, epochs=a.epochs), 2)
+        meta["seed_std_steps"] = round(seed_spread(counted, zeros, epochs=a.epochs), 2)
         print(json.dumps(m, indent=1))
     else:  # keep the last measured half-width so the live ± does not fall back to 100 %, and say which run measured it
         try:
@@ -1607,7 +1613,7 @@ def main(argv=None):
         write_results(ROOT / "docs" / "steps_results.md", m, results, demo_res, meta["seed_std_steps"], losses, len(counted), len(zeros))
         print("wrote docs/steps_results.md")
         from steps_plots import figures
-        figures(FIGS, results, m, train, model, mean, std, losses)
+        figures(FIGS, results, m, counted, model, mean, std, losses)
         print("wrote docs/figures/steps_*.png")
     for r in demo_res:
         print("demo %-45s true %3d  pred %6.1f" % (r["name"], r["true"], r["pred"]))
@@ -1800,7 +1806,8 @@ git commit -m "P6-Gait-Wearable: step-counter figures (LORO scatter with ± band
 
 Run: `cd ~/ME193/P6-Gait-Wearable && .venv/bin/python train/steps.py --report 2>&1 | tee /tmp/steps-report.log | tail -40`
 Expected: LORO lines, a metrics JSON, `wrote models/stepnet.json`, `wrote docs/steps_results.md ...`. The STAND/BIKE
-zero segments of the guided sessions (`data/*-guided-*.csv`) are included automatically, in the fit and in LORO.
+zero segments of the guided sessions (`data/*-guided-*.csv`) are included automatically: in the final fit and in every LORO
+fold, never held out (the metrics are over counted takes only).
 
 - [ ] **Step 2: Judge it.** Open `docs/steps_results.md`. Good: MAPE under ~8 %, 0-step takes under 2 steps, no activity with a large bias. If WALK is fine but 0-step takes count steps, or MAPE is above 15 %: try `--epochs 600`; if still poor, report the table to the user and stop (the spec names the fallback: an auxiliary gyro-peak target; that is a design change, not a plan step).
 

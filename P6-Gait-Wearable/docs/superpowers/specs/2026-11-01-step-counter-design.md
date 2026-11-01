@@ -150,9 +150,10 @@ re-probe, samples lost, so the typed count no longer matches) is skipped with a 
 fold only. Each item: `x` of shape `(6, T)`, target `N`, activity, who.
 
 **Zero segments.** Each run of STAND or BIKE rows lasting 5 s or more in the older guided session files
-(`data/*-guided-*.csv`, a label per row; a run ends at a label change or a break in `t` over 0.3 s) is added as an exact
-zero-step recording (`load_zero_segments`, name `file:LABEL`, who `guided`), in training and in LORO like a counted take;
-WALK/RUN runs have no count and are not used. They teach that leg motion without footfalls is not a step. Measured on 6
+(`data/*-guided-*.csv`, a label per row; a run ends at a label change or a break in `t` over 0.3 s, length = rows / 100 Hz)
+is added as an exact zero-step recording (`load_zero_segments`, name `file:LABEL@<start>s`, who `guided`). They are in
+every training fold (LORO and the seed spread) but never held out, so every metric is over counted takes only; WALK/RUN
+runs have no count and are not used. They teach that leg motion without footfalls is not a step. Measured on 6
 counted takes, together with the wider gain: held-out walk MAE 4.06 → 2.33 steps (mean of 3 seeds).
 
 **Model.** `StepNetTorch(channels=12, kernel=5, dilations=(1, 2, 4))` with the same layers as §3, left padding via
@@ -182,16 +183,16 @@ late: on the synthetic probe a 300-epoch fit is within 10 % at all four cadences
 for 8 of 8. Dilations `(1, 2, 4, 8)` were tried and gave no reliable gain, so the board net stays `(1, 2, 4)`.
 
 **Evaluation and uncertainty** (`--report`):
-- *Leave-one-recording-out*: for each recording, fit on the others and predict its count. Per recording: predicted,
+- *Leave-one-recording-out*: for each counted take, fit on the others plus all zero segments and predict its count. Per recording: predicted,
   true, error (steps), percentage error (non-zero recordings). Summary: MAE in steps, MAPE, signed bias, bootstrap
   (2000 resamples) 95 % interval of the mean percentage error, `pm_pct95` (`null` when no recording has steps; the
   board then shows ±100 %), and the same MAE/bias per activity.
-- *Seed spread*: 5 fits on all recordings with different seeds; per-recording standard deviation of the predicted
-  count, summarised as `seed_std_steps` (mean over recordings). This is the net's own variability.
+- *Seed spread*: 5 fits on all counted takes and zero segments with different seeds; per-take standard deviation of
+  the predicted count, summarised as `seed_std_steps` (mean over the counted takes). This is the net's own variability.
 - *Hold-out demo takes*: recordings whose `who` is `demo` or ends in `-demo` are excluded from training and LORO and reported
   separately as "fresh takes the net never saw" (this is what the video shows).
 
-**Outputs.** `models/stepnet.json` (final fit on all non-demo recordings), `docs/steps_results.md` (tables of the
+**Outputs.** `models/stepnet.json` (final fit on all non-demo counted takes plus the zero segments; `meta.recordings` = counted takes, `meta.zero_segments`), `docs/steps_results.md` (tables of the
 above), figures via `train/steps_plots.py`: `steps_scatter.png` (true vs predicted, LORO, coloured by activity, with
 the ±pm band), `steps_errors.png` (histogram of LORO errors), `steps_rate.png` (one walk: the six traces, the rate
 curve, the cumulative count against the typed count), `steps_training.png` (loss curve). The write-up embeds these.
