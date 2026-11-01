@@ -4,3 +4,5 @@ my_env/
 __pycache__/
 .pytest_cache/
 plate/out/
+docs/animation/media/
+docs/animation/stepnet_explainer.mp4
