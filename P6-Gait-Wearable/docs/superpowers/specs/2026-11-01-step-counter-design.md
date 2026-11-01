@@ -101,12 +101,12 @@ get-ready gap: the wearer starts walking after tapping Start, and standing at th
 - `Recorder.start_counted(activity, who="")` opens `<stamp>-steps-<activity>-<who>.csv` (activity lower-case, who
   omitted when empty) with a 1-hour cap instead of a script end.
 - `Recorder.stop(steps=None)`: when the active take is a counted one and `steps` is an int ≥ 0, the file is closed and
-  renamed to `<stamp>-steps-<activity>-<steps>[-<who>].csv`; without `steps` it keeps its name (the training loader
-  ignores files without a count). `stop()` on a guided or single take ignores `steps`.
+  renamed (never over an existing file: `-2`, `-3`, ... until a free name) to `<stamp>-steps-<activity>-n<steps>[-<who>][-2].csv`; without `steps` it keeps its name (the training loader
+  ignores files without a count). `stop()` on a guided or single take ignores `steps`; a negative `steps` raises `ValueError`. `stop()` returns the final file name (`None` if no take was open) so the caller can tell the wearer when a count could not be saved. The `n` marks the count so a take stopped without one, whose `who` is numeric or starts with a digit, can never parse as counted.
 - `recorder.status()` gains `"kind": "guided" | "single" | "counted" | None` and `"elapsed_s"` (seconds since the take
   started) so the page can show a running clock.
 - File-name grammar, parsed by `recorder.parse_counted(name) -> (activity, steps, who) | None`, shared with the
-  trainer: `^\d{8}-\d{6}-steps-(walk|run|stand|bike|mixed)-(\d+)(?:-([A-Za-z0-9_-]+))?(?:-2)?\.csv$`.
+  trainer: `^\d{8}-\d{6}-steps-(walk|run|stand|bike|mixed)-n(\d+)(?:-([A-Za-z0-9_-]+?))?(?:-2)?\.csv$`.
 
 Protocol for the wearer (goes in the README and on the tab): about 25 takes of 15 to 40 s, counted out loud:
 walk slow ×3, walk normal ×4, walk fast ×3, run ×4, stand with fidgets ×3 (0), air-bike ×3 (0), mixed ×5.
@@ -144,7 +144,7 @@ Page, Steps tab (third tab in the bar; `showTab("steps")`):
 
 ## 6. Training (`train/steps.py`, `train/stepnet_torch.py`)
 
-**Dataset.** Every `data/*-steps-*-<N>[-who].csv` with a parsable count. Rows are loaded like `train.py` does today
+**Dataset.** Every `data/*-steps-*-n<N>[-who].csv` with a parsable count. Rows are loaded like `train.py` does today
 (truncated last row skipped), decimated with `stepnet.decimate`, normalised with mean/std computed over the training
 fold only. Each item: `x` of shape `(6, T)`, target `N`, activity, who.
 

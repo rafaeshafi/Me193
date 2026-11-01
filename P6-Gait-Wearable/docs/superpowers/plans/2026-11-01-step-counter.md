@@ -421,16 +421,18 @@ git commit -m "P6-Gait-Wearable: seed stepnet.json (random weights, pm 100 %) an
 - [ ] **Step 1: Append the failing tests to `tests/test_recorder.py`**
 
 ```python
-from recorder import STEP_ACTIVITIES, parse_counted
+from recorder import STEP_ACTIVITIES, parse_counted   # add to the existing `from recorder import ...` line at the top
 
 
 def test_parse_counted():
-    assert parse_counted("20261101-101500-steps-walk-42-Rafae.csv") == ("WALK", 42, "Rafae")
-    assert parse_counted("20261101-101500-steps-bike-0.csv") == ("BIKE", 0, "")
-    assert parse_counted("20261101-101500-steps-walk-42-Rafae-2.csv") == ("WALK", 42, "Rafae")
+    assert parse_counted("20261101-101500-steps-walk-n42-Rafae.csv") == ("WALK", 42, "Rafae")
+    assert parse_counted("20261101-101500-steps-bike-n0.csv") == ("BIKE", 0, "")
+    assert parse_counted("20261101-101500-steps-walk-n42-Rafae-2.csv") == ("WALK", 42, "Rafae")
     assert parse_counted("20261101-101500-steps-walk-Rafae.csv") is None      # stopped without a count
     assert parse_counted("20261026-135026-guided-Rafae.csv") is None
-    assert parse_counted("20261101-101500-steps-hop-5.csv") is None            # not an activity
+    assert parse_counted("20261101-101500-steps-walk-42.csv") is None          # no n-marker: a numeric who, not a count
+    assert parse_counted("20261101-101500-steps-walk-5-Bob.csv") is None
+    assert parse_counted("20261101-101500-steps-hop-n5.csv") is None            # not an activity
     assert STEP_ACTIVITIES == ("WALK", "RUN", "STAND", "BIKE", "MIXED")
 
 
@@ -446,9 +448,9 @@ def test_counted_take_is_renamed_with_its_count(tmp_path):
     assert r.status()["elapsed_s"] == 12.3
     rows = read(r.path)
     assert [row[1] for row in rows[1:]] == ["WALK"] * 10          # no get-ready gap: every row carries the activity
-    r.stop(steps=42)
+    assert r.stop(steps=42) == r.path.name
     assert not r.active
-    assert r.path.name.endswith("-steps-walk-42-Rafae.csv") and r.path.exists()
+    assert r.path.name.endswith("-steps-walk-n42-Rafae.csv") and r.path.exists()
     assert r.sessions() == [r.path.name]
     assert r.status()["kind"] is None and r.status()["elapsed_s"] is None
 
@@ -457,7 +459,7 @@ def test_counted_take_without_a_count_keeps_its_name(tmp_path):
     r = Recorder(tmp_path, clock=Clock(), rolling=False)
     r.start_counted("MIXED")
     name = r.path.name
-    r.stop()
+    assert r.stop() == name
     assert r.path.name == name and name.endswith("-steps-mixed.csv") and parse_counted(name) is None
 
 
@@ -465,13 +467,29 @@ def test_steps_are_ignored_for_other_kinds_and_bad_activities_rejected(tmp_path)
     r = Recorder(tmp_path, clock=Clock(), rolling=False)
     r.start_single("WALK", seconds=10)
     name = r.path.name
-    r.stop(steps=7)
+    assert r.stop(steps=7) == name
     assert r.path.name == name
+    assert r.stop() is None                                         # idle
     with pytest.raises(ValueError):
         r.start_counted("HOP")
+
+
+def test_rename_never_overwrites_and_negative_count_is_rejected(tmp_path):
+    clk = Clock()
+    r = Recorder(tmp_path, clock=clk, rolling=False)
+    names = []
+    for _ in range(3):                      # same second, same count: -2, -3 suffixes, nothing overwritten
+        r.start_counted("walk")
+        names.append(r.stop(steps=5))
+    assert len(set(names)) == 3 and all(parse_counted(n)[:2] == ("WALK", 5) for n in names)
+    assert len(list(tmp_path.glob("*.csv"))) == 3
+    r.start_counted("walk")
+    with pytest.raises(ValueError):
+        r.stop(steps=-1)
+    assert r.active                          # a rejected stop leaves the take open
 ```
 
-Add `import pytest` to the top of `tests/test_recorder.py` if it is not there.
+Add `import pytest` to the top of `tests/test_recorder.py` if it is not there, and merge the `STEP_ACTIVITIES, parse_counted` import into the file's existing `from recorder import ...` line.
 
 - [ ] **Step 2: Run them**
 
@@ -480,17 +498,17 @@ Expected: `ImportError: cannot import name 'STEP_ACTIVITIES'`
 
 - [ ] **Step 3: Extend `app/python/recorder.py`**
 
-Add after `LABELS = ...`:
+Add after `ROLLING_KEEP = 2`:
 ```python
 STEP_ACTIVITIES = ("WALK", "RUN", "STAND", "BIKE", "MIXED")   # counted takes (step counter training)
 COUNTED_CAP_S = 3600
-COUNTED_RE = re.compile(r"^\d{8}-\d{6}-steps-(walk|run|stand|bike|mixed)-(\d+)(?:-([A-Za-z0-9_-]+?))?(?:-2)?\.csv$")
+COUNTED_RE = re.compile(r"^\d{8}-\d{6}-steps-(walk|run|stand|bike|mixed)-n(\d+)(?:-([A-Za-z0-9_-]+?))?(?:-2)?\.csv$")
 ```
 
 Add after `clean()`:
 ```python
 def parse_counted(name):
-    """'<stamp>-steps-<activity>-<steps>[-<who>][-2].csv' -> (ACTIVITY, steps, who) or None for any other file."""
+    """'<stamp>-steps-<activity>-n<steps>[-<who>][-2].csv' -> (ACTIVITY, steps, who) or None for any other file."""
     m = COUNTED_RE.match(name)
     if not m:
         return None
@@ -501,6 +519,7 @@ In `__init__`, after `self.who = ""` add:
 ```python
         self.kind = None      # "guided" | "single" | "counted" while a take is open
         self._stamp = ""
+        self._activity = None  # lower-case activity of an open counted take
 ```
 
 Add a method after `start_single`:
@@ -511,6 +530,7 @@ Add a method after `start_single`:
         if activity not in STEP_ACTIVITIES:
             raise ValueError("activity must be one of %s" % ", ".join(STEP_ACTIVITIES))
         self._start([(activity, COUNTED_CAP_S)], who, "steps-" + activity.lower(), kind="counted")
+        self._activity = activity.lower()
 ```
 
 Change `_start`'s signature to
@@ -520,28 +540,36 @@ Change `_start`'s signature to
 and inside it replace `stamp = time.strftime(...)` / `base = ...` with
 ```python
             stamp = time.strftime("%Y%m%d-%H%M%S")
-            self._stamp, self.kind = stamp, kind
+            self._stamp, self.kind, self._activity = stamp, kind, None
             base = "%s-%s%s" % (stamp, name, "-" + self.who if self.who else "")
 ```
 Update the two existing callers: `start_guided` → `self._start(steps, who, "guided", kind="guided")`; `start_single` → `self._start([("", GAP_S), (label, seconds)], who, label.lower())`.
 
 In `_close_session` add `self.kind = None` after `self._writer = None` (outside the `if`, so it always clears).
 
-Replace `stop`:
+Replace `stop` (it returns the final file name, or None when idle; a negative count raises ValueError):
 ```python
     def stop(self, steps=None):
-        """Stop the open take. For a counted take, `steps` (int >= 0) is the wearer's count and goes into the file name."""
+        """Stop the open take and return its final file name, or None if none was open. For a counted take, `steps`
+        (int >= 0) is the wearer's count and goes into the file name; it is ignored for other takes."""
+        if steps is not None and int(steps) < 0:
+            raise ValueError("steps must be >= 0")
         with self._lock:
-            counted = self._file is not None and self.kind == "counted"
+            if self._file is None:
+                return None
+            counted = self.kind == "counted"
             self._close_session()
             if counted and steps is not None:
                 self._rename_counted(int(steps))
+            return self.path.name
 
     def _rename_counted(self, steps):
-        m = re.match(r"^(\d{8}-\d{6})-steps-([a-z]+)", self.path.name)
-        target = self.dir / ("%s-steps-%s-%d%s.csv" % (m.group(1), m.group(2), steps, "-" + self.who if self.who else ""))
-        if target.exists():
-            target = target.with_name(target.stem + "-2.csv")
+        who = "-" + self.who if self.who else ""
+        target = self.dir / ("%s-steps-%s-n%d%s.csv" % (self._stamp, self._activity, steps, who))
+        k = 2
+        while target.exists():
+            target = self.dir / ("%s-steps-%s-n%d%s-%d.csv" % (self._stamp, self._activity, steps, who, k))
+            k += 1
         self.path.rename(target)
         self.path = target
         self._sessions = None
@@ -562,18 +590,18 @@ In `status()` change the locked block and the return to include the kind and the
                 "prompt": self._prompt(cur), "who": who}
 ```
 
-Update the module docstring's file list: add `<stamp>-steps-<activity>[-<steps>][-who].csv (counted take; the count is added at stop)`.
+Update the module docstring's file list: add `<stamp>-steps-<activity>[-n<steps>][-who].csv (counted take; the count is added at stop)`.
 
 - [ ] **Step 4: Run the recorder tests, then everything**
 
-Run: `.venv/bin/python -m pytest tests/test_recorder.py -q` → Expected: all pass (existing + 4 new).
+Run: `.venv/bin/python -m pytest tests/test_recorder.py -q` → Expected: all pass (existing + 5 new).
 Run: `.venv/bin/python -m pytest tests -q` → Expected: all pass.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add app/python/recorder.py tests/test_recorder.py
-git commit -m "P6-Gait-Wearable: counted takes in the recorder (open-ended single activity, typed count renamed into the file name, parse_counted, kind/elapsed in status)"
+git commit -m "P6-Gait-Wearable: counted takes in the recorder (open-ended single activity, typed count renamed into the file name as n<steps>, parse_counted, kind/elapsed in status)"
 ```
 
 ---
@@ -740,7 +768,7 @@ def test_steps_routes(server):
     assert status == 400
     status, _, body = req(s, "POST", "/stop?steps=17")
     snap = json.loads(body)
-    assert status == 200 and not snap["recorder"]["active"] and any(n.endswith("-steps-mixed-17-ann.csv") for n in snap["sessions"])
+    assert status == 200 and not snap["recorder"]["active"] and any(n.endswith("-steps-mixed-n17-ann.csv") for n in snap["sessions"])
     status, _, body = req(s, "POST", "/record?label=HOP&steps=1")
     assert status == 400
     status, _, body = req(s, "POST", "/record?label=MIXED")          # MIXED is only a counted activity
@@ -1093,7 +1121,7 @@ def synthetic_recordings():
     recs = []
     for i, (kind, n, cad) in enumerate(specs):
         x = to_array(steps_take(n, cad, kind=kind) if n else steps_take(30, cad, kind=kind))
-        recs.append(Recording("%d-steps-%s-%d-t.csv" % (i, kind.lower(), n), kind, n, "t", x, False))
+        recs.append(Recording("%d-steps-%s-n%d-t.csv" % (i, kind.lower(), n), kind, n, "t", x, False))
     return recs
 
 
@@ -1138,7 +1166,7 @@ Expected: `ModuleNotFoundError: No module named 'steps'`
 ```python
 """Train StepNet from the counted takes and measure how good it is.
 
-  .venv/bin/python train/steps.py                 # fit on data/*-steps-*-<N>*.csv -> models/stepnet.json
+  .venv/bin/python train/steps.py                 # fit on data/*-steps-*-n<N>*.csv -> models/stepnet.json
   .venv/bin/python train/steps.py --report        # + leave-one-recording-out, 5 seeds, demo takes, figures, docs/steps_results.md
 
 A take's true count is in its file name (recorder.parse_counted). Takes whose `who` ends in "demo" are never trained
@@ -1360,7 +1388,7 @@ def main(argv=None):
     train, demo = [r for r in recs if not r.demo], [r for r in recs if r.demo]
     print("%d counted takes (%d training, %d demo)" % (len(recs), len(train), len(demo)))
     if len(train) < 3:
-        sys.exit("need at least 3 counted takes in %s (names like ...-steps-walk-42-Rafae.csv)" % a.data)
+        sys.exit("need at least 3 counted takes in %s (names like ...-steps-walk-n42-Rafae.csv)" % a.data)
     meta = {"trained": time.strftime("%Y-%m-%dT%H:%M:%S"), "recordings": len(train), "epochs": a.epochs, "loro": None, "seed_std_steps": None}
     results = None
     if a.report:

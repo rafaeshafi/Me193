@@ -2,7 +2,7 @@ import csv
 
 import pytest
 
-from recorder import GAP_S, HEADER, SCRIPT, Recorder
+from recorder import GAP_S, HEADER, SCRIPT, STEP_ACTIVITIES, Recorder, parse_counted
 
 
 class Clock:
@@ -99,16 +99,15 @@ def test_rolling_log_runs_only_while_idle(tmp_path):
     assert r.sessions() == [r.path.name]             # rolling logs are not sessions
 
 
-from recorder import STEP_ACTIVITIES, parse_counted
-
-
 def test_parse_counted():
-    assert parse_counted("20261101-101500-steps-walk-42-Rafae.csv") == ("WALK", 42, "Rafae")
-    assert parse_counted("20261101-101500-steps-bike-0.csv") == ("BIKE", 0, "")
-    assert parse_counted("20261101-101500-steps-walk-42-Rafae-2.csv") == ("WALK", 42, "Rafae")
+    assert parse_counted("20261101-101500-steps-walk-n42-Rafae.csv") == ("WALK", 42, "Rafae")
+    assert parse_counted("20261101-101500-steps-bike-n0.csv") == ("BIKE", 0, "")
+    assert parse_counted("20261101-101500-steps-walk-n42-Rafae-2.csv") == ("WALK", 42, "Rafae")
     assert parse_counted("20261101-101500-steps-walk-Rafae.csv") is None      # stopped without a count
     assert parse_counted("20261026-135026-guided-Rafae.csv") is None
-    assert parse_counted("20261101-101500-steps-hop-5.csv") is None            # not an activity
+    assert parse_counted("20261101-101500-steps-walk-42.csv") is None          # no n-marker: a numeric who, not a count
+    assert parse_counted("20261101-101500-steps-walk-5-Bob.csv") is None
+    assert parse_counted("20261101-101500-steps-hop-n5.csv") is None            # not an activity
     assert STEP_ACTIVITIES == ("WALK", "RUN", "STAND", "BIKE", "MIXED")
 
 
@@ -124,9 +123,9 @@ def test_counted_take_is_renamed_with_its_count(tmp_path):
     assert r.status()["elapsed_s"] == 12.3
     rows = read(r.path)
     assert [row[1] for row in rows[1:]] == ["WALK"] * 10          # no get-ready gap: every row carries the activity
-    r.stop(steps=42)
+    assert r.stop(steps=42) == r.path.name
     assert not r.active
-    assert r.path.name.endswith("-steps-walk-42-Rafae.csv") and r.path.exists()
+    assert r.path.name.endswith("-steps-walk-n42-Rafae.csv") and r.path.exists()
     assert r.sessions() == [r.path.name]
     assert r.status()["kind"] is None and r.status()["elapsed_s"] is None
 
@@ -135,7 +134,7 @@ def test_counted_take_without_a_count_keeps_its_name(tmp_path):
     r = Recorder(tmp_path, clock=Clock(), rolling=False)
     r.start_counted("MIXED")
     name = r.path.name
-    r.stop()
+    assert r.stop() == name
     assert r.path.name == name and name.endswith("-steps-mixed.csv") and parse_counted(name) is None
 
 
@@ -143,7 +142,23 @@ def test_steps_are_ignored_for_other_kinds_and_bad_activities_rejected(tmp_path)
     r = Recorder(tmp_path, clock=Clock(), rolling=False)
     r.start_single("WALK", seconds=10)
     name = r.path.name
-    r.stop(steps=7)
+    assert r.stop(steps=7) == name
     assert r.path.name == name
+    assert r.stop() is None                                         # idle
     with pytest.raises(ValueError):
         r.start_counted("HOP")
+
+
+def test_rename_never_overwrites_and_negative_count_is_rejected(tmp_path):
+    clk = Clock()
+    r = Recorder(tmp_path, clock=clk, rolling=False)
+    names = []
+    for _ in range(3):                      # same second, same count: -2, -3 suffixes, nothing overwritten
+        r.start_counted("walk")
+        names.append(r.stop(steps=5))
+    assert len(set(names)) == 3 and all(parse_counted(n)[:2] == ("WALK", 5) for n in names)
+    assert len(list(tmp_path.glob("*.csv"))) == 3
+    r.start_counted("walk")
+    with pytest.raises(ValueError):
+        r.stop(steps=-1)
+    assert r.active                          # a rejected stop leaves the take open

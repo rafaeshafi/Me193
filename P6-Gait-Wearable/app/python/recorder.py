@@ -1,9 +1,10 @@
-"""Labelled CSV recording on the board: the guided script, single-activity takes, and an unlabelled rolling log.
+"""Labelled CSV recording on the board: the guided script, single-activity takes, counted takes (step counter
+training) and an unlabelled rolling log.
 
 Rows are raw 100 Hz samples, not features, so features can change later without re-recording.
 CSV columns: t (seconds since the session started), label ("" during a get-ready gap, "-" in the rolling log),
 ax ay az (g), gx gy gz (deg/s). Files: <YYYYmmdd-HHMMSS>-guided[-who].csv, <stamp>-walk[-who].csv,
-<stamp>-steps-<activity>[-<steps>][-who].csv (counted take; the count is added at stop), rolling-<stamp>.csv.
+<stamp>-steps-<activity>[-n<steps>][-who].csv (counted take; the count is added at stop), rolling-<stamp>.csv.
 
 Threads: on_samples() runs on the Bridge thread at 10 Hz; start/stop/status come from the web and main threads, so
 every public method takes the lock. The script's position is a pure function of time (bisect over the step ends):
@@ -27,7 +28,7 @@ ROLLING_ROTATE_S = 3600
 ROLLING_KEEP = 2
 STEP_ACTIVITIES = ("WALK", "RUN", "STAND", "BIKE", "MIXED")   # counted takes (step counter training)
 COUNTED_CAP_S = 3600
-COUNTED_RE = re.compile(r"^\d{8}-\d{6}-steps-(walk|run|stand|bike|mixed)-(\d+)(?:-([A-Za-z0-9_-]+?))?(?:-2)?\.csv$")
+COUNTED_RE = re.compile(r"^\d{8}-\d{6}-steps-(walk|run|stand|bike|mixed)-n(\d+)(?:-([A-Za-z0-9_-]+?))?(?:-2)?\.csv$")
 
 
 def clean(who):
@@ -35,7 +36,7 @@ def clean(who):
 
 
 def parse_counted(name):
-    """'<stamp>-steps-<activity>-<steps>[-<who>][-2].csv' -> (ACTIVITY, steps, who) or None for any other file."""
+    """'<stamp>-steps-<activity>-n<steps>[-<who>][-2].csv' -> (ACTIVITY, steps, who) or None for any other file."""
     m = COUNTED_RE.match(name)
     if not m:
         return None
@@ -63,6 +64,7 @@ class Recorder:
         self.who = ""
         self.kind = None      # "guided" | "single" | "counted" while a take is open
         self._stamp = ""
+        self._activity = None  # lower-case activity of an open counted take
         self._rolling_on = rolling
         self._rolling = None
         self._rolling_writer = None
@@ -87,13 +89,14 @@ class Recorder:
         if activity not in STEP_ACTIVITIES:
             raise ValueError("activity must be one of %s" % ", ".join(STEP_ACTIVITIES))
         self._start([(activity, COUNTED_CAP_S)], who, "steps-" + activity.lower(), kind="counted")
+        self._activity = activity.lower()
 
     def _start(self, steps, who, name, kind="single"):
         with self._lock:
             self._close_session()
             self.who = clean(who)
             stamp = time.strftime("%Y%m%d-%H%M%S")
-            self._stamp, self.kind = stamp, kind
+            self._stamp, self.kind, self._activity = stamp, kind, None
             base = "%s-%s%s" % (stamp, name, "-" + self.who if self.who else "")
             path = self.dir / (base + ".csv")
             try:
@@ -124,18 +127,26 @@ class Recorder:
         self._sessions = None
 
     def stop(self, steps=None):
-        """Stop the open take. For a counted take, `steps` (int >= 0) is the wearer's count and goes into the file name."""
+        """Stop the open take and return its final file name, or None if none was open. For a counted take, `steps`
+        (int >= 0) is the wearer's count and goes into the file name; it is ignored for other takes."""
+        if steps is not None and int(steps) < 0:
+            raise ValueError("steps must be >= 0")
         with self._lock:
-            counted = self._file is not None and self.kind == "counted"
+            if self._file is None:
+                return None
+            counted = self.kind == "counted"
             self._close_session()
             if counted and steps is not None:
                 self._rename_counted(int(steps))
+            return self.path.name
 
     def _rename_counted(self, steps):
-        m = re.match(r"^(\d{8}-\d{6})-steps-([a-z]+)", self.path.name)
-        target = self.dir / ("%s-steps-%s-%d%s.csv" % (m.group(1), m.group(2), steps, "-" + self.who if self.who else ""))
-        if target.exists():
-            target = target.with_name(target.stem + "-2.csv")
+        who = "-" + self.who if self.who else ""
+        target = self.dir / ("%s-steps-%s-n%d%s.csv" % (self._stamp, self._activity, steps, who))
+        k = 2
+        while target.exists():
+            target = self.dir / ("%s-steps-%s-n%d%s-%d.csv" % (self._stamp, self._activity, steps, who, k))
+            k += 1
         self.path.rename(target)
         self.path = target
         self._sessions = None
