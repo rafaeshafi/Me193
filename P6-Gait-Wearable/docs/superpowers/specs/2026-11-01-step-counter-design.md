@@ -145,7 +145,8 @@ Page, Steps tab (third tab in the bar; `showTab("steps")`):
 ## 6. Training (`train/steps.py`, `train/stepnet_torch.py`)
 
 **Dataset.** Every `data/*-steps-*-n<N>[-who].csv` with a parsable count. Rows are loaded like `train.py` does today
-(truncated last row skipped), decimated with `stepnet.decimate`, normalised with mean/std computed over the training
+(truncated last row skipped); a take with a break in `t` over 0.8 s (`train.py`'s threshold: FIFO overflow or
+re-probe, samples lost, so the typed count no longer matches) is skipped with a printed warning. Rows are decimated with `stepnet.decimate`, normalised with mean/std computed over the training
 fold only. Each item: `x` of shape `(6, T)`, target `N`, activity, who.
 
 **Model.** `StepNetTorch(channels=12, kernel=5, dilations=(1, 2, 4))` with the same layers as §3, left padding via
@@ -153,27 +154,34 @@ fold only. Each item: `x` of shape `(6, T)`, target `N`, activity, who.
 `export(path, mean, std, meta)` writes the JSON of §3. A test loads the export into `stepnet.StepNet` and checks the
 pure-Python output equals the torch output within 1e-5 on random input.
 
-**Loss.** `SmoothL1(count_pred, N)` per recording (beta 1.0). Zero-count recordings pull the rate to zero during
-pedalling and fidgeting; nothing else is needed.
+**Loss.** `SmoothL1(count_pred, N)` per recording (beta 1.0), in steps. Zero-count recordings pull the rate to zero
+during pedalling and fidgeting. (A relative loss, divided by `max(N, 5)`, was tried and dropped: on the synthetic
+probe it made the cadence response less reliable across seeds, not more.)
 
-**Augmentation** (each applied with probability 0.5 per item per epoch, all count-preserving):
+**Augmentation** (all count-preserving; pairing, rotation and gain each with probability 0.5 per item per epoch, in
+that order, then the time-stretch on every item):
+- *pairing*: concatenate with another random recording, targets add;
 - *frame rotation*: one random rotation of up to 15° about a random axis applied to both the accel and the gyro
   vectors (the strap sits differently each day);
 - *gain*: multiply all channels by `U(0.9, 1.1)`;
-- *time-stretch*: linear resampling by a factor `U(0.85, 1.15)` at 25 Hz (changes the cadence, not the count);
-- *pairing*: concatenate with another random recording, targets add.
+- *time-stretch*, always: linear resampling by a factor `U(0.7, 1.3)` at 25 Hz. The same count over a new duration
+  is the signal that makes the rate follow the cadence; without it (or at probability 0.5 with `U(0.85, 1.15)`) the
+  net learns "time spent moving × ~1.85 steps/s" and a 44-step walk at 1.6 / 2.3 Hz reads 52 / 36.
 Augmentation happens after decimation, before normalisation, on the training fold only.
 
 **Fit.** One recording per optimiser step (variable lengths, no padding), Adam, lr 3e-3 for 300 epochs then 3e-4
-for 100, seed fixed. A fit takes seconds on the Mac.
+for 100 (`EPOCHS = 400`, the drop at 75 %), seed fixed. A fit takes seconds on the Mac. The cadence response appears
+late: on the synthetic probe a 300-epoch fit is within 10 % at all four cadences for 6 of 8 seeds, a 400-epoch fit
+for 8 of 8. Dilations `(1, 2, 4, 8)` were tried and gave no reliable gain, so the board net stays `(1, 2, 4)`.
 
-**Evaluation and uncertainty** (`--loro`, `--seeds`):
+**Evaluation and uncertainty** (`--report`):
 - *Leave-one-recording-out*: for each recording, fit on the others and predict its count. Per recording: predicted,
   true, error (steps), percentage error (non-zero recordings). Summary: MAE in steps, MAPE, signed bias, bootstrap
-  (2000 resamples) 95 % interval of the mean percentage error, `pm_pct95`, and the same MAE/bias per activity.
+  (2000 resamples) 95 % interval of the mean percentage error, `pm_pct95` (`null` when no recording has steps; the
+  board then shows ±100 %), and the same MAE/bias per activity.
 - *Seed spread*: 5 fits on all recordings with different seeds; per-recording standard deviation of the predicted
   count, summarised as `seed_std_steps` (mean over recordings). This is the net's own variability.
-- *Hold-out demo takes*: recordings whose `who` ends in `-demo` are excluded from training and LORO and reported
+- *Hold-out demo takes*: recordings whose `who` is `demo` or ends in `-demo` are excluded from training and LORO and reported
   separately as "fresh takes the net never saw" (this is what the video shows).
 
 **Outputs.** `models/stepnet.json` (final fit on all non-demo recordings), `docs/steps_results.md` (tables of the
@@ -181,8 +189,10 @@ above), figures via `train/steps_plots.py`: `steps_scatter.png` (true vs predict
 the ±pm band), `steps_errors.png` (histogram of LORO errors), `steps_rate.png` (one walk: the six traces, the rate
 curve, the cumulative count against the typed count), `steps_training.png` (loss curve). The write-up embeds these.
 
-**CLI.** `train/steps.py [--loro] [--seeds] [--report] [--epochs N] [--seed S]`; default = fit + export. `--report`
-runs everything and writes `docs/steps_results.md`. `train/requirements.txt` gains `torch`.
+**CLI.** `train/steps.py [--report] [--epochs N] [--seed S] [--data DIR]`; default = fit + export, keeping the
+previous export's `meta.loro` (and its `trained` stamp as `meta.loro_from`) so the live ± survives a plain refit.
+`--report` adds LORO, the seed spread and the demo takes, writes `docs/steps_results.md` first and then the figures
+(a figure error cannot lose the results). `train/requirements.txt` gains `torch`.
 
 ## 7. Animation (`docs/animation/`)
 
@@ -215,14 +225,15 @@ GitHub link; the reflection questions are left for the user. The Notion page its
   `None` and the tab shows "no step model".
 - `/stop?steps=` not an integer or negative → 400; `steps=1` with an activity outside `STEP_ACTIVITIES` → 400.
 - Renaming a take whose target name exists (two takes in one second) appends `-2`, as today.
-- Training with fewer than 3 counted recordings exits with a clear message; `--loro` needs at least 4.
+- Training with fewer than 3 counted recordings exits with a clear message; `--report` needs at least 4.
 
 Tests (pytest, in `tests/`): `test_stepnet.py` (decimation remainder handling; pure-Python conv on a hand-computed
 3-sample case; streaming == offline on random weights over random chunk sizes; numpy path == pure path when numpy is
 present; reset keeps the count and clears the context; JSON load validation), `test_steps_train.py` (skipped
-without torch: torch forward == `stepnet` forward after export; a 40-epoch fit on synthetic step recordings from
-`tests/synth.py` gets the counts within 20 %; augmentations preserve length rules and targets add on pairing; LORO
-runs on 4 synthetic recordings), extended `test_recorder.py` (counted take file name, rename on stop with a count,
+without torch: torch forward == `stepnet` forward after export; a 400-epoch fit on synthetic step recordings from
+`tests/synth.py` gets every count within 6 steps and counts 44-step walks it never saw at 1.6-2.3 Hz within 10 %
+with the rate tracking the cadence; the torch net is causal; augmentations preserve length rules and targets add on
+pairing; LORO runs on 4 synthetic recordings; the loader skips gapped takes and sorts out demo takes), extended `test_recorder.py` (counted take file name, rename on stop with a count,
 no rename without, `parse_counted`), `test_web.py` (`/steps`, `/record?steps=1`, `/stop?steps=`, `/steps/reset`,
 400s), `test_pipeline.py` (`steps` in the snapshot advances on synthetic walking, reset, `stepnet=None`).
 Existing 57 tests keep passing.

@@ -69,7 +69,8 @@ class StepNet:
                             int(l["dilation"]), l["act"]) for l in spec["layers"]]
             self.meta = spec.get("meta", {}) or {}
             dec, dt = int(spec.get("decimate", DECIMATE)), float(spec.get("dt", DT))
-            self.pm_pct95 = float((self.meta.get("loro") or {}).get("pm_pct95", 100.0))
+            pm = (self.meta.get("loro") or {}).get("pm_pct95")
+            self.pm_pct95 = 100.0 if pm is None else float(pm)   # None: training had no take with steps
         except (KeyError, TypeError, ValueError, AttributeError) as e:
             raise ValueError("bad StepNet spec: %s" % e)
         if len(self.mean) != CHANNELS or len(self.std) != CHANNELS or any(not (s > 0) or not math.isfinite(s) for s in self.std):

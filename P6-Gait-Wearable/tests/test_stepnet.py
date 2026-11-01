@@ -109,3 +109,7 @@ def test_load_validates(tmp_path, mut):
     p.write_text(json.dumps(_bad(mut)))
     with pytest.raises(ValueError):
         StepNet.load(p)
+
+
+def test_a_missing_half_width_falls_back_to_100_percent():
+    assert StepNet(seed_stepnet(pm_pct95=None)).pm_pct95 == 100.0

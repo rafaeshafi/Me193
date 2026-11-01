@@ -1071,6 +1071,17 @@ from stepnet import DT, StepNet          # noqa: E402
 from stepnet_torch import StepNetTorch  # noqa: E402
 
 
+def test_the_torch_net_is_causal():
+    torch.manual_seed(0)
+    model = StepNetTorch()
+    x = torch.randn(1, 6, 80)
+    y = x.clone()
+    y[:, :, 41:] = torch.randn(1, 6, 39)          # change only the future of t = 40
+    with torch.no_grad():
+        a, b = model(x), model(y)
+    assert torch.equal(a[..., :41], b[..., :41]) and not torch.equal(a[..., 41:], b[..., 41:])
+
+
 def test_export_matches_the_pure_python_forward(tmp_path):
     torch.manual_seed(0)
     model = StepNetTorch()
@@ -1086,7 +1097,7 @@ def test_export_matches_the_pure_python_forward(tmp_path):
         ref = model(xt)[0, 0].tolist()
         cnt = model.count(xt).item()
     got = net.forward(x)
-    assert max(abs(a - b) for a, b in zip(got, ref)) < 1e-4
+    assert max(abs(a - b) for a, b in zip(got, ref)) < 1e-5
     assert cnt == pytest.approx(sum(got) * DT, abs=1e-3)
 ```
 
@@ -1146,7 +1157,7 @@ class StepNetTorch(nn.Module):
 
 - [ ] **Step 5: Run the test**
 
-Run: `.venv/bin/python -m pytest tests/test_steps_train.py -q` → Expected: `1 passed`
+Run: `.venv/bin/python -m pytest tests/test_steps_train.py -q` → Expected: `2 passed`
 
 - [ ] **Step 6: Commit**
 
@@ -1163,6 +1174,7 @@ git commit -m "P6-Gait-Wearable: StepNetTorch (causal dilated convs + softplus h
 - Create: `train/steps.py`
 - Modify: `tests/synth.py` (append `steps_take`)
 - Modify: `tests/test_steps_train.py` (append)
+- Modify: `app/python/stepnet.py`, `tests/test_stepnet.py` (a `null` `pm_pct95` falls back to 100 %)
 
 - [ ] **Step 1: Add synthetic counted takes to `tests/synth.py`**
 
@@ -1191,7 +1203,8 @@ def steps_take(n_steps, cadence_hz=1.8, rate=100, still_s=1.0, kind="WALK"):
 import numpy as np                                                  # noqa: E402
 
 from synth import steps_take                                        # noqa: E402
-from steps import Recording, augment_pair, fit, gain, loro, metrics, normalisation, predict, rotate, stretch, to_array  # noqa: E402
+from steps import (EPOCHS, Recording, augment_pair, fit, gain, load_recordings, loro, metrics, normalisation,  # noqa: E402
+                   predict, rates, rotate, stretch, to_array)
 
 
 def synthetic_recordings():
@@ -1215,24 +1228,63 @@ def test_augmentations_preserve_what_they_should():
     g = gain(x, rng)
     assert g.shape == x.shape and 0.85 < (g[0].std() / x[0].std()) < 1.15
     s = stretch(x, rng)
-    assert 0.8 * x.shape[1] < s.shape[1] < 1.2 * x.shape[1]
+    assert 0.69 * x.shape[1] < s.shape[1] < 1.31 * x.shape[1]
     a, b = synthetic_recordings()[:2]
     px, py = augment_pair(a, b)
     assert px.shape[1] == a.x.shape[1] + b.x.shape[1] and py == a.steps + b.steps
 
 
-def test_fit_learns_synthetic_counts_and_loro_runs():
+@pytest.fixture(scope="module")
+def fitted():
+    """One full-length fit on the synthetic takes, shared by the tests below (~3 s). The cadence only takes over from
+    "time spent moving" late in training (a 60-epoch fit is still a duration counter), so this is the real EPOCHS."""
     recs = synthetic_recordings()
+    return recs, fit(recs, epochs=EPOCHS, seed=0)
+
+
+def test_fit_learns_synthetic_counts_and_loro_runs(fitted):
+    recs, (model, losses, fmean, fstd) = fitted
     mean, std = normalisation(recs)
     assert mean.shape == (6,) and (std > 0).all()
-    model, losses = fit(recs, epochs=60, seed=0)
+    assert np.array_equal(fmean, mean) and np.array_equal(fstd, std)
     assert losses[-1] < losses[0]
     worst = max(abs(predict(model, mean, std, r.x) - r.steps) for r in recs)
-    assert worst < 6, worst                                           # a tiny net, synthetic data, 60 epochs
+    assert worst < 6, worst                                           # a tiny net, synthetic data
     res = loro(recs[:4], epochs=15, seed=0)
     assert len(res) == 4 and {r["name"] for r in res} == {r.name for r in recs[:4]}
     m = metrics(res)
     assert set(m) >= {"n", "mae_steps", "mape_pct", "bias_steps", "ci95_pct", "pm_pct95", "by_activity"}
+
+
+def test_rate_tracks_cadence(fitted):
+    """The same 44 steps at four cadences (none of these takes is in the training set): the count stays within 10 %
+    and the rate while moving follows the cadence, so the net counts steps, not time spent moving."""
+    _, (model, _, mean, std) = fitted
+    for cad in (1.6, 1.8, 2.1, 2.3):
+        x = to_array(steps_take(44, cad))
+        pred, moving = predict(model, mean, std, x), rates(model, mean, std, x)[25:-25].mean()   # 1 s still each end
+        assert abs(pred - 44) <= 4.4, (cad, pred)
+        assert abs(moving - cad) <= 0.1 * cad, (cad, moving)
+
+
+def test_load_recordings_skips_gaps_and_sorts_out_demo_takes(tmp_path):
+    def write(name, gap_at=None):
+        rows, t = ["t,label,ax,ay,az,gx,gy,gz"], 0.0
+        for i, smp in enumerate(steps_take(6)):
+            t += 1.0 if i == gap_at else 0.01
+            rows.append("%.3f,WALK," % t + ",".join("%.4f" % v for v in smp))
+        (tmp_path / name).write_text("\n".join(rows) + "\n")
+    write("20261101-120001-steps-walk-n6-Rafae.csv")
+    write("20261101-120002-steps-walk-n6-Rafae-demo.csv")
+    write("20261101-120003-steps-walk-n6-demo.csv")
+    write("20261101-120004-steps-walk-n6-Ademo.csv")        # a person called Ademo, not a demo take
+    write("20261101-120005-steps-walk-n6-Rafae-2.csv", gap_at=200)
+    write("20261101-120006-guided-Rafae.csv")
+    logged = []
+    recs = load_recordings(tmp_path, log=logged.append)
+    assert [(r.name[14], r.demo) for r in recs] == [("1", False), ("2", True), ("3", True), ("4", False)]
+    assert len(logged) == 1 and "5-steps" in logged[0]
+    assert metrics([{"activity": "STAND", "true": 0, "pred": 0.4}])["pm_pct95"] is None
 ```
 
 - [ ] **Step 3: Run them**
@@ -1248,10 +1300,12 @@ Expected: `ModuleNotFoundError: No module named 'steps'`
   .venv/bin/python train/steps.py                 # fit on data/*-steps-*-n<N>*.csv -> models/stepnet.json
   .venv/bin/python train/steps.py --report        # + leave-one-recording-out, 5 seeds, demo takes, figures, docs/steps_results.md
 
-A take's true count is in its file name (recorder.parse_counted). Takes whose `who` ends in "demo" are never trained
-on: they are the fresh takes the video shows and are reported separately. Decimation is the board's own
-(stepnet.decimate), normalisation is fit on the training fold only. Loss: smooth-L1 between the integrated rate and
-the typed count; augmentation keeps the count true (frame rotation, gain, time-stretch, pairing two takes).
+A take's true count is in its file name (recorder.parse_counted). Takes whose `who` is "demo" or ends in "-demo" are
+never trained on: they are the fresh takes the video shows and are reported separately. A take with a break in t over
+0.8 s (samples lost) is skipped. Decimation is the board's own (stepnet.decimate), normalisation is fit on the training
+fold only. Loss: smooth-L1 between the integrated rate and the typed count; augmentation keeps the count true (pairing
+two takes, frame rotation, gain, and on every pass a time-stretch by U(0.7, 1.3): the same count over a new duration,
+which is what makes the rate follow the cadence instead of the time spent moving).
 """
 import argparse
 import csv
@@ -1269,11 +1323,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app" / "python"))
 sys.path.insert(0, str(ROOT / "train"))
 from recorder import parse_counted  # noqa: E402
-from stepnet import DT, decimate  # noqa: E402
+from stepnet import decimate  # noqa: E402
 from stepnet_torch import StepNetTorch  # noqa: E402
 
 DATA, MODELS, FIGS = ROOT / "data", ROOT / "models", ROOT / "docs" / "figures"
-EPOCHS, LR, LR_DROP_AT, SEEDS, BOOT = 300, 3e-3, 0.75, 5, 2000
+EPOCHS, LR, LR_DROP_AT, SEEDS, BOOT = 400, 3e-3, 0.75, 5, 2000
+P_AUG, STRETCH = 0.5, (0.7, 1.3)   # pairing/rotation/gain each half the time; a time-stretch in STRETCH on every pass
+MAX_GAP_S = 0.8    # a break in t this long (FIFO overflow, re-probe; train.py's threshold) loses steps: skip the take
 
 
 @dataclass
@@ -1287,14 +1343,17 @@ class Recording:
 
 
 def load_rows(path):
-    out = []
+    """-> (t list, [(ax, ay, az, gx, gy, gz), ...]) in file order."""
+    ts, out = [], []
     with open(path) as f:
         for r in csv.DictReader(f):
             try:
-                out.append(tuple(float(r[k]) for k in ("ax", "ay", "az", "gx", "gy", "gz")))
+                row = float(r["t"]), tuple(float(r[k]) for k in ("ax", "ay", "az", "gx", "gy", "gz"))
             except (TypeError, ValueError):
                 continue   # a truncated last row (power pulled)
-    return out
+            ts.append(row[0])
+            out.append(row[1])
+    return ts, out
 
 
 def to_array(samples):
@@ -1303,17 +1362,27 @@ def to_array(samples):
     return np.array(dec, dtype=np.float32).T
 
 
-def load_recordings(data_dir=DATA):
+def is_demo(who):
+    w = who.lower()
+    return w == "demo" or w.endswith("-demo")
+
+
+def load_recordings(data_dir=DATA, log=print):
     recs = []
     for p in sorted(Path(data_dir).glob("*.csv")):
         parsed = parse_counted(p.name)
         if not parsed:
             continue
         act, n, who = parsed
-        x = to_array(load_rows(p))
+        ts, rows = load_rows(p)
+        gap = float(np.diff(ts).max()) if len(ts) > 1 else 0.0
+        if gap > MAX_GAP_S:
+            log("skipping %s: a %.1f s gap in t (samples lost, the count would not match)" % (p.name, gap))
+            continue
+        x = to_array(rows)
         if x.size == 0:
             continue
-        recs.append(Recording(p.name, act, n, who, x, who.lower().endswith("demo")))
+        recs.append(Recording(p.name, act, n, who, x, is_demo(who)))
     return recs
 
 
@@ -1331,8 +1400,8 @@ def gain(x, rng):
     return (x * rng.uniform(0.9, 1.1)).astype(np.float32)
 
 
-def stretch(x, rng):
-    f = rng.uniform(0.85, 1.15)
+def stretch(x, rng, lo=STRETCH[0], hi=STRETCH[1]):
+    f = rng.uniform(lo, hi)
     T = x.shape[1]
     T2 = max(2, int(round(T * f)))
     src, dst = np.linspace(0, 1, T), np.linspace(0, 1, T2)
@@ -1354,7 +1423,7 @@ def tensor(x, mean, std):
 
 # --- fitting and predicting ---------------------------------------------------------------------------------------
 def fit(recs, epochs=EPOCHS, seed=0, augment=True, log=None):
-    """-> (model, per-epoch mean loss). Normalisation is the caller's (normalisation(recs)) and is baked into tensors here."""
+    """-> (model, per-epoch mean loss, mean, std). mean/std = normalisation(recs), the inputs the model expects."""
     mean, std = normalisation(recs)
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
@@ -1367,18 +1436,16 @@ def fit(recs, epochs=EPOCHS, seed=0, augment=True, log=None):
                 g["lr"] = LR / 10
         total = 0.0
         for i in rng.permutation(len(recs)):
-            x, y = recs[i].x, float(recs[i].steps)
+            x, y = recs[i].x, recs[i].steps
             if augment:
-                if rng.random() < 0.5:
+                if rng.random() < P_AUG:
+                    x, y = augment_pair(recs[i], recs[int(rng.integers(len(recs)))])
+                if rng.random() < P_AUG:
                     x = rotate(x, rng)
-                if rng.random() < 0.5:
+                if rng.random() < P_AUG:
                     x = gain(x, rng)
-                if rng.random() < 0.5:
-                    x = stretch(x, rng)
-                if rng.random() < 0.5:
-                    j = int(rng.integers(len(recs)))
-                    x, y = np.concatenate([x, recs[j].x], axis=1), y + recs[j].steps
-            loss = F.smooth_l1_loss(model.count(tensor(x, mean, std)), torch.tensor([y]))
+                x = stretch(x, rng)   # always: the same count over a new duration forces rate ~ cadence
+            loss = F.smooth_l1_loss(model.count(tensor(x, mean, std)), torch.tensor([float(y)]))
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -1386,7 +1453,7 @@ def fit(recs, epochs=EPOCHS, seed=0, augment=True, log=None):
         losses.append(total / len(recs))
         if log and (ep % 25 == 0 or ep == epochs - 1):
             log("epoch %3d  loss %.3f" % (ep, losses[-1]))
-    return model, losses
+    return model, losses, mean, std
 
 
 def predict(model, mean, std, x):
@@ -1404,8 +1471,7 @@ def loro(recs, epochs=EPOCHS, seed=0, log=None):
     out = []
     for i, held in enumerate(recs):
         rest = recs[:i] + recs[i + 1:]
-        model, _ = fit(rest, epochs=epochs, seed=seed)
-        mean, std = normalisation(rest)
+        model, _, mean, std = fit(rest, epochs=epochs, seed=seed)
         pred = predict(model, mean, std, held.x)
         out.append({"name": held.name, "activity": held.activity, "who": held.who, "true": held.steps, "pred": round(pred, 2)})
         if log:
@@ -1417,8 +1483,7 @@ def seed_spread(recs, n=SEEDS, epochs=EPOCHS):
     """Fit n times with different seeds on all takes; -> per-take std of the predicted count (mean over takes)."""
     preds = []
     for s in range(n):
-        model, _ = fit(recs, epochs=epochs, seed=s)
-        mean, std = normalisation(recs)
+        model, _, mean, std = fit(recs, epochs=epochs, seed=s)
         preds.append([predict(model, mean, std, r.x) for r in recs])
     return float(np.mean(np.std(np.array(preds), axis=0)))
 
@@ -1435,7 +1500,7 @@ def metrics(results, rng=None):
         by[act] = {"n": int(len(e)), "mae_steps": round(float(np.abs(e).mean()), 2), "bias_steps": round(float(e.mean()), 2)}
     return {"n": len(results), "mae_steps": round(float(np.abs(err).mean()), 2), "mape_pct": round(float(np.abs(pct).mean()), 2),
             "bias_steps": round(float(err.mean()), 2), "ci95_pct": [round(float(np.percentile(boots, 2.5)), 2), round(float(np.percentile(boots, 97.5)), 2)],
-            "pm_pct95": round(float(np.percentile(np.abs(pct), 95)), 2), "by_activity": by}
+            "pm_pct95": round(float(np.percentile(np.abs(pct), 95)), 2) if nz.any() else None, "by_activity": by}
 
 
 # --- the report ---------------------------------------------------------------------------------------------------
@@ -1444,7 +1509,7 @@ def write_results(path, m, results, demo, seed_std, losses, n_train):
              "## Leave-one-recording-out", "", "| metric | value |", "|---|---|",
              "| takes | %d |" % m["n"], "| mean absolute error | %.2f steps |" % m["mae_steps"], "| mean absolute percentage error | %.1f %% |" % m["mape_pct"],
              "| bias (predicted − true) | %+.2f steps |" % m["bias_steps"], "| 95 %% bootstrap interval of the mean %% error | %+.1f %% to %+.1f %% |" % tuple(m["ci95_pct"]),
-             "| 95th percentile of the absolute %% error (shown live as ±) | %.1f %% |" % m["pm_pct95"], "| seed-to-seed spread of a prediction (5 fits) | %.2f steps |" % seed_std, "",
+             "| 95th percentile of the absolute %% error (shown live as ±) | %s |" % ("n/a (no take with steps)" if m["pm_pct95"] is None else "%.1f %%" % m["pm_pct95"]), "| seed-to-seed spread of a prediction (5 fits) | %.2f steps |" % seed_std, "",
              "| activity | takes | MAE (steps) | bias (steps) |", "|---|---|---|---|"]
     lines += ["| %s | %d | %.2f | %+.2f |" % (a, v["n"], v["mae_steps"], v["bias_steps"]) for a, v in m["by_activity"].items()]
     lines += ["", "| take | activity | true | predicted | error |", "|---|---|---|---|---|"]
@@ -1478,21 +1543,24 @@ def main(argv=None):
         meta["loro"] = m
         meta["seed_std_steps"] = round(seed_spread(train, epochs=a.epochs), 2)
         print(json.dumps(m, indent=1))
-    else:  # keep the last measured half-width so the live ± does not fall back to 100 %
+    else:  # keep the last measured half-width so the live ± does not fall back to 100 %, and say which run measured it
         try:
-            meta["loro"] = json.loads((MODELS / "stepnet.json").read_text())["meta"].get("loro")
-        except (OSError, ValueError, KeyError):
+            old = json.loads((MODELS / "stepnet.json").read_text())["meta"]
+            meta["loro"] = old.get("loro")
+            if meta["loro"]:
+                meta["loro_from"] = old.get("trained")
+        except (OSError, ValueError, KeyError, TypeError):
             pass
-    model, losses = fit(train, epochs=a.epochs, seed=a.seed, log=print)
-    mean, std = normalisation(train)
+    model, losses, mean, std = fit(train, epochs=a.epochs, seed=a.seed, log=print)
     demo_res = [{"name": r.name, "true": r.steps, "pred": round(predict(model, mean, std, r.x), 2)} for r in demo]
     model.export(MODELS / "stepnet.json", mean, std, meta)
     print("wrote", MODELS / "stepnet.json")
-    if a.report:
+    if a.report:   # the results first, so a figure error cannot lose them
+        write_results(ROOT / "docs" / "steps_results.md", m, results, demo_res, meta["seed_std_steps"], losses, len(train))
+        print("wrote docs/steps_results.md")
         from steps_plots import figures
         figures(FIGS, results, m, train, model, mean, std, losses)
-        write_results(ROOT / "docs" / "steps_results.md", m, results, demo_res, meta["seed_std_steps"], losses, len(train))
-        print("wrote docs/steps_results.md and docs/figures/steps_*.png")
+        print("wrote docs/figures/steps_*.png")
     for r in demo_res:
         print("demo %-45s true %3d  pred %6.1f" % (r["name"], r["true"], r["pred"]))
 
@@ -1504,12 +1572,30 @@ if __name__ == "__main__":
 - [ ] **Step 5: Run the tests**
 
 Run: `.venv/bin/python -m pytest tests/test_steps_train.py -q -x`
-Expected: `3 passed` (the fit test takes ~20 to 60 s). If `worst < 6` fails, print the per-take predictions, raise `epochs` to 100 in the test and re-run once; if it still fails, stop and report the numbers (the model or loss needs a look, not the test).
+Expected: `6 passed` in about 5 s (one shared 400-epoch fit). The cadence probe is the test that matters: without
+the always-on wide time-stretch the net learns "time spent moving × ~1.85 steps/s" (44-step walks at 1.6/1.8/2.1/2.3 Hz
+read 52.5/46.6/39.8/36.2), and it needs the full EPOCHS (a 60- or 150-epoch fit is still a duration counter).
+
+- [ ] **Step 5b: Let the board fall back when no take had steps**
+
+In `StepNet.__init__` (`app/python/stepnet.py`) replace the `pm_pct95` line with:
+
+```python
+            pm = (self.meta.get("loro") or {}).get("pm_pct95")
+            self.pm_pct95 = 100.0 if pm is None else float(pm)   # None: training had no take with steps
+```
+
+and append to `tests/test_stepnet.py`:
+
+```python
+def test_a_missing_half_width_falls_back_to_100_percent():
+    assert StepNet(seed_stepnet(pm_pct95=None)).pm_pct95 == 100.0
+```
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add train/steps.py tests/synth.py tests/test_steps_train.py
+git add train/steps.py tests/synth.py tests/test_steps_train.py app/python/stepnet.py tests/test_stepnet.py
 git commit -m "P6-Gait-Wearable: train/steps.py (counted-take dataset from file names, count-preserving augmentation, smooth-L1 fit, leave-one-recording-out, seed spread, metrics, export)"
 ```
 
@@ -1527,8 +1613,7 @@ git commit -m "P6-Gait-Wearable: train/steps.py (counted-take dataset from file 
 def test_figures_are_written(tmp_path):
     from steps_plots import figures
     recs = synthetic_recordings()
-    mean, std = normalisation(recs)
-    model, losses = fit(recs, epochs=3, seed=0)
+    model, losses, mean, std = fit(recs, epochs=3, seed=0)
     res = [{"name": r.name, "activity": r.activity, "who": r.who, "true": r.steps, "pred": r.steps + 1.0} for r in recs]
     figures(tmp_path, res, metrics(res), recs, model, mean, std, losses)
     for n in ("steps_scatter.png", "steps_errors.png", "steps_rate.png", "steps_training.png"):
@@ -1559,7 +1644,8 @@ def scatter(path, results, m):
     hi = max([r["true"] for r in results] + [r["pred"] for r in results] + [10]) * 1.1
     ax.plot([0, hi], [0, hi], color="#999", lw=1)
     xs = np.linspace(0, hi, 50)
-    ax.fill_between(xs, xs * (1 - m["pm_pct95"] / 100), xs * (1 + m["pm_pct95"] / 100), color="#ddd", alpha=0.6, label="±%.0f %% (95th pct)" % m["pm_pct95"])
+    if m["pm_pct95"] is not None:   # None when no take had steps
+        ax.fill_between(xs, xs * (1 - m["pm_pct95"] / 100), xs * (1 + m["pm_pct95"] / 100), color="#ddd", alpha=0.6, label="±%.0f %% (95th pct)" % m["pm_pct95"])
     for act in sorted({r["activity"] for r in results}):
         pts = [r for r in results if r["activity"] == act]
         ax.scatter([r["true"] for r in pts], [r["pred"] for r in pts], color=COLORS.get(act, "k"), label=act, zorder=3)
@@ -1638,7 +1724,7 @@ def figures(out_dir, results, m, recs, model, mean, std, losses):
     training(out / "steps_training.png", losses)
 ```
 
-- [ ] **Step 4: Run the tests** → `.venv/bin/python -m pytest tests/test_steps_train.py -q` → Expected: `4 passed`
+- [ ] **Step 4: Run the tests** → `.venv/bin/python -m pytest tests/test_steps_train.py -q` → Expected: `7 passed`
 
 - [ ] **Step 5: Commit**
 
