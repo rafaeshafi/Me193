@@ -723,7 +723,7 @@ def load_stepnet(path):
 gait = Gait(Tree.load(MODELS / "model1.json"), Tree.load(MODELS / "model2.json"), Recorder(DATA),
             stepnet=load_stepnet(MODELS / "stepnet.json"))
 ```
-(`log` is defined before `gait` already; move `load_stepnet` between the logger and `gait`.) Extend the periodic log line with `steps=%s` using `gait.steps.snapshot()["count"] if gait.steps else None`.
+(`log` is defined before `gait` already; move `load_stepnet` between the logger and `gait`.) Extend the periodic log line with `steps=%s` using `int(gait.steps.count) if gait.steps else None`.
 
 - [ ] **Step 5: Run all tests**
 

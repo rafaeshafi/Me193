@@ -45,7 +45,7 @@ def loop():
         s = gait.state
         log.info("act=%s m1=%s cad=%s pk=%s dropped=%d imu=%s steps=%s", s["act"], s["m1"], s["cad"],
                  None if s["pk"] is None else round(s["pk"], 2), s["dropped"], s["imu"],
-                 gait.steps.snapshot()["count"] if gait.steps else None)
+                 int(gait.steps.count) if gait.steps else None)
     time.sleep(0.05)
 
 
