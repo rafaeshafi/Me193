@@ -22,3 +22,21 @@ def synth(kind, seconds=2.0, rate=100, phase=0.0):
         else:
             raise ValueError(kind)
     return out
+
+
+def steps_take(n_steps, cadence_hz=1.8, rate=100, still_s=1.0, kind="WALK"):
+    """A take with exactly n_steps steps at cadence_hz (one accel peak per step, thigh gyro at half the step rate),
+    `still_s` of standing before and after. kind STAND/BIKE gives a 0-step take of the given length in steps/cadence."""
+    out = []
+    moving_s = n_steps / cadence_hz
+    if kind in ("STAND", "BIKE"):
+        return synth(kind, seconds=moving_s + 2 * still_s, rate=rate)
+    out += synth("STAND", seconds=still_s, rate=rate)
+    for i in range(int(round(moving_s * rate))):
+        t = i / rate
+        amp = 0.6 if kind == "WALK" else 2.5
+        s = math.sin(2 * math.pi * cadence_hz * t)
+        out.append((1.0 + amp * (s if kind == "RUN" and s > 0 else s if kind == "WALK" else 0.0), 0.1, 0.05,
+                    150 * math.sin(2 * math.pi * cadence_hz / 2 * t), 10.0, 5.0))
+    out += synth("STAND", seconds=still_s, rate=rate)
+    return out
