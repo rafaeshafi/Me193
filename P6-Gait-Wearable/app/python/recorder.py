@@ -88,15 +88,14 @@ class Recorder:
         activity = activity.upper()
         if activity not in STEP_ACTIVITIES:
             raise ValueError("activity must be one of %s" % ", ".join(STEP_ACTIVITIES))
-        self._start([(activity, COUNTED_CAP_S)], who, "steps-" + activity.lower(), kind="counted")
-        self._activity = activity.lower()
+        self._start([(activity, COUNTED_CAP_S)], who, "steps-" + activity.lower(), kind="counted", activity=activity.lower())
 
-    def _start(self, steps, who, name, kind="single"):
+    def _start(self, steps, who, name, kind="single", activity=None):
         with self._lock:
             self._close_session()
             self.who = clean(who)
             stamp = time.strftime("%Y%m%d-%H%M%S")
-            self._stamp, self.kind, self._activity = stamp, kind, None
+            self._stamp, self.kind, self._activity = stamp, kind, activity
             base = "%s-%s%s" % (stamp, name, "-" + self.who if self.who else "")
             path = self.dir / (base + ".csv")
             try:

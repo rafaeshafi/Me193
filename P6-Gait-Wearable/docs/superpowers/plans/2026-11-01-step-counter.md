@@ -529,18 +529,17 @@ Add a method after `start_single`:
         activity = activity.upper()
         if activity not in STEP_ACTIVITIES:
             raise ValueError("activity must be one of %s" % ", ".join(STEP_ACTIVITIES))
-        self._start([(activity, COUNTED_CAP_S)], who, "steps-" + activity.lower(), kind="counted")
-        self._activity = activity.lower()
+        self._start([(activity, COUNTED_CAP_S)], who, "steps-" + activity.lower(), kind="counted", activity=activity.lower())
 ```
 
 Change `_start`'s signature to
 ```python
-    def _start(self, steps, who, name, kind="single"):
+    def _start(self, steps, who, name, kind="single", activity=None):
 ```
 and inside it replace `stamp = time.strftime(...)` / `base = ...` with
 ```python
             stamp = time.strftime("%Y%m%d-%H%M%S")
-            self._stamp, self.kind, self._activity = stamp, kind, None
+            self._stamp, self.kind, self._activity = stamp, kind, activity
             base = "%s-%s%s" % (stamp, name, "-" + self.who if self.who else "")
 ```
 Update the two existing callers: `start_guided` → `self._start(steps, who, "guided", kind="guided")`; `start_single` → `self._start([("", GAP_S), (label, seconds)], who, label.lower())`.
