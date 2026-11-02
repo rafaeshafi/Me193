@@ -36,13 +36,9 @@ Every number below is leave-one-recording-out: the net is trained without a take
 | 95th percentile of the % error | 47 % | the live ± band: 19 out of 20 takes land inside it |
 | seed-to-seed spread | 0.4 steps | retraining with a different random start barely moves a prediction |
 
-Standing is solved: three standing takes and the board lying flat on a desk all read zero. Walking is where the error lives, and two findings explain most of it.
+Standing reads zero every time; walking carries the error, and two things explain it. A label audit, counting swing cycles straight off the thigh gyro, matches what I typed on every walk except the first test take: 40 cycles for a typed 30, and held out the net says 37.8, so it counts what the sensor saw. The ± band is set by the 7-step take, where 3.7 steps off is 53 %. And with six walks each fold trains on five, so the held-out number is noisy: six variants of the net and augmentation, and dropping the suspect takes, all scored the same or worse. More counted walks is the only lever.
 
-First, I audited the labels against the signal by counting swing cycles straight off the thigh gyro. Every walk agrees with what I typed within three except the first test take: 40 cycles for a typed 30. Held out, it comes back at 37.8, so the net is counting what the sensor saw. The 95th percentile itself is set by the 7-step take, where 3.7 steps off is 53 %, and by the 27-step take at 30 %.
-
-Second, with six walks each fold trains on five, so the held-out number is noisy by construction: six variants of the net and the augmentation, and dropping either suspect take, all scored the same or worse. The band is honest for this much data and tightens as counted walks accumulate.
-
-An earlier version was far worse for an instructive reason. With four walks and one total each, the net learned "time spent moving times an average cadence", which fits the training totals and fails on any new pace. The fix cost no new recordings: the standing and air-pedalling stretches of the October guided sessions are exact zeros with plenty of leg motion, and adding them forced the net onto footfalls. Walk error halved without a new recording.
+The first version learned time spent moving times an average cadence: it fit four training totals and failed on any new pace. Adding the standing and air-pedalling stretches of the earlier guided sessions as exact zeros, plenty of leg motion and no steps, forced it onto footfalls and halved the walk error without a new recording.
 
 ## Figures
 
@@ -53,7 +49,7 @@ An earlier version was far worse for an instructive reason. With four walks and 
 
 ## Demo takes
 
-Three fresh walks recorded after training was frozen, so the net had never seen them. These are the takes in the video, and the numbers are what the phone showed live, since the board's streaming pass is bit-for-bit the offline one.
+Recorded after training was frozen, so the net had never seen them. These are the takes in the video; the numbers are what the phone showed live.
 
 | take | true | predicted | error |
 |---|---|---|---|
@@ -61,12 +57,12 @@ Three fresh walks recorded after training was frozen, so the net had never seen 
 | demo 2 | 19 | 20.9 | +1.9 |
 | demo 3 | 20 | 21.5 | +1.5 |
 
-All three land within about 2 steps, well inside the ± band, with a small consistent over-count of roughly 8 %.
+All within about 2 steps, with a slight over-count of about 8 %.
 
 ## Video captions
 
 - **Demo video.** Strap on, phone open on the Steps tab reading 0. Three counted walks of 24, 19 and 20 footfalls; the count climbs one per step with the rate trace spiking under each, and finishes at 26, 21 and 22. Between walks the count holds still.
-- **Animation** (`stepnet_explainer_small.mp4`, 88 s, made with Manim). From the six sensor traces, through decimation and standardisation, into the three convolution layers, the rate curve whose area is the count, the loss against the typed total, back-propagation nudging the weights, and the JSON file landing on the board.
+- **Animation** (`stepnet_explainer_small.mp4`, 88 s, made with Manim by Claude): from the sensor traces through decimation, the three convolution layers and the rate curve to the loss, back-propagation and the weights file landing on the board.
 
 ## GitHub
 
