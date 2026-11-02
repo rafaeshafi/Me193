@@ -251,3 +251,19 @@ Existing 57 tests keep passing.
 Recorder + routes + tab (so recording can start right away) → `stepnet.py` with seed weights and tests → pipeline
 integration → deploy and record the ~25 takes → PyTorch model, training, LORO, figures, export → deploy the trained
 net, record the three demo takes, film → animation → README, results, Notion drafts.
+
+## Revision 1 (2026-11-02, after training on real takes)
+
+- **Walking only.** The user dropped run and bike takes; the counted set is 9 takes (6 walks of 7 to 40 steps, 3
+  stands), not the ~25 of §4, plus the 4 guided STAND/BIKE zero segments of §6. The protocol text in §4 stands as the
+  recommended set; the ± band is what it is for the data recorded.
+- **Label audit.** The typed counts were checked against swing cycles counted straight off the thigh gyro: every
+  walk agrees within 3 except the first test take (40 cycles, typed 30; held out it predicts 37.8). pm_pct95 is set by
+  the 7-step take (3.7 steps off = 53 %) and the 27-step take (30 %). Everything stays in training and in the table.
+- **Variants tried and rejected** (scratchpad experiments, 3 seeds each, leave-one-out): no time-stretch, stretch
+  U(0.85, 1.15), dilations up to 8 and 16, 16 channels, no take pairing, and dropping either suspect take. None beat
+  the §3/§6 setup; with 6 walks each fold trains on 5, so the held-out number is noisy by construction.
+- **Numbers in §3's weights example** are illustrative; the real meta is in `models/stepnet.json` (LORO MAE 3.0 steps,
+  walks 4.5, MAPE 22 %, pm_pct95 47.3, seed std 0.38).
+- **Board startup.** The counter reads about 5 steps right after an app restart while the IMU settles, then holds.
+- Tests: 88 (the "existing 57" of §9 plus 31 for the step counter).

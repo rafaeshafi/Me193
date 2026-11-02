@@ -235,7 +235,7 @@ class StepNetExplainer(Scene):
             recol = [l.animate.set_stroke(color=RED if rng.random() < 0.5 else BLUE, opacity=0.9, width=2) for l in picked]
             self.play(*recol, ChangeDecimalToValue(loss, val), run_time=0.6)
             self.play(FadeOut(arrows), *[l.animate.set_stroke(color=GREY_B, opacity=0.35, width=0.6) for l in picked], run_time=0.4)
-        cap = self.swap_caption(cap, "Adam nudges each weight against its gradient. 300 passes over ~25 takes, with "
+        cap = self.swap_caption(cap, "Adam nudges each weight against its gradient. 400 passes over 9 counted takes (and 4 known-zero stretches), with "
                                      "rotation, gain, time-stretch and paired takes so it generalises.")
         self.wait(3)
         self.clear_all()
@@ -252,7 +252,7 @@ class StepNetExplainer(Scene):
         phone = RoundedRectangle(corner_radius=0.3, width=2.2, height=3.6, color=WHITE).move_to(RIGHT * 4.6 + UP * 0.4)
         count = num(0, num_decimal_places=0, font_size=64, color=WHITE).move_to(phone.get_center() + UP * 0.5)
         count.add_updater(lambda m: m.move_to(phone.get_center() + UP * 0.5))
-        pm = Text("± 2 steps", font_size=26, color=GREY_B).next_to(count, DOWN)
+        pm = Text("± 18 steps", font_size=26, color=GREY_B).next_to(count, DOWN)
         a1 = Arrow(js.get_right(), board.get_left(), color=GREY_B, buff=0.15)
         a2 = Arrow(board.get_right(), phone.get_left(), color=GREY_B, buff=0.15)
         self.play(Create(js), Write(jtxt))
