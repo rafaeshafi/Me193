@@ -53,11 +53,19 @@ An earlier version was far worse for an instructive reason. With four walks and 
 
 ## Demo takes
 
-*(three `Rafae-demo` walks, held out from training; table from `docs/steps_results.md` once recorded)*
+Three fresh walks recorded after training was frozen, so the net had never seen them. These are the takes in the video, and the numbers are what the phone showed live, since the board's streaming pass is bit-for-bit the offline one.
+
+| take | true | predicted | error |
+|---|---|---|---|
+| demo 1 | 24 | 26.1 | +2.1 |
+| demo 2 | 19 | 20.9 | +1.9 |
+| demo 3 | 20 | 21.5 | +1.5 |
+
+All three land within about 2 steps, well inside the ± band, with a small consistent over-count of roughly 8 %.
 
 ## Video captions
 
-- **Demo video.** Strap on, phone open on the Steps tab reading 0 ± 0. Walk and count aloud; the count climbs one per footfall with the rate trace spiking under each step. Stop; the count holds and the ± band shows. Stand still for ten seconds: nothing moves.
+- **Demo video.** Strap on, phone open on the Steps tab reading 0. Three counted walks of 24, 19 and 20 footfalls; the count climbs one per step with the rate trace spiking under each, and finishes at 26, 21 and 22. Between walks the count holds still.
 - **Animation** (`stepnet_explainer_small.mp4`, 88 s, made with Manim). From the six sensor traces, through decimation and standardisation, into the three convolution layers, the rate curve whose area is the count, the loss against the typed total, back-propagation nudging the weights, and the JSON file landing on the board.
 
 ## GitHub

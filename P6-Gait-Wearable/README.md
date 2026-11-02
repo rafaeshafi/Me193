@@ -56,6 +56,7 @@ count with its measured uncertainty (`38 ± 18`).
 | Net | conv 6→12 (dil 1) → 12→12 (dil 2) → 12→12 (dil 4), ReLU, kernel 5; softplus head → steps/s; 1,849 parameters |
 | Training | 9 counted takes (typed count in the file name) + 4 known-zero stretches from the guided sessions; smooth-L1 on the integrated count; rotation / gain / time-stretch / pairing augmentation |
 | Leave-one-recording-out | MAE 3.0 steps (walks 4.5, stands 0.1), MAPE 22 %, 95th pct 47 % (the live ±) |
+| Three fresh demo walks | 24 → 26.1, 19 → 20.9, 20 → 21.5 (never trained on; what the video shows) |
 
 The ± band is set by a 7-step take (3.7 steps off is 53 %) and by fold noise: with six walks each fold trains on
 five. One take's typed 30 disagrees with the 40 swing cycles on the thigh gyro. The band shrinks as counted walks
