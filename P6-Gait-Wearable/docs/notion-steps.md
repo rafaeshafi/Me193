@@ -4,7 +4,7 @@
 
 ## Intro
 
-The P6 wearable now counts steps. The same thigh-strapped Arduino UNO Q and MPU6050 feed a small neural network, trained in PyTorch on my Mac and run on the board in plain Python, that turns the six raw motion channels into a steps-per-second curve. The count is the area under that curve. The Steps tab on the phone shows the count live with a ± band that comes from measured errors, not a guess. The net learned from nothing but takes where I walked, counted every footfall out loud, and typed the total when I stopped.
+The P6 wearable now counts steps. The same thigh-strapped Arduino UNO Q and MPU6050 feed a small neural network, trained in PyTorch on my Mac and run on the board in plain Python. The Steps tab on the phone shows the count live with a ± band that comes from measured errors, not a guess. The net learned from nothing but takes where I walked, counted every footfall out loud, and typed the total when I stopped.
 
 ## How the net works
 
