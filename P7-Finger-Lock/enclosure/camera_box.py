@@ -4,8 +4,12 @@
                                        #   out/camera_box.sc (open it in SolidCraft), .step, .stl, iso/top/front .png
 
 A four-sided hood, open at the front and the bottom, that stands on a base plate. The webcam (70 x 18.5 x 25 mm body,
-lens on the 70 x 18.5 face) drops lens-down into a snug pocket in a boss on the roof and looks at the desk through a
-window in the pocket floor; two slots beside the boss take a velcro strap or zip tie over the camera, and a 1/4-20
+lens on the 70 x 18.5 face) presses lens-down into a pocket in a boss on the roof and looks at the desk through a
+window in the pocket floor. The pocket is a press fit: its walls clear the camera by a hair and ten thin crush ribs
+on them stand proud by rib_p, so the ribs squash on the way in and grip whatever the printer did to the walls (too
+tight: shave the ribs or lower rib_p; loose: raise it). A chamfer at the mouth leads the camera in, the ribs start a
+little below it, and a finger notch at each end lets you pull the camera out. Two slots beside the boss still take a
+strap over the camera as a belt-and-braces, and a 1/4-20
 clearance hole in front of the boss is there for a camera with a tripod thread instead. The base plate carries the
 engraved square the net is trained on, sized from the lens height and the camera's field of view, centred under the
 lens; a notch at the top of the back wall passes the USB cable. Every number below is a design parameter in the .sc,
@@ -24,7 +28,10 @@ CLI = "/Applications/SolidCraft.app/Contents/MacOS/solidcraft-cli"
 # ---- parameters (mm, degrees) ----
 P = dict(
     cam_w=70.0, cam_h=18.5, cam_d=25.0,     # the webcam body: width, height of the lens face, depth (front to back)
-    fit=0.5,                                # pocket clearance on width and height
+    fit=0.3,                                # pocket wall clearance on width and height (total; the ribs do the gripping)
+    rib_w=1.5, rib_p=0.4, rib_n=3,          # crush ribs: width, how far they stand into the pocket, count per long wall
+    lead=1.0,                               # mouth chamfer; the ribs also stop this far below the mouth
+    notch_w=10.0, notch_d=6.0, notch_h=10.0,  # finger notch at each end of the pocket: along the wall, into the boss, down
     lip=2.5,                                # pocket floor left under the camera on each long side (the lens looks past it)
     inner=320.0,                            # hood inside width and depth
     wall=4.0,                               # wall and roof thickness
@@ -62,8 +69,9 @@ def script(d):
     def add(command, **params):
         c.append({"command": command, "params": params})
 
-    for name in ("inner", "wall", "lens_h", "cam_w", "cam_h", "cam_d", "fit", "lip", "boss_margin", "square", "line",
-                 "engrave", "strap_w", "strap_l", "strap_gap", "tripod_d", "tripod_y", "cable_w", "cable_h", "base_t", "corner_r"):
+    for name in ("inner", "wall", "lens_h", "cam_w", "cam_h", "cam_d", "fit", "rib_w", "rib_p", "lead", "lip", "boss_margin", "square", "line",
+                 "engrave", "strap_w", "strap_l", "strap_gap", "tripod_d", "tripod_y", "cable_w", "cable_h", "base_t", "corner_r",
+                 "notch_w"):
         add("parameters.change", name=name, expression=f"{d[name]} mm")
     # the hood: a box, rounded vertical edges, then hollowed from the front (+Y) and the bottom
     add("solid.box", length="inner + 2*wall", width="inner + 2*wall", height=h, center=[0, 0, h / 2], body_name="Hood")
@@ -78,6 +86,26 @@ def script(d):
     add("sketch.rectangle.center", center=[0, 0], corner=["(cam_w + fit)/2", "(cam_h + fit)/2"])
     add("sketch.finish")
     add("solid.extrude", distance="cam_d", direction="negative", operation="cut", targets=["Hood"])
+    # the press fit: a chamfer round the mouth, crush ribs on all four walls (rooted 0.5 mm into the wall, rising from
+    # the floor to lead below the mouth), and a finger notch at each end to get the camera out again
+    top, pw, pd = h + d["boss_h"], d["pocket_w"], d["pocket_d"]
+    add("solid.chamfer", edges=[[0, pd / 2, top], [0, -pd / 2, top], [pw / 2, 0, top], [-pw / 2, 0, top]], distance="lead",
+        body="Hood")
+    rib_h = d["cam_d"] - d["lead"] + 0.5
+    rib_z = d["lens_h"] - 0.5 + rib_h / 2
+    for i in range(d["rib_n"]):
+        x = (i - (d["rib_n"] - 1) / 2) * pw * 0.68 / max(d["rib_n"] - 1, 1)
+        for sy in (1, -1):
+            add("solid.box", length="rib_w", width="rib_p + 0.5", height=rib_h,
+                center=[x, sy * (pd / 2 + 0.25 - d["rib_p"] / 2), rib_z], operation="join", targets=["Hood"])
+    for sx in (1, -1):  # two per end wall, clear of the finger notch between them
+        for sy in (1, -1):
+            add("solid.box", length="rib_p + 0.5", width="rib_w", height=rib_h,
+                center=[sx * (pw / 2 + 0.25 - d["rib_p"] / 2), sy * (pd / 2 - d["rib_w"] / 2 - 1.5), rib_z],
+                operation="join", targets=["Hood"])
+    for sx in (1, -1):
+        add("solid.box", length=d["notch_d"] + 0.5, width="notch_w", height=d["notch_h"] + 0.5,
+            center=[sx * (pw / 2 + d["notch_d"] / 2 - 0.25), 0, top - d["notch_h"] / 2 + 0.25], operation="cut", targets=["Hood"])
     add("sketch.create", plane="XY", offset="lens_h", name="Window")  # the pocket floor
     add("sketch.rectangle.center", center=[0, 0], corner=[d["window_w"] / 2, "(cam_h + fit)/2 - lip"])
     add("sketch.finish")
@@ -110,7 +138,9 @@ def main():
     path = HERE / "camera_box.json"
     path.write_text(json.dumps(script(d), indent=1))
     print(f"hood {d['outer']:.0f} x {d['outer']:.0f} x {d['hood_h'] + d['boss_h']:.0f} mm; pocket {d['pocket_w']} x {d['pocket_d']} x "
-          f"{d['cam_d']}; window {d['window_w']} x {d['window_d']}; square {d['square']} mm; script {path.name}")
+          f"{d['cam_d']} (ribs {d['rib_n'] * 2 + 4} x {d['rib_p']} mm proud -> grip {d['cam_w'] - (d['pocket_w'] - 2 * d['rib_p']):.2f} / "
+          f"{d['cam_h'] - (d['pocket_d'] - 2 * d['rib_p']):.2f} mm interference); window {d['window_w']} x {d['window_d']}; "
+          f"square {d['square']} mm; script {path.name}")
     if "--no-run" in sys.argv:
         return
     run = [CLI, "run", str(path), "--save", str(OUT / "camera_box.sc"), "--out", str(OUT / "camera_box.step"),

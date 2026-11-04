@@ -46,7 +46,28 @@
    "command": "parameters.change",
    "params": {
     "name": "fit",
-    "expression": "0.5 mm"
+    "expression": "0.3 mm"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "rib_w",
+    "expression": "1.5 mm"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "rib_p",
+    "expression": "0.4 mm"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "lead",
+    "expression": "1.0 mm"
    }
   },
   {
@@ -148,6 +169,13 @@
    }
   },
   {
+   "command": "parameters.change",
+   "params": {
+    "name": "notch_w",
+    "expression": "10.0 mm"
+   }
+  },
+  {
    "command": "solid.box",
    "params": {
     "length": "inner + 2*wall",
@@ -224,8 +252,8 @@
      0
     ],
     "corner": [
-     45.25,
-     19.5
+     45.15,
+     19.4
     ]
    }
   },
@@ -280,6 +308,239 @@
    }
   },
   {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      0,
+      9.4,
+      331.0
+     ],
+     [
+      0,
+      -9.4,
+      331.0
+     ],
+     [
+      35.15,
+      0,
+      331.0
+     ],
+     [
+      -35.15,
+      0,
+      331.0
+     ]
+    ],
+    "distance": "lead",
+    "body": "Hood"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": "rib_w",
+    "width": "rib_p + 0.5",
+    "height": 24.5,
+    "center": [
+     -23.902,
+     9.450000000000001,
+     317.75
+    ],
+    "operation": "join",
+    "targets": [
+     "Hood"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": "rib_w",
+    "width": "rib_p + 0.5",
+    "height": 24.5,
+    "center": [
+     -23.902,
+     -9.450000000000001,
+     317.75
+    ],
+    "operation": "join",
+    "targets": [
+     "Hood"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": "rib_w",
+    "width": "rib_p + 0.5",
+    "height": 24.5,
+    "center": [
+     0.0,
+     9.450000000000001,
+     317.75
+    ],
+    "operation": "join",
+    "targets": [
+     "Hood"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": "rib_w",
+    "width": "rib_p + 0.5",
+    "height": 24.5,
+    "center": [
+     0.0,
+     -9.450000000000001,
+     317.75
+    ],
+    "operation": "join",
+    "targets": [
+     "Hood"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": "rib_w",
+    "width": "rib_p + 0.5",
+    "height": 24.5,
+    "center": [
+     23.902,
+     9.450000000000001,
+     317.75
+    ],
+    "operation": "join",
+    "targets": [
+     "Hood"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": "rib_w",
+    "width": "rib_p + 0.5",
+    "height": 24.5,
+    "center": [
+     23.902,
+     -9.450000000000001,
+     317.75
+    ],
+    "operation": "join",
+    "targets": [
+     "Hood"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": "rib_p + 0.5",
+    "width": "rib_w",
+    "height": 24.5,
+    "center": [
+     35.199999999999996,
+     7.15,
+     317.75
+    ],
+    "operation": "join",
+    "targets": [
+     "Hood"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": "rib_p + 0.5",
+    "width": "rib_w",
+    "height": 24.5,
+    "center": [
+     35.199999999999996,
+     -7.15,
+     317.75
+    ],
+    "operation": "join",
+    "targets": [
+     "Hood"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": "rib_p + 0.5",
+    "width": "rib_w",
+    "height": 24.5,
+    "center": [
+     -35.199999999999996,
+     7.15,
+     317.75
+    ],
+    "operation": "join",
+    "targets": [
+     "Hood"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": "rib_p + 0.5",
+    "width": "rib_w",
+    "height": 24.5,
+    "center": [
+     -35.199999999999996,
+     -7.15,
+     317.75
+    ],
+    "operation": "join",
+    "targets": [
+     "Hood"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 6.5,
+    "width": "notch_w",
+    "height": 10.5,
+    "center": [
+     37.9,
+     0,
+     326.25
+    ],
+    "operation": "cut",
+    "targets": [
+     "Hood"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 6.5,
+    "width": "notch_w",
+    "height": 10.5,
+    "center": [
+     -37.9,
+     0,
+     326.25
+    ],
+    "operation": "cut",
+    "targets": [
+     "Hood"
+    ]
+   }
+  },
+  {
    "command": "sketch.create",
    "params": {
     "plane": "XY",
@@ -327,11 +588,11 @@
    "command": "sketch.rectangle.center",
    "params": {
     "center": [
-     53.25,
+     53.15,
      0
     ],
     "corner": [
-     55.25,
+     55.15,
      7.0
     ]
    }
@@ -340,11 +601,11 @@
    "command": "sketch.rectangle.center",
    "params": {
     "center": [
-     -53.25,
+     -53.15,
      0
     ],
     "corner": [
-     -51.25,
+     -51.15,
      7.0
     ]
    }

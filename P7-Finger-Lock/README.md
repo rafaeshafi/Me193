@@ -84,8 +84,11 @@ Three failures in a row → LOCKOUT 30 s (button ignored, red blinks, the failin
 `enclosure/camera_box.py` writes a [SolidCraft](https://github.com/tangency-labs/solidcraft) script and runs it headless:
 `enclosure/out/camera_box.sc` (open it in SolidCraft, every number is a parameter), `.step`, `.stl` and three renders.
 A 328 x 328 mm hood, open at the front and the bottom, roof 304 mm up; the webcam (70 x 18.5 x 25 mm) drops lens-down
-into a snug pocket in a boss on the roof and looks through a 62 x 14 window in the pocket floor, strapped down through
-two slots; a 1/4-20 hole in front of the boss is the alternative for a camera with a tripod thread. The base plate
+into a press-fit pocket in a boss on the roof and looks through a 62 x 14 window in the pocket floor. The pocket walls
+clear the camera by 0.15 mm a side and ten 1.5 mm crush ribs stand 0.4 mm proud of them (0.5 mm interference each
+way), so the ribs squash on the way in and hold the camera whatever the printer did to the walls: too tight, shave the
+ribs or lower `rib_p`; loose, raise it. A 1 mm chamfer leads the camera into the mouth and a finger notch at each end
+gets it out again; two strap slots beside the boss are the backup. A 1/4-20 hole in front of the boss is the alternative for a camera with a tripod thread. The base plate
 carries the engraved 177 mm square (the net's region of interest at that height for a 70° lens) centred under the
 lens; `config.json`'s `roi` is centred to match. Cable notch at the top of the back wall. Change `P` in the script,
 or the parameters in SolidCraft, to resize it. To let Claude drive SolidCraft directly in later sessions:

@@ -1,43 +1,43 @@
 {
   "bodies": [
     {
-      "area_mm2": 822174.7220229487,
+      "area_mm2": 822494.5074627611,
       "bbox": {
         "max": [
-          164.00000000000006,
-          164.00000000000006,
+          164.00000000000003,
+          164.00000000000003,
           331.0
         ],
         "min": [
-          -164.00000000000006,
           -164.00000000000003,
+          -164.00000000000006,
           0.0
         ]
       },
       "center_of_mass": [
-        8.242058738093153e-8,
-        -35.962281037999496,
-        194.55344960447377
+        8.248596908730596e-8,
+        -35.99079569544218,
+        194.4488311933145
       ],
       "closed": true,
       "density_g_cm3": 1.29,
-      "edges": 140,
+      "edges": 308,
       "face_types": {
         "cylinder": 9,
-        "plane": 41
+        "plane": 105
       },
-      "faces": 50,
+      "faces": 114,
       "kernel": {
-        "edges": 144,
-        "faces": 51,
+        "edges": 312,
+        "faces": 115,
         "shells": 1,
-        "vertices": 94
+        "vertices": 198
       },
-      "mass_g": 2139.0790333687205,
+      "mass_g": 2137.384291568686,
       "material": "Default",
       "name": "Hood",
-      "vertices": 92,
-      "volume_mm3": 1658200.8010610237
+      "vertices": 196,
+      "volume_mm3": 1656887.0477276633
     },
     {
       "area_mm2": 221099.74473351837,
@@ -138,11 +138,38 @@
     {
       "comment": "",
       "error": null,
-      "expression": "0.5 mm",
+      "expression": "0.3 mm",
       "model": false,
       "name": "fit",
       "unit": "mm",
-      "value": 0.5
+      "value": 0.3
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "1.5 mm",
+      "model": false,
+      "name": "rib_w",
+      "unit": "mm",
+      "value": 1.5
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "0.4 mm",
+      "model": false,
+      "name": "rib_p",
+      "unit": "mm",
+      "value": 0.4
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "1.0 mm",
+      "model": false,
+      "name": "lead",
+      "unit": "mm",
+      "value": 1.0
     },
     {
       "comment": "",
@@ -273,9 +300,18 @@
     {
       "comment": "",
       "error": null,
+      "expression": "10.0 mm",
+      "model": false,
+      "name": "notch_w",
+      "unit": "mm",
+      "value": 10.0
+    },
+    {
+      "comment": "",
+      "error": null,
       "expression": "tripod_d",
       "model": true,
-      "name": "d13",
+      "name": "d50",
       "unit": "mm",
       "value": 6.6
     }
@@ -302,7 +338,7 @@
     {
       "curves": 6,
       "dof": 0,
-      "id": 8,
+      "id": 21,
       "name": "Window",
       "profiles": 1,
       "status": "solved",
@@ -311,7 +347,7 @@
     {
       "curves": 17,
       "dof": 8,
-      "id": 10,
+      "id": 23,
       "name": "Slots",
       "profiles": 4,
       "status": "solved",
@@ -320,7 +356,7 @@
     {
       "curves": 12,
       "dof": 0,
-      "id": 14,
+      "id": 27,
       "name": "Square",
       "profiles": 2,
       "status": "solved",
@@ -335,7 +371,7 @@
       },
       "error": null,
       "id": 1,
-      "ms": 0.7276659999999999,
+      "ms": 0.837042,
       "name": "Box1",
       "rolled_back": false,
       "suppressed": false,
@@ -349,7 +385,7 @@
       },
       "error": null,
       "id": 2,
-      "ms": 38.506208,
+      "ms": 37.158667,
       "name": "Fillet1",
       "rolled_back": false,
       "suppressed": false,
@@ -363,7 +399,7 @@
       },
       "error": null,
       "id": 3,
-      "ms": 61.777583,
+      "ms": 66.695042,
       "name": "Shell1",
       "rolled_back": false,
       "suppressed": false,
@@ -377,7 +413,7 @@
       },
       "error": null,
       "id": 4,
-      "ms": 0.19325,
+      "ms": 0.180125,
       "name": "Boss",
       "rolled_back": false,
       "suppressed": false,
@@ -391,7 +427,7 @@
       },
       "error": null,
       "id": 5,
-      "ms": 80.834584,
+      "ms": 77.314042,
       "name": "Extrude1",
       "rolled_back": false,
       "suppressed": false,
@@ -405,7 +441,7 @@
       },
       "error": null,
       "id": 6,
-      "ms": 0.119083,
+      "ms": 0.10900000000000001,
       "name": "Pocket",
       "rolled_back": false,
       "suppressed": false,
@@ -419,7 +455,7 @@
       },
       "error": null,
       "id": 7,
-      "ms": 25.227958,
+      "ms": 23.115584000000002,
       "name": "Extrude2",
       "rolled_back": false,
       "suppressed": false,
@@ -433,7 +469,269 @@
       },
       "error": null,
       "id": 8,
-      "ms": 0.101209,
+      "ms": 155.744792,
+      "name": "Chamfer1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ChamferFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [
+          {
+            "face_shift_mm": 0.0,
+            "rotation_rad": 0.0,
+            "strategy": "planar_fallback",
+            "tolerance_mm": 0.0,
+            "translation_mm": 0.0
+          }
+        ],
+        "truncated": false
+      },
+      "error": null,
+      "id": 9,
+      "ms": 615.582792,
+      "name": "Box2",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [
+          {
+            "face_shift_mm": 0.0,
+            "rotation_rad": 0.0,
+            "strategy": "planar_fallback",
+            "tolerance_mm": 0.0,
+            "translation_mm": 0.0
+          }
+        ],
+        "truncated": false
+      },
+      "error": null,
+      "id": 10,
+      "ms": 621.036708,
+      "name": "Box3",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [
+          {
+            "face_shift_mm": 0.0,
+            "rotation_rad": 0.0,
+            "strategy": "planar_fallback",
+            "tolerance_mm": 0.0,
+            "translation_mm": 0.0
+          }
+        ],
+        "truncated": false
+      },
+      "error": null,
+      "id": 11,
+      "ms": 635.904917,
+      "name": "Box4",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [
+          {
+            "face_shift_mm": 0.0,
+            "rotation_rad": 0.0,
+            "strategy": "planar_fallback",
+            "tolerance_mm": 0.0,
+            "translation_mm": 0.0
+          }
+        ],
+        "truncated": false
+      },
+      "error": null,
+      "id": 12,
+      "ms": 625.1922500000001,
+      "name": "Box5",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [
+          {
+            "face_shift_mm": 0.0,
+            "rotation_rad": 0.0,
+            "strategy": "planar_fallback",
+            "tolerance_mm": 0.0,
+            "translation_mm": 0.0
+          }
+        ],
+        "truncated": false
+      },
+      "error": null,
+      "id": 13,
+      "ms": 643.6717090000001,
+      "name": "Box6",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [
+          {
+            "face_shift_mm": 0.0,
+            "rotation_rad": 0.0,
+            "strategy": "planar_fallback",
+            "tolerance_mm": 0.0,
+            "translation_mm": 0.0
+          }
+        ],
+        "truncated": false
+      },
+      "error": null,
+      "id": 14,
+      "ms": 648.757042,
+      "name": "Box7",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [
+          {
+            "face_shift_mm": 0.0,
+            "rotation_rad": 0.0,
+            "strategy": "planar_fallback",
+            "tolerance_mm": 0.0,
+            "translation_mm": 0.0
+          }
+        ],
+        "truncated": false
+      },
+      "error": null,
+      "id": 15,
+      "ms": 644.220083,
+      "name": "Box8",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [
+          {
+            "face_shift_mm": 0.0,
+            "rotation_rad": 0.0,
+            "strategy": "planar_fallback",
+            "tolerance_mm": 0.0,
+            "translation_mm": 0.0
+          }
+        ],
+        "truncated": false
+      },
+      "error": null,
+      "id": 16,
+      "ms": 656.697459,
+      "name": "Box9",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [
+          {
+            "face_shift_mm": 0.0,
+            "rotation_rad": 0.0,
+            "strategy": "planar_fallback",
+            "tolerance_mm": 0.0,
+            "translation_mm": 0.0
+          }
+        ],
+        "truncated": false
+      },
+      "error": null,
+      "id": 17,
+      "ms": 655.699208,
+      "name": "Box10",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [
+          {
+            "face_shift_mm": 0.0,
+            "rotation_rad": 0.0,
+            "strategy": "planar_fallback",
+            "tolerance_mm": 0.0,
+            "translation_mm": 0.0
+          }
+        ],
+        "truncated": false
+      },
+      "error": null,
+      "id": 18,
+      "ms": 658.530125,
+      "name": "Box11",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 19,
+      "ms": 51.491334,
+      "name": "Box12",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 20,
+      "ms": 53.5785,
+      "name": "Box13",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 21,
+      "ms": 0.12079200000000001,
       "name": "Window",
       "rolled_back": false,
       "suppressed": false,
@@ -446,8 +744,8 @@
         "truncated": false
       },
       "error": null,
-      "id": 9,
-      "ms": 24.187958,
+      "id": 22,
+      "ms": 58.552833,
       "name": "Extrude3",
       "rolled_back": false,
       "suppressed": false,
@@ -460,8 +758,8 @@
         "truncated": false
       },
       "error": null,
-      "id": 10,
-      "ms": 0.18329199999999998,
+      "id": 23,
+      "ms": 0.18525,
       "name": "Slots",
       "rolled_back": false,
       "suppressed": false,
@@ -474,8 +772,8 @@
         "truncated": false
       },
       "error": null,
-      "id": 11,
-      "ms": 53.988416,
+      "id": 24,
+      "ms": 146.327667,
       "name": "Extrude4",
       "rolled_back": false,
       "suppressed": false,
@@ -488,9 +786,9 @@
         "truncated": false
       },
       "error": null,
-      "id": 12,
-      "ms": 0.363166,
-      "name": "Box2",
+      "id": 25,
+      "ms": 0.418667,
+      "name": "Box14",
       "rolled_back": false,
       "suppressed": false,
       "type": "BoxFeature",
@@ -502,8 +800,8 @@
         "truncated": false
       },
       "error": null,
-      "id": 13,
-      "ms": 25.4135,
+      "id": 26,
+      "ms": 23.613583000000002,
       "name": "Fillet2",
       "rolled_back": false,
       "suppressed": false,
@@ -516,8 +814,8 @@
         "truncated": false
       },
       "error": null,
-      "id": 14,
-      "ms": 0.13487500000000002,
+      "id": 27,
+      "ms": 0.134375,
       "name": "Square",
       "rolled_back": false,
       "suppressed": false,
@@ -530,8 +828,8 @@
         "truncated": false
       },
       "error": null,
-      "id": 15,
-      "ms": 11.103916,
+      "id": 28,
+      "ms": 9.844583,
       "name": "Extrude5",
       "rolled_back": false,
       "suppressed": false,
@@ -540,12 +838,12 @@
     }
   ],
   "total": {
-    "area_mm2": 1043274.466756467,
-    "edges": 188,
-    "faces": 70,
-    "mass_g": 2692.8340614394638,
+    "area_mm2": 1043594.2521962795,
+    "edges": 356,
+    "faces": 134,
+    "mass_g": 2691.1393196394292,
     "open_bodies_skipped": 0,
-    "vertices": 124,
-    "volume_mm3": 2087468.264681755
+    "vertices": 228,
+    "volume_mm3": 2086154.5113483947
   }
 }
