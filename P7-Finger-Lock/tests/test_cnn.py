@@ -50,3 +50,14 @@ def test_whole_net_parity_and_export_roundtrip(tmp_path):
 def test_softmax():
     p = softmax([1.0, 2.0, 3.0])
     assert abs(p.sum() - 1) < 1e-9 and p.argmax() == 2
+
+
+def test_activations_end_in_logits():
+    import torch as _t
+    _t.manual_seed(0)
+    net = NumpyNet(to_spec(FingerNet().eval(), 0.4, 0.2))
+    acts = net.activations(np.random.default_rng(0).random((64, 64), dtype=np.float32))
+    names = [n for n, _ in acts]
+    assert names[:4] == ["input", "conv1", "relu1", "maxpool1"] and names[-1] == "linear2"
+    assert acts[3][1].shape == (16, 32, 32) and acts[-1][1].shape == (6,)
+    assert np.allclose(acts[-1][1], net.logits(acts[0][1][0] * 0.2 + 0.4), atol=1e-4)

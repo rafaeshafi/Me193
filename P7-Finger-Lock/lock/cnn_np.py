@@ -82,6 +82,26 @@ class NumpyNet:
                 raise ValueError(f"unknown layer {t}")
         return x
 
+    def activations(self, x):
+        """[(layer name, array)] after the input and after every layer, for the explainer movie."""
+        x = ((np.asarray(x, dtype=np.float32) - self.mean) / self.std)[None]
+        out = [("input", x)]
+        counts = {}
+        for t, w, b in self.layers:
+            if t == "conv":
+                x = conv2d(x, w, b)
+            elif t == "relu":
+                x = relu(x)
+            elif t == "maxpool":
+                x = maxpool2(x)
+            elif t == "flatten":
+                x = x.reshape(-1)
+            elif t == "linear":
+                x = w @ x + b
+            counts[t] = counts.get(t, 0) + 1
+            out.append((f"{t}{counts[t]}", x))
+        return out
+
     def predict(self, x):
         """-> (class, probabilities list)."""
         p = softmax(self.logits(x))
