@@ -78,3 +78,15 @@ Three failures in a row → LOCKOUT 30 s (button ignored, red blinks, the failin
 - **Intruder log + skull**: after the third wrong code the matrix shows a skull, the button is dead for 30 s, and the
   hand that failed is saved for the owner.
 - The explainer is a **stop-action movie** drawn from the real weights and the real activations of my hand.
+
+## The camera hood (SolidCraft)
+
+`enclosure/camera_box.py` writes a [SolidCraft](https://github.com/tangency-labs/solidcraft) script and runs it headless:
+`enclosure/out/camera_box.sc` (open it in SolidCraft, every number is a parameter), `.step`, `.stl` and three renders.
+A 328 x 328 mm hood, open at the front and the bottom, roof 304 mm up; the webcam (70 x 18.5 x 25 mm) drops lens-down
+into a snug pocket in a boss on the roof and looks through a 62 x 14 window in the pocket floor, strapped down through
+two slots; a 1/4-20 hole in front of the boss is the alternative for a camera with a tripod thread. The base plate
+carries the engraved 177 mm square (the net's region of interest at that height for a 70° lens) centred under the
+lens; `config.json`'s `roi` is centred to match. Cable notch at the top of the back wall. Change `P` in the script,
+or the parameters in SolidCraft, to resize it. To let Claude drive SolidCraft directly in later sessions:
+`claude mcp add solidcraft -- /Applications/SolidCraft.app/Contents/MacOS/solidcraft-cli mcp`.

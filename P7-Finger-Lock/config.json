@@ -1,9 +1,20 @@
 {
-  "code": [2, 5, 3],
+  "code": [
+    2,
+    5,
+    3
+  ],
   "camera": 1,
-  "frame_size": [640, 480],
+  "frame_size": [
+    640,
+    480
+  ],
   "fps": 10,
-  "roi": [0.3, 0.2, 0.55],
+  "roi": [
+    0.294,
+    0.225,
+    0.55
+  ],
   "input_size": 64,
   "min_confidence": 0.85,
   "hold_frames": 8,

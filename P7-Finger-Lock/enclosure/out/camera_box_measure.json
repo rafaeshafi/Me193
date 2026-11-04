@@ -1,0 +1,551 @@
+{
+  "bodies": [
+    {
+      "area_mm2": 822174.7220229487,
+      "bbox": {
+        "max": [
+          164.00000000000006,
+          164.00000000000006,
+          331.0
+        ],
+        "min": [
+          -164.00000000000006,
+          -164.00000000000003,
+          0.0
+        ]
+      },
+      "center_of_mass": [
+        8.242058738093153e-8,
+        -35.962281037999496,
+        194.55344960447377
+      ],
+      "closed": true,
+      "density_g_cm3": 1.29,
+      "edges": 140,
+      "face_types": {
+        "cylinder": 9,
+        "plane": 41
+      },
+      "faces": 50,
+      "kernel": {
+        "edges": 144,
+        "faces": 51,
+        "shells": 1,
+        "vertices": 94
+      },
+      "mass_g": 2139.0790333687205,
+      "material": "Default",
+      "name": "Hood",
+      "vertices": 92,
+      "volume_mm3": 1658200.8010610237
+    },
+    {
+      "area_mm2": 221099.74473351837,
+      "bbox": {
+        "max": [
+          164.0,
+          164.0,
+          0.0
+        ],
+        "min": [
+          -164.0,
+          -164.00000000000003,
+          -4.0
+        ]
+      },
+      "center_of_mass": [
+        5.867644176654109e-15,
+        2.670214523741529e-15,
+        -2.0033608137635945
+      ],
+      "closed": true,
+      "density_g_cm3": 1.29,
+      "edges": 48,
+      "face_types": {
+        "cylinder": 4,
+        "plane": 16
+      },
+      "faces": 20,
+      "kernel": {
+        "edges": 48,
+        "faces": 20,
+        "shells": 1,
+        "vertices": 32
+      },
+      "mass_g": 553.7550280707435,
+      "material": "Default",
+      "name": "Base",
+      "vertices": 32,
+      "volume_mm3": 429267.4636207314
+    }
+  ],
+  "body_count": 2,
+  "params": [
+    {
+      "comment": "",
+      "error": null,
+      "expression": "320.0 mm",
+      "model": false,
+      "name": "inner",
+      "unit": "mm",
+      "value": 320.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "4.0 mm",
+      "model": false,
+      "name": "wall",
+      "unit": "mm",
+      "value": 4.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "306.0 mm",
+      "model": false,
+      "name": "lens_h",
+      "unit": "mm",
+      "value": 306.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "70.0 mm",
+      "model": false,
+      "name": "cam_w",
+      "unit": "mm",
+      "value": 70.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "18.5 mm",
+      "model": false,
+      "name": "cam_h",
+      "unit": "mm",
+      "value": 18.5
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "25.0 mm",
+      "model": false,
+      "name": "cam_d",
+      "unit": "mm",
+      "value": 25.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "0.5 mm",
+      "model": false,
+      "name": "fit",
+      "unit": "mm",
+      "value": 0.5
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "2.5 mm",
+      "model": false,
+      "name": "lip",
+      "unit": "mm",
+      "value": 2.5
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "10.0 mm",
+      "model": false,
+      "name": "boss_margin",
+      "unit": "mm",
+      "value": 10.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "176.8 mm",
+      "model": false,
+      "name": "square",
+      "unit": "mm",
+      "value": 176.8
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "2.0 mm",
+      "model": false,
+      "name": "line",
+      "unit": "mm",
+      "value": 2.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "0.6 mm",
+      "model": false,
+      "name": "engrave",
+      "unit": "mm",
+      "value": 0.6
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "4.0 mm",
+      "model": false,
+      "name": "strap_w",
+      "unit": "mm",
+      "value": 4.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "14.0 mm",
+      "model": false,
+      "name": "strap_l",
+      "unit": "mm",
+      "value": 14.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "6.0 mm",
+      "model": false,
+      "name": "strap_gap",
+      "unit": "mm",
+      "value": 6.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "6.6 mm",
+      "model": false,
+      "name": "tripod_d",
+      "unit": "mm",
+      "value": 6.6
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "45.0 mm",
+      "model": false,
+      "name": "tripod_y",
+      "unit": "mm",
+      "value": 45.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "16.0 mm",
+      "model": false,
+      "name": "cable_w",
+      "unit": "mm",
+      "value": 16.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "20.0 mm",
+      "model": false,
+      "name": "cable_h",
+      "unit": "mm",
+      "value": 20.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "4.0 mm",
+      "model": false,
+      "name": "base_t",
+      "unit": "mm",
+      "value": 4.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "8.0 mm",
+      "model": false,
+      "name": "corner_r",
+      "unit": "mm",
+      "value": 8.0
+    },
+    {
+      "comment": "",
+      "error": null,
+      "expression": "tripod_d",
+      "model": true,
+      "name": "d13",
+      "unit": "mm",
+      "value": 6.6
+    }
+  ],
+  "sketches": [
+    {
+      "curves": 6,
+      "dof": 2,
+      "id": 4,
+      "name": "Boss",
+      "profiles": 1,
+      "status": "solved",
+      "visible": false
+    },
+    {
+      "curves": 6,
+      "dof": 0,
+      "id": 6,
+      "name": "Pocket",
+      "profiles": 1,
+      "status": "solved",
+      "visible": false
+    },
+    {
+      "curves": 6,
+      "dof": 0,
+      "id": 8,
+      "name": "Window",
+      "profiles": 1,
+      "status": "solved",
+      "visible": false
+    },
+    {
+      "curves": 17,
+      "dof": 8,
+      "id": 10,
+      "name": "Slots",
+      "profiles": 4,
+      "status": "solved",
+      "visible": false
+    },
+    {
+      "curves": 12,
+      "dof": 0,
+      "id": 14,
+      "name": "Square",
+      "profiles": 2,
+      "status": "solved",
+      "visible": false
+    }
+  ],
+  "timeline": [
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 1,
+      "ms": 0.7276659999999999,
+      "name": "Box1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 2,
+      "ms": 38.506208,
+      "name": "Fillet1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "FilletFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 3,
+      "ms": 61.777583,
+      "name": "Shell1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ShellFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 4,
+      "ms": 0.19325,
+      "name": "Boss",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 5,
+      "ms": 80.834584,
+      "name": "Extrude1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ExtrudeFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 6,
+      "ms": 0.119083,
+      "name": "Pocket",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 7,
+      "ms": 25.227958,
+      "name": "Extrude2",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ExtrudeFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 8,
+      "ms": 0.101209,
+      "name": "Window",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 9,
+      "ms": 24.187958,
+      "name": "Extrude3",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ExtrudeFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 10,
+      "ms": 0.18329199999999998,
+      "name": "Slots",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 11,
+      "ms": 53.988416,
+      "name": "Extrude4",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ExtrudeFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 12,
+      "ms": 0.363166,
+      "name": "Box2",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 13,
+      "ms": 25.4135,
+      "name": "Fillet2",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "FilletFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 14,
+      "ms": 0.13487500000000002,
+      "name": "Square",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 15,
+      "ms": 11.103916,
+      "name": "Extrude5",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ExtrudeFeature",
+      "warning": null
+    }
+  ],
+  "total": {
+    "area_mm2": 1043274.466756467,
+    "edges": 188,
+    "faces": 70,
+    "mass_g": 2692.8340614394638,
+    "open_bodies_skipped": 0,
+    "vertices": 124,
+    "volume_mm3": 2087468.264681755
+  }
+}
