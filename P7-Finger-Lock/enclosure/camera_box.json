@@ -46,7 +46,7 @@
    "command": "parameters.change",
    "params": {
     "name": "fit",
-    "expression": "0.3 mm"
+    "expression": "2.0 mm"
    }
   },
   {
@@ -60,7 +60,7 @@
    "command": "parameters.change",
    "params": {
     "name": "rib_p",
-    "expression": "0.4 mm"
+    "expression": "1.2 mm"
    }
   },
   {
@@ -179,7 +179,7 @@
    "command": "parameters.change",
    "params": {
     "name": "sink",
-    "expression": "0.5 mm"
+    "expression": "2.0 mm"
    }
   },
   {
@@ -187,11 +187,11 @@
    "params": {
     "length": "inner + 2*wall",
     "width": "inner + 2*wall",
-    "height": 331.5,
+    "height": 333.0,
     "center": [
      0,
      0,
-     165.75
+     166.5
     ],
     "body_name": "Hood"
    }
@@ -203,22 +203,22 @@
      [
       164.0,
       164.0,
-      165.75
+      166.5
      ],
      [
       164.0,
       -164.0,
-      165.75
+      166.5
      ],
      [
       -164.0,
       164.0,
-      165.75
+      166.5
      ],
      [
       -164.0,
       -164.0,
-      165.75
+      166.5
      ]
     ],
     "radius": "corner_r"
@@ -231,7 +231,7 @@
      [
       0,
       164.0,
-      165.75
+      166.5
      ],
      [
       0,
@@ -247,7 +247,7 @@
    "command": "sketch.create",
    "params": {
     "plane": "XY",
-    "offset": 327.5,
+    "offset": 329.0,
     "name": "Block"
    }
   },
@@ -259,8 +259,8 @@
      0
     ],
     "corner": [
-     45.15,
-     19.4
+     46.0,
+     20.25
     ]
    }
   },
@@ -271,7 +271,7 @@
   {
    "command": "solid.extrude",
    "params": {
-    "distance": 23.5,
+    "distance": 25.0,
     "direction": "negative",
     "operation": "join",
     "targets": [
@@ -283,7 +283,7 @@
    "command": "sketch.create",
    "params": {
     "plane": "XY",
-    "offset": 331.5,
+    "offset": 333.0,
     "name": "Cavity"
    }
   },
@@ -321,23 +321,23 @@
     "edges": [
      [
       0,
-      9.4,
-      331.5
+      10.25,
+      333.0
      ],
      [
       0,
-      -9.4,
-      331.5
+      -10.25,
+      333.0
      ],
      [
-      35.15,
+      36.0,
       0,
-      331.5
+      333.0
      ],
      [
-      -35.15,
+      -36.0,
       0,
-      331.5
+      333.0
      ]
     ],
     "distance": "lead",
@@ -349,11 +349,11 @@
    "params": {
     "length": "rib_w",
     "width": "rib_p + 0.5",
-    "height": 25.0,
+    "height": 26.5,
     "center": [
-     -23.902,
-     9.450000000000001,
-     318.0
+     -24.48,
+     9.9,
+     318.75
     ],
     "operation": "join",
     "targets": [
@@ -366,11 +366,11 @@
    "params": {
     "length": "rib_w",
     "width": "rib_p + 0.5",
-    "height": 25.0,
+    "height": 26.5,
     "center": [
-     -23.902,
-     -9.450000000000001,
-     318.0
+     -24.48,
+     -9.9,
+     318.75
     ],
     "operation": "join",
     "targets": [
@@ -383,11 +383,11 @@
    "params": {
     "length": "rib_w",
     "width": "rib_p + 0.5",
-    "height": 25.0,
+    "height": 26.5,
     "center": [
      0.0,
-     9.450000000000001,
-     318.0
+     9.9,
+     318.75
     ],
     "operation": "join",
     "targets": [
@@ -400,11 +400,11 @@
    "params": {
     "length": "rib_w",
     "width": "rib_p + 0.5",
-    "height": 25.0,
+    "height": 26.5,
     "center": [
      0.0,
-     -9.450000000000001,
-     318.0
+     -9.9,
+     318.75
     ],
     "operation": "join",
     "targets": [
@@ -417,11 +417,11 @@
    "params": {
     "length": "rib_w",
     "width": "rib_p + 0.5",
-    "height": 25.0,
+    "height": 26.5,
     "center": [
-     23.902,
-     9.450000000000001,
-     318.0
+     24.48,
+     9.9,
+     318.75
     ],
     "operation": "join",
     "targets": [
@@ -434,11 +434,11 @@
    "params": {
     "length": "rib_w",
     "width": "rib_p + 0.5",
-    "height": 25.0,
+    "height": 26.5,
     "center": [
-     23.902,
-     -9.450000000000001,
-     318.0
+     24.48,
+     -9.9,
+     318.75
     ],
     "operation": "join",
     "targets": [
@@ -451,11 +451,11 @@
    "params": {
     "length": "rib_p + 0.5",
     "width": "rib_w",
-    "height": 25.0,
+    "height": 26.5,
     "center": [
-     35.199999999999996,
-     7.15,
-     318.0
+     35.65,
+     8.0,
+     318.75
     ],
     "operation": "join",
     "targets": [
@@ -468,11 +468,11 @@
    "params": {
     "length": "rib_p + 0.5",
     "width": "rib_w",
-    "height": 25.0,
+    "height": 26.5,
     "center": [
-     35.199999999999996,
-     -7.15,
-     318.0
+     35.65,
+     -8.0,
+     318.75
     ],
     "operation": "join",
     "targets": [
@@ -485,11 +485,11 @@
    "params": {
     "length": "rib_p + 0.5",
     "width": "rib_w",
-    "height": 25.0,
+    "height": 26.5,
     "center": [
-     -35.199999999999996,
-     7.15,
-     318.0
+     -35.65,
+     8.0,
+     318.75
     ],
     "operation": "join",
     "targets": [
@@ -502,11 +502,11 @@
    "params": {
     "length": "rib_p + 0.5",
     "width": "rib_w",
-    "height": 25.0,
+    "height": 26.5,
     "center": [
-     -35.199999999999996,
-     -7.15,
-     318.0
+     -35.65,
+     -8.0,
+     318.75
     ],
     "operation": "join",
     "targets": [
@@ -519,11 +519,11 @@
    "params": {
     "length": 6.5,
     "width": "notch_w",
-    "height": 26.0,
+    "height": 27.5,
     "center": [
-     37.9,
+     38.75,
      0,
-     319.0
+     319.75
     ],
     "operation": "cut",
     "targets": [
@@ -536,11 +536,11 @@
    "params": {
     "length": 6.5,
     "width": "notch_w",
-    "height": 26.0,
+    "height": 27.5,
     "center": [
-     -37.9,
+     -38.75,
      0,
-     319.0
+     319.75
     ],
     "operation": "cut",
     "targets": [
@@ -588,7 +588,7 @@
    "command": "sketch.create",
    "params": {
     "plane": "XY",
-    "offset": 331.5,
+    "offset": 333.0,
     "name": "Slots"
    }
   },
@@ -596,11 +596,11 @@
    "command": "sketch.rectangle.center",
    "params": {
     "center": [
-     53.15,
+     54.0,
      0
     ],
     "corner": [
-     55.15,
+     56.0,
      7.0
     ]
    }
@@ -609,11 +609,11 @@
    "command": "sketch.rectangle.center",
    "params": {
     "center": [
-     -53.15,
+     -54.0,
      0
     ],
     "corner": [
-     -51.15,
+     -52.0,
      7.0
     ]
    }

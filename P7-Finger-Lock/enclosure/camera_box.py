@@ -29,10 +29,10 @@ CLI = "/Applications/SolidCraft.app/Contents/MacOS/solidcraft-cli"
 # ---- parameters (mm, degrees) ----
 P = dict(
     cam_w=70.0, cam_h=18.5, cam_d=25.0,     # the webcam body: width, height of the lens face, depth (front to back)
-    fit=0.3,                                # cavity wall clearance on width and height (total; the ribs do the gripping)
-    rib_w=1.5, rib_p=0.4, rib_n=3,          # crush ribs: width, how far they stand into the cavity, count per long wall
+    fit=2.0,                                # cavity wall clearance on width and height (total; the ribs do the gripping)
+    rib_w=1.5, rib_p=1.2, rib_n=3,          # crush ribs: width, how far they stand into the cavity, count per long wall
     lead=1.0,                               # mouth chamfer; the ribs also stop this far below the mouth
-    sink=0.5,                               # the camera's back sits this far below the roof surface
+    sink=2.0,                               # the camera's back sits this far below the roof surface
     notch_w=10.0, notch_d=6.0,              # finger/cable notch at each end of the cavity: along the wall, into the block
     lip=2.5,                                # cavity floor left under the camera on each long side (the lens looks past it)
     inner=320.0,                            # hood inside width and depth
