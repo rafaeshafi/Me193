@@ -61,7 +61,7 @@ All within about 2 steps, with a slight over-count of about 8 %.
 
 ## Video captions
 
-- **Demo video.** Strap on, phone open on the Steps tab reading 0. Three counted walks of 24, 19 and 20 footfalls; the count climbs one per step with the rate trace spiking under each, and finishes at 26, 21 and 22. Between walks the count holds still.
+- **Demo video** (phone screen recording, 24 s, demo take 3): starts at 0, 20 counted footfalls, the count climbs one per step with a spike in the rate trace under each, and ends at 21 ± 10. Standing before and after holds it still.
 - **Animation** (`stepnet_explainer_small.mp4`, 88 s, made with Manim by Claude): from the sensor traces through decimation, the three convolution layers and the rate curve to the loss, back-propagation and the weights file landing on the board.
 
 ## GitHub
