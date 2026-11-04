@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finger Lock</title>
+<style>
+ body{font-family:-apple-system,Helvetica,Arial,sans-serif;background:#111;color:#eee;margin:0;padding:16px}
+ h1{font-size:20px;margin:0 0 8px} .row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+ #state{font-size:34px;font-weight:700} .IDLE{color:#aaa}.LISTENING{color:#ffd500}.UNLOCKED{color:#3f3}.DENIED,.LOCKOUT{color:#f44}
+ #digits{font-size:40px;letter-spacing:12px;font-family:Menlo,monospace} img{width:256px;height:256px;image-rendering:pixelated;border:2px solid #444}
+ .bar{height:14px;background:#555;margin:3px 0;position:relative} .bar i{display:block;height:100%;background:#888} .bar.win i{background:#ffd500}
+ .bar b{position:absolute;left:4px;top:-2px;font-size:12px} button{font-size:18px;padding:8px 18px;margin-right:8px}
+ small{color:#999} #led{display:inline-block;width:18px;height:18px;border-radius:50%;margin-right:6px;vertical-align:middle}
+</style></head><body>
+<h1>🔐 Finger Lock <small id="meta"></small></h1>
+<div class="row">
+ <div><img id="roi" alt="what the net sees"><br><small>the desk square, as the net sees it</small></div>
+ <div style="min-width:260px">
+  <div id="state" class="IDLE">IDLE</div>
+  <div id="digits">_ _ _</div>
+  <div id="prog"></div>
+  <div id="bars"></div>
+  <p><span id="r" class="led"></span><span id="g" class="led"></span> <span id="leds"></span></p>
+  <p><button onclick="post('/button')">button</button><button onclick="post('/reset')">reset attempts</button></p>
+  <p><small id="timing"></small></p>
+ </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+function post(p){fetch(p,{method:'POST'});}
+function led(id,on,c){const e=$(id);e.style.display='inline-block';e.style.width='18px';e.style.height='18px';e.style.borderRadius='50%';e.style.marginRight='6px';e.style.verticalAlign='middle';e.style.background=on?c:'#333';}
+async function tick(){
+ try{const s=await (await fetch('/state')).json();
+  $('state').textContent=s.state+(s.remaining!=null?'  '+s.remaining.toFixed(0)+' s':''); $('state').className=s.state;
+  let d=s.entered.slice(); while(d.length<s.code_len)d.push('_'); $('digits').textContent=d.join(' ');
+  $('prog').innerHTML=s.state==='LISTENING'?'<div class="bar"><i style="width:'+(100*s.progress)+'%"></i><b>hold '+(s.candidate||'-')+'</b></div>':'';
+  $('bars').innerHTML=(s.probs||[]).map((p,i)=>'<div class="bar'+(i===s.cls?' win':'')+'"><i style="width:'+(100*p)+'%"></i><b>'+i+' fingers '+(100*p).toFixed(0)+'%</b></div>').join('');
+  led('r',s.leds[0],'#f33'); led('g',s.leds[1],'#3f3'); $('leds').textContent='attempts '+s.attempts;
+  $('meta').textContent=(s.camera?'camera on':'NO CAMERA')+' · '+s.engine; $('timing').textContent='inference '+(s.inference_ms??'-')+' ms · '+(s.fps??'-')+' fps · frame '+s.frames;
+  $('roi').src='/roi.jpg?'+Date.now();
+ }catch(e){ $('meta').textContent='no connection'; }
+}
+setInterval(tick,250); tick();
+</script></body></html>

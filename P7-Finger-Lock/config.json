@@ -1,0 +1,18 @@
+{
+  "code": [2, 5, 3],
+  "camera": 1,
+  "frame_size": [640, 480],
+  "fps": 10,
+  "roi": [0.3, 0.2, 0.55],
+  "input_size": 64,
+  "min_confidence": 0.85,
+  "hold_frames": 8,
+  "gap_frames": 3,
+  "entry_timeout_s": 20,
+  "unlock_s": 5,
+  "deny_s": 2,
+  "max_attempts": 3,
+  "lockout_s": 30,
+  "servo_open_ms": 5000,
+  "web_port": 8080
+}

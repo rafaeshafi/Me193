@@ -1,0 +1,9 @@
+name: Finger Lock
+icon: 🔐
+description: A safe that opens for a three-digit finger code. The USB webcam looks at the desk square, a small convolutional net (trained in PyTorch on the Mac, run here in numpy) counts fingers, and the lock policy decides. Button on D2, LEDs on D3/D4, servo latch on D5, the 13x8 matrix shows the digits. Page on port 8080.
+
+# A list of network ports that the application exposes.
+ports: [8080]
+
+# A list of bricks used by this application.
+bricks: []

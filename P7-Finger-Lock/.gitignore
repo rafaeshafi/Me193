@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+data/intruders/
+docs/movie/frames/
+docs/movie/*.mp4
+docs/bench_*.json
+app/data/
