@@ -1,23 +1,23 @@
 {
   "bodies": [
     {
-      "area_mm2": 822494.5074627611,
+      "area_mm2": 875222.749069134,
       "bbox": {
         "max": [
-          164.00000000000003,
-          164.00000000000003,
-          331.0
+          164.0,
+          164.0000000000014,
+          331.5000000000001
         ],
         "min": [
+          -164.0,
           -164.00000000000003,
-          -164.00000000000006,
           0.0
         ]
       },
       "center_of_mass": [
-        8.248596908730596e-8,
-        -35.99079569544218,
-        194.4488311933145
+        8.532268024927004e-8,
+        -37.19688136346087,
+        207.54651227037613
       ],
       "closed": true,
       "density_g_cm3": 1.29,
@@ -33,11 +33,11 @@
         "shells": 1,
         "vertices": 198
       },
-      "mass_g": 2137.384291568686,
+      "mass_g": 2260.898007975003,
       "material": "Default",
       "name": "Hood",
       "vertices": 196,
-      "volume_mm3": 1656887.0477276633
+      "volume_mm3": 1752634.1147093049
     },
     {
       "area_mm2": 221099.74473351837,
@@ -309,6 +309,15 @@
     {
       "comment": "",
       "error": null,
+      "expression": "0.5 mm",
+      "model": false,
+      "name": "sink",
+      "unit": "mm",
+      "value": 0.5
+    },
+    {
+      "comment": "",
+      "error": null,
       "expression": "tripod_d",
       "model": true,
       "name": "d50",
@@ -321,7 +330,7 @@
       "curves": 6,
       "dof": 2,
       "id": 4,
-      "name": "Boss",
+      "name": "Block",
       "profiles": 1,
       "status": "solved",
       "visible": false
@@ -330,7 +339,7 @@
       "curves": 6,
       "dof": 0,
       "id": 6,
-      "name": "Pocket",
+      "name": "Cavity",
       "profiles": 1,
       "status": "solved",
       "visible": false
@@ -371,7 +380,7 @@
       },
       "error": null,
       "id": 1,
-      "ms": 0.837042,
+      "ms": 0.840333,
       "name": "Box1",
       "rolled_back": false,
       "suppressed": false,
@@ -385,7 +394,7 @@
       },
       "error": null,
       "id": 2,
-      "ms": 37.158667,
+      "ms": 36.163125,
       "name": "Fillet1",
       "rolled_back": false,
       "suppressed": false,
@@ -399,7 +408,7 @@
       },
       "error": null,
       "id": 3,
-      "ms": 66.695042,
+      "ms": 64.493542,
       "name": "Shell1",
       "rolled_back": false,
       "suppressed": false,
@@ -413,8 +422,8 @@
       },
       "error": null,
       "id": 4,
-      "ms": 0.180125,
-      "name": "Boss",
+      "ms": 0.16470800000000002,
+      "name": "Block",
       "rolled_back": false,
       "suppressed": false,
       "type": "Sketch",
@@ -427,7 +436,7 @@
       },
       "error": null,
       "id": 5,
-      "ms": 77.314042,
+      "ms": 46.143,
       "name": "Extrude1",
       "rolled_back": false,
       "suppressed": false,
@@ -441,8 +450,8 @@
       },
       "error": null,
       "id": 6,
-      "ms": 0.10900000000000001,
-      "name": "Pocket",
+      "ms": 0.106458,
+      "name": "Cavity",
       "rolled_back": false,
       "suppressed": false,
       "type": "Sketch",
@@ -455,7 +464,7 @@
       },
       "error": null,
       "id": 7,
-      "ms": 23.115584000000002,
+      "ms": 24.159,
       "name": "Extrude2",
       "rolled_back": false,
       "suppressed": false,
@@ -469,7 +478,7 @@
       },
       "error": null,
       "id": 8,
-      "ms": 155.744792,
+      "ms": 153.33070800000002,
       "name": "Chamfer1",
       "rolled_back": false,
       "suppressed": false,
@@ -491,7 +500,7 @@
       },
       "error": null,
       "id": 9,
-      "ms": 615.582792,
+      "ms": 687.148959,
       "name": "Box2",
       "rolled_back": false,
       "suppressed": false,
@@ -513,7 +522,7 @@
       },
       "error": null,
       "id": 10,
-      "ms": 621.036708,
+      "ms": 655.636042,
       "name": "Box3",
       "rolled_back": false,
       "suppressed": false,
@@ -526,16 +535,16 @@
           {
             "face_shift_mm": 0.0,
             "rotation_rad": 0.0,
-            "strategy": "planar_fallback",
-            "tolerance_mm": 0.0,
-            "translation_mm": 0.0
+            "strategy": "shifted_operands",
+            "tolerance_mm": 1.140281105692804,
+            "translation_mm": 3.2367064979875426
           }
         ],
         "truncated": false
       },
       "error": null,
       "id": 11,
-      "ms": 635.904917,
+      "ms": 101.210667,
       "name": "Box4",
       "rolled_back": false,
       "suppressed": false,
@@ -544,20 +553,12 @@
     },
     {
       "boolean_diagnostics": {
-        "events": [
-          {
-            "face_shift_mm": 0.0,
-            "rotation_rad": 0.0,
-            "strategy": "planar_fallback",
-            "tolerance_mm": 0.0,
-            "translation_mm": 0.0
-          }
-        ],
+        "events": [],
         "truncated": false
       },
       "error": null,
       "id": 12,
-      "ms": 625.1922500000001,
+      "ms": 66.56045900000001,
       "name": "Box5",
       "rolled_back": false,
       "suppressed": false,
@@ -566,20 +567,12 @@
     },
     {
       "boolean_diagnostics": {
-        "events": [
-          {
-            "face_shift_mm": 0.0,
-            "rotation_rad": 0.0,
-            "strategy": "planar_fallback",
-            "tolerance_mm": 0.0,
-            "translation_mm": 0.0
-          }
-        ],
+        "events": [],
         "truncated": false
       },
       "error": null,
       "id": 13,
-      "ms": 643.6717090000001,
+      "ms": 66.72391599999999,
       "name": "Box6",
       "rolled_back": false,
       "suppressed": false,
@@ -592,16 +585,16 @@
           {
             "face_shift_mm": 0.0,
             "rotation_rad": 0.0,
-            "strategy": "planar_fallback",
-            "tolerance_mm": 0.0,
-            "translation_mm": 0.0
+            "strategy": "shifted_operands",
+            "tolerance_mm": 1.140281105692804,
+            "translation_mm": 3.2367064979875426
           }
         ],
         "truncated": false
       },
       "error": null,
       "id": 14,
-      "ms": 648.757042,
+      "ms": 105.72616699999999,
       "name": "Box7",
       "rolled_back": false,
       "suppressed": false,
@@ -623,7 +616,7 @@
       },
       "error": null,
       "id": 15,
-      "ms": 644.220083,
+      "ms": 675.1509159999999,
       "name": "Box8",
       "rolled_back": false,
       "suppressed": false,
@@ -645,7 +638,7 @@
       },
       "error": null,
       "id": 16,
-      "ms": 656.697459,
+      "ms": 684.329916,
       "name": "Box9",
       "rolled_back": false,
       "suppressed": false,
@@ -658,17 +651,31 @@
           {
             "face_shift_mm": 0.0,
             "rotation_rad": 0.0,
-            "strategy": "planar_fallback",
-            "tolerance_mm": 0.0,
-            "translation_mm": 0.0
+            "strategy": "shifted_operands",
+            "tolerance_mm": 1.140281105692804,
+            "translation_mm": 2.8263110513817784
           }
         ],
         "truncated": false
       },
       "error": null,
       "id": 17,
-      "ms": 655.699208,
+      "ms": 99.39937499999999,
       "name": "Box10",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 18,
+      "ms": 68.41354199999999,
+      "name": "Box11",
       "rolled_back": false,
       "suppressed": false,
       "type": "BoxFeature",
@@ -688,22 +695,8 @@
         "truncated": false
       },
       "error": null,
-      "id": 18,
-      "ms": 658.530125,
-      "name": "Box11",
-      "rolled_back": false,
-      "suppressed": false,
-      "type": "BoxFeature",
-      "warning": null
-    },
-    {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
-      "error": null,
       "id": 19,
-      "ms": 51.491334,
+      "ms": 645.901709,
       "name": "Box12",
       "rolled_back": false,
       "suppressed": false,
@@ -712,12 +705,20 @@
     },
     {
       "boolean_diagnostics": {
-        "events": [],
+        "events": [
+          {
+            "face_shift_mm": 0.0,
+            "rotation_rad": 0.0,
+            "strategy": "planar_fallback",
+            "tolerance_mm": 0.0,
+            "translation_mm": 0.0
+          }
+        ],
         "truncated": false
       },
       "error": null,
       "id": 20,
-      "ms": 53.5785,
+      "ms": 657.915958,
       "name": "Box13",
       "rolled_back": false,
       "suppressed": false,
@@ -731,7 +732,7 @@
       },
       "error": null,
       "id": 21,
-      "ms": 0.12079200000000001,
+      "ms": 0.105916,
       "name": "Window",
       "rolled_back": false,
       "suppressed": false,
@@ -745,7 +746,7 @@
       },
       "error": null,
       "id": 22,
-      "ms": 58.552833,
+      "ms": 68.9075,
       "name": "Extrude3",
       "rolled_back": false,
       "suppressed": false,
@@ -759,7 +760,7 @@
       },
       "error": null,
       "id": 23,
-      "ms": 0.18525,
+      "ms": 0.181791,
       "name": "Slots",
       "rolled_back": false,
       "suppressed": false,
@@ -768,12 +769,20 @@
     },
     {
       "boolean_diagnostics": {
-        "events": [],
+        "events": [
+          {
+            "face_shift_mm": 0.0,
+            "rotation_rad": 0.0,
+            "strategy": "refined_tolerance",
+            "tolerance_mm": 0.285070276423201,
+            "translation_mm": 0.0
+          }
+        ],
         "truncated": false
       },
       "error": null,
       "id": 24,
-      "ms": 146.327667,
+      "ms": 235.731417,
       "name": "Extrude4",
       "rolled_back": false,
       "suppressed": false,
@@ -787,7 +796,7 @@
       },
       "error": null,
       "id": 25,
-      "ms": 0.418667,
+      "ms": 0.413709,
       "name": "Box14",
       "rolled_back": false,
       "suppressed": false,
@@ -801,7 +810,7 @@
       },
       "error": null,
       "id": 26,
-      "ms": 23.613583000000002,
+      "ms": 23.219375,
       "name": "Fillet2",
       "rolled_back": false,
       "suppressed": false,
@@ -815,7 +824,7 @@
       },
       "error": null,
       "id": 27,
-      "ms": 0.134375,
+      "ms": 0.151208,
       "name": "Square",
       "rolled_back": false,
       "suppressed": false,
@@ -829,7 +838,7 @@
       },
       "error": null,
       "id": 28,
-      "ms": 9.844583,
+      "ms": 9.774042,
       "name": "Extrude5",
       "rolled_back": false,
       "suppressed": false,
@@ -838,12 +847,12 @@
     }
   ],
   "total": {
-    "area_mm2": 1043594.2521962795,
+    "area_mm2": 1096322.4938026525,
     "edges": 356,
     "faces": 134,
-    "mass_g": 2691.1393196394292,
+    "mass_g": 2814.6530360457464,
     "open_bodies_skipped": 0,
     "vertices": 228,
-    "volume_mm3": 2086154.5113483947
+    "volume_mm3": 2181901.5783300363
   }
 }

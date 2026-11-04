@@ -176,15 +176,22 @@
    }
   },
   {
+   "command": "parameters.change",
+   "params": {
+    "name": "sink",
+    "expression": "0.5 mm"
+   }
+  },
+  {
    "command": "solid.box",
    "params": {
     "length": "inner + 2*wall",
     "width": "inner + 2*wall",
-    "height": 304.0,
+    "height": 331.5,
     "center": [
      0,
      0,
-     152.0
+     165.75
     ],
     "body_name": "Hood"
    }
@@ -196,22 +203,22 @@
      [
       164.0,
       164.0,
-      152.0
+      165.75
      ],
      [
       164.0,
       -164.0,
-      152.0
+      165.75
      ],
      [
       -164.0,
       164.0,
-      152.0
+      165.75
      ],
      [
       -164.0,
       -164.0,
-      152.0
+      165.75
      ]
     ],
     "radius": "corner_r"
@@ -224,7 +231,7 @@
      [
       0,
       164.0,
-      152.0
+      165.75
      ],
      [
       0,
@@ -240,8 +247,8 @@
    "command": "sketch.create",
    "params": {
     "plane": "XY",
-    "offset": 304.0,
-    "name": "Boss"
+    "offset": 327.5,
+    "name": "Block"
    }
   },
   {
@@ -264,7 +271,8 @@
   {
    "command": "solid.extrude",
    "params": {
-    "distance": 27.0,
+    "distance": 23.5,
+    "direction": "negative",
     "operation": "join",
     "targets": [
      "Hood"
@@ -275,8 +283,8 @@
    "command": "sketch.create",
    "params": {
     "plane": "XY",
-    "offset": 331.0,
-    "name": "Pocket"
+    "offset": 331.5,
+    "name": "Cavity"
    }
   },
   {
@@ -299,7 +307,7 @@
   {
    "command": "solid.extrude",
    "params": {
-    "distance": "cam_d",
+    "distance": "cam_d + sink",
     "direction": "negative",
     "operation": "cut",
     "targets": [
@@ -314,22 +322,22 @@
      [
       0,
       9.4,
-      331.0
+      331.5
      ],
      [
       0,
       -9.4,
-      331.0
+      331.5
      ],
      [
       35.15,
       0,
-      331.0
+      331.5
      ],
      [
       -35.15,
       0,
-      331.0
+      331.5
      ]
     ],
     "distance": "lead",
@@ -341,11 +349,11 @@
    "params": {
     "length": "rib_w",
     "width": "rib_p + 0.5",
-    "height": 24.5,
+    "height": 25.0,
     "center": [
      -23.902,
      9.450000000000001,
-     317.75
+     318.0
     ],
     "operation": "join",
     "targets": [
@@ -358,11 +366,11 @@
    "params": {
     "length": "rib_w",
     "width": "rib_p + 0.5",
-    "height": 24.5,
+    "height": 25.0,
     "center": [
      -23.902,
      -9.450000000000001,
-     317.75
+     318.0
     ],
     "operation": "join",
     "targets": [
@@ -375,11 +383,11 @@
    "params": {
     "length": "rib_w",
     "width": "rib_p + 0.5",
-    "height": 24.5,
+    "height": 25.0,
     "center": [
      0.0,
      9.450000000000001,
-     317.75
+     318.0
     ],
     "operation": "join",
     "targets": [
@@ -392,11 +400,11 @@
    "params": {
     "length": "rib_w",
     "width": "rib_p + 0.5",
-    "height": 24.5,
+    "height": 25.0,
     "center": [
      0.0,
      -9.450000000000001,
-     317.75
+     318.0
     ],
     "operation": "join",
     "targets": [
@@ -409,11 +417,11 @@
    "params": {
     "length": "rib_w",
     "width": "rib_p + 0.5",
-    "height": 24.5,
+    "height": 25.0,
     "center": [
      23.902,
      9.450000000000001,
-     317.75
+     318.0
     ],
     "operation": "join",
     "targets": [
@@ -426,11 +434,11 @@
    "params": {
     "length": "rib_w",
     "width": "rib_p + 0.5",
-    "height": 24.5,
+    "height": 25.0,
     "center": [
      23.902,
      -9.450000000000001,
-     317.75
+     318.0
     ],
     "operation": "join",
     "targets": [
@@ -443,11 +451,11 @@
    "params": {
     "length": "rib_p + 0.5",
     "width": "rib_w",
-    "height": 24.5,
+    "height": 25.0,
     "center": [
      35.199999999999996,
      7.15,
-     317.75
+     318.0
     ],
     "operation": "join",
     "targets": [
@@ -460,11 +468,11 @@
    "params": {
     "length": "rib_p + 0.5",
     "width": "rib_w",
-    "height": 24.5,
+    "height": 25.0,
     "center": [
      35.199999999999996,
      -7.15,
-     317.75
+     318.0
     ],
     "operation": "join",
     "targets": [
@@ -477,11 +485,11 @@
    "params": {
     "length": "rib_p + 0.5",
     "width": "rib_w",
-    "height": 24.5,
+    "height": 25.0,
     "center": [
      -35.199999999999996,
      7.15,
-     317.75
+     318.0
     ],
     "operation": "join",
     "targets": [
@@ -494,11 +502,11 @@
    "params": {
     "length": "rib_p + 0.5",
     "width": "rib_w",
-    "height": 24.5,
+    "height": 25.0,
     "center": [
      -35.199999999999996,
      -7.15,
-     317.75
+     318.0
     ],
     "operation": "join",
     "targets": [
@@ -511,11 +519,11 @@
    "params": {
     "length": 6.5,
     "width": "notch_w",
-    "height": 10.5,
+    "height": 26.0,
     "center": [
      37.9,
      0,
-     326.25
+     319.0
     ],
     "operation": "cut",
     "targets": [
@@ -528,11 +536,11 @@
    "params": {
     "length": 6.5,
     "width": "notch_w",
-    "height": 10.5,
+    "height": 26.0,
     "center": [
      -37.9,
      0,
-     326.25
+     319.0
     ],
     "operation": "cut",
     "targets": [
@@ -568,7 +576,7 @@
   {
    "command": "solid.extrude",
    "params": {
-    "distance": 7.0,
+    "distance": 3.0,
     "direction": "negative",
     "operation": "cut",
     "targets": [
@@ -580,7 +588,7 @@
    "command": "sketch.create",
    "params": {
     "plane": "XY",
-    "offset": 304.0,
+    "offset": 331.5,
     "name": "Slots"
    }
   },
