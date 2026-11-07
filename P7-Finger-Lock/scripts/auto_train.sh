@@ -7,7 +7,7 @@
 #   scripts/auto_train.sh --movie    also re-render docs/movie with the new weights (slow, a few minutes)
 #
 # Needs: every label 0..5 with at least MIN_PER_CLASS pictures and at least 2 capture sessions (validation holds out
-# whole sessions). Training is train/train.py --ablate (with and without augmentation; the augmented net is deployed).
+# whole sessions). Training is train/train.py --ablate --deploy best (with and without augmentation; the better one is deployed).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 PY=.venv/bin/python
@@ -50,7 +50,7 @@ train_once() {
     SPLIT=session; [ "$rc" = 3 ] && SPLIT=within
     if [ "$rc" = 1 ]; then say "not enough yet; keep taking pictures"; return 2; fi
     say "training (${EPOCHS} epochs, augmentation strength ${AUG} and none, validation split: ${SPLIT})..."
-    if ! "$PY" train/train.py --ablate --epochs "$EPOCHS" --split "$SPLIT" --aug-strength "$AUG" 2>&1 | tee -a "$LOG" | grep -E "training /|per class|^--- |epoch +(1|5|10|20|30|40)\b|deployed run|Error|error"; then
+    if ! "$PY" train/train.py --ablate --deploy best --epochs "$EPOCHS" --split "$SPLIT" --aug-strength "$AUG" 2>&1 | tee -a "$LOG" | grep -E "training /|per class|^--- |epoch +(1|5|10|20|30|40)\b|deployed run|Error|error"; then
         say "training failed; see $LOG"; return 1
     fi
     say "results (docs/results.md):"

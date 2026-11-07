@@ -118,6 +118,9 @@ def main(argv=None):
                     help="session: hold out whole capture sessions (honest); within: the last quarter of every burst")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--aug-strength", type=float, default=1.0, help="scale of the augmentation amounts (0.5 = milder)")
+    ap.add_argument("--sessions", nargs="*", default=None, help="train on these capture sessions only (default: all)")
+    ap.add_argument("--deploy", choices=("augmented", "best"), default="augmented",
+                    help="with --ablate: export the augmented run (default) or whichever run validates best")
     ap.add_argument("--size", type=int, default=64)
     ap.add_argument("--out-dir", default=None, help="write models/figures/results somewhere else (tests)")
     a = ap.parse_args(argv)
@@ -133,6 +136,8 @@ def main(argv=None):
         items = [(None, int(l), str(s)) for l, s in zip(labels, sessions)]
     else:
         items = scan(a.data)
+        if a.sessions:
+            items = [it for it in items if it[2] in set(a.sessions)]
         if not items:
             sys.exit(f"no pictures under {a.data}: run tools/capture.py first (or --synth)")
         xs = load_gray(items, a.size)
@@ -158,7 +163,9 @@ def main(argv=None):
         print(f"--- {name} ---")
         model, mean, std, history, cm = fit(xs_tr, y_tr, xs_va, y_va, a.size, a.epochs, aug, a.seed, strength=a.aug_strength)
         runs[name] = history
-        if deployed is None or aug:
+        better = deployed is None or (aug if a.deploy == "augmented" else
+                                      (history[-1]["val_acc"] or 0) > (deployed[4][-1]["val_acc"] or 0))
+        if better:
             deployed = (name, model, mean, std, history, cm)
         plots.curves(history, figs / ("train_curves.png" if aug or not a.ablate else "train_curves_noaug.png"),
                      f"FingerNet training ({name})")
