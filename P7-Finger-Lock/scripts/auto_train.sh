@@ -27,11 +27,15 @@ from pathlib import Path
 need = int(sys.argv[1]); raw = Path("data/raw"); ok = True; sessions = set()
 for label in range(6):
     files = list((raw / str(label)).glob("*.png")) if (raw / str(label)).exists() else []
-    sessions |= {re.sub(r"-\d+\.png$", "", f.name) for f in files}
+    mine = {re.sub(r"-\d+\.png$", "", f.name) for f in files}
+    sessions |= mine
     flag = "" if len(files) >= need else f"   <- need {need - len(files)} more"
-    print(f"  {label} fingers: {len(files):4d} pictures{flag}")
-    ok &= len(files) >= need
+    if len(mine) < 2:
+        flag += "   <- in only %d session; shoot it again in another run" % len(mine)
+    print(f"  {label} fingers: {len(files):4d} pictures in {len(mine)} session(s){flag}")
+    ok &= len(files) >= need and len(mine) >= 2
 print(f"  sessions: {len(sessions)} {'(need at least 2: quit and run the capture again for a second session)' if len(sessions) < 2 else ''}")
+print("  (the newest session is held out to measure accuracy, so every label must appear in at least two sessions)")
 sys.exit(0 if ok and len(sessions) >= 2 else 1)
 EOF
 }
