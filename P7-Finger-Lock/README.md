@@ -11,7 +11,7 @@ ME 193 midterm, Tufts, November 2026.
 | Net | 3 x (conv 3x3 → ReLU → max-pool 2) with 16 / 32 / 64 filters, linear 4096 → 64 → 6, cross-entropy; 285,894 weights |
 | Input | the desk square, grayscale 128 x 128 |
 | Decision | same class ≥ 0.85 confidence for 8 frames in a row = a digit; hand must leave before the next; 3 digits vs the code |
-| Board | UNO Q: webcam → numpy net → policy → 13x8 matrix + 2 LEDs + servo latch; page on port 8080 |
+| Board | UNO Q: webcam → numpy net → policy → 13x8 matrix + 2 LEDs + stepper latch; page on port 8080 |
 | Results | `docs/results.md` (written by the training script), `docs/comparison.md` (UNO Q vs Mac) |
 
 ## What's where
@@ -55,7 +55,7 @@ a fist. Training holds out whole sessions, so the accuracy in `docs/results.md` 
 | Push button | D2 to GND | internal pull-up, 30 ms debounce |
 | Red LED | D3 → 220 Ω → GND | denied / lockout (blinks) |
 | Green LED | D4 → 220 Ω → GND | unlocked; both LEDs on while listening |
-| Servo (latch) | signal D5, 5V, GND | open 2.0 ms pulse for `servo_open_ms`, closed 1.0 ms; change `kOpenUs` in the sketch to suit the latch |
+| Stepper (latch) via HW-627 (DRV8833) | IN1 D6, IN2 D7, IN3 D8, IN4 D9, EEP D10; VCC = motor supply 3-10 V, GND shared | coil A on OUT1/OUT2, coil B on OUT3/OUT4; turns `kStepsOpen` full steps open, holds `servo_open_ms`, turns back; EEP must be HIGH or the chip sleeps; swap one coil's wires to reverse |
 | USB webcam | the USB port (hub if needed) | the same webcam as on the Mac; `board_camera` in config.json picks it (`usb:0`) |
 | 13x8 LED matrix | built in | the digits entered, hold-progress bar, tick / cross / skull |
 
@@ -67,7 +67,7 @@ probabilities, a button for testing without wiring one). Logs: `adb shell tail -
 `lock/policy.py`, fed one probability vector per frame. IDLE → button → LISTENING (LEDs on, 20 s to enter). A digit
 is accepted when the same class 1..5 is the arg-max with confidence ≥ 0.85 for 8 consecutive frames (0.8 s at 10 fps);
 then the hand must release (3 frames of no hand or another class) before the next digit can start, so a held hand is
-one digit. Three digits are compared with the code in order: UNLOCKED (servo open 5 s, green) or DENIED (red, 2 s).
+one digit. Three digits are compared with the code in order: UNLOCKED (latch open 5 s, green) or DENIED (red, 2 s).
 Three failures in a row → LOCKOUT 30 s (button ignored, red blinks, the failing hand's picture is saved to
 `data/intruders/`). The code must be three different digits in 1..5; `config.json` is refused otherwise.
 

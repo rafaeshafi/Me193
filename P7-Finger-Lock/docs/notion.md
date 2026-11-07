@@ -6,10 +6,10 @@ marked (your words) are for you to write.*
 ## Intro
 
 My midterm safe opens for a three-digit code I show with my fingers. I push a button, the LEDs come on, I hold up 2,
-then 5, then 3 fingers under a webcam on a stand, and a servo swings the latch open. The number of fingers in each
+then 5, then 3 fingers under a webcam on a stand, and a stepper motor turns the bolt open. The number of fingers in each
 picture comes from FingerNet, a convolutional neural network I built from scratch in PyTorch and trained on about
 a thousand pictures of my own hand, taken with the same USB webcam. The trained weights then moved onto the Arduino
-UNO Q, where they run in plain numpy next to the same lock policy, the same button, LEDs and servo. The whole
+UNO Q, where they run in plain numpy next to the same lock policy, the same button, LEDs and latch motor. The whole
 pipeline, from pixels to "open", is mine: no vision library does the counting.
 
 | deliverable | where |
@@ -26,26 +26,26 @@ pipeline, from pixels to "open", is mine: no vision library does the counting.
 - USB webcam on a stand, a fixed height above the desk, pointing straight down; a square drawn on the desk is the
   only part of the picture the net sees (the "region of interest", stored in `config.json` so the Mac and the board
   crop the same square).
-- Arduino UNO Q in the safe: push button on D2, red LED on D3, green LED on D4, a hobby servo on D5 as the latch,
+- Arduino UNO Q in the safe: push button on D2, red LED on D3, green LED on D4, a stepper motor on D6-D10 through an HW-627 (DRV8833) driver as the latch,
   the built-in 13x8 LED matrix showing the digits as they are read.
 - Software: PyTorch on the Mac for training; the board runs the exported weights in numpy because the App Lab
   container has no PyTorch.
 
-*(photo of the stand and the square)*  *(photo of the box with the servo latch)*
+*(photo of the stand and the square)*  *(photo of the box with the stepper latch)*
 
 ## Demo video
 
-*(video to come: button, LEDs on, 2-5-3, servo opens; then a wrong code, red; then three wrong codes, skull)*
+*(video to come: button, LEDs on, 2-5-3, the bolt turns open; then a wrong code, red; then three wrong codes, skull)*
 
 ## How it works
 
 Every tenth of a second: the webcam frame is cropped to the square, turned to grey, shrunk to 128x128 and normalised; FingerNet
 turns those 16,384 numbers into six probabilities (0 to 5 fingers); the lock policy turns the stream of probabilities
-into digits and digits into a decision; the MCU shows the state on the matrix and the LEDs and drives the servo.
+into digits and digits into a decision; the MCU shows the state on the matrix and the LEDs and drives the latch motor.
 
 ```
 webcam → crop the square → 128x128 grey → FingerNet (conv 16 → conv 32 → conv 64 → linear 64 → 6) → softmax
-       → lock policy (hold 8 frames, release, 3 digits, compare) → matrix / LEDs / servo
+       → lock policy (hold 8 frames, release, 3 digits, compare) → matrix / LEDs / stepper latch
 ```
 
 ## 1. The lock policy: how it decides
@@ -59,7 +59,7 @@ code on the Mac, in the tests and on the board.
   shows the candidate glowing and a bar filling as the frames accumulate.
 - **Release.** After a digit is accepted the hand has to go away (3 frames of "no hand" or of a different number)
   before the next digit can start, so holding up two fingers for five seconds is one "2", not three.
-- **Decide.** Three digits are compared with the code in order. Match: servo open for 5 s, green LED, a tick on
+- **Decide.** Three digits are compared with the code in order. Match: latch open for 5 s, green LED, a tick on
   the matrix, then back to idle. No match: red LED, a cross, 2 s, idle, and the failed-attempt counter goes up.
 - **Lockout.** Three wrong codes in a row and the safe ignores the button for 30 s, the red LED blinks and the matrix
   shows a skull; the picture of the hand that failed is saved for me. One right code clears the counter.
@@ -79,7 +79,7 @@ code on the Mac, in the tests and on the board.
 6. **Speed and timing.** The board reads about ten frames a second and needs eight in a row; a fast flick between
    numbers can miss a digit or, if a finger is half down, read the wrong one.
 7. **Small code space and a weak latch.** 60 codes; the lockout makes guessing slow, not impossible, and a hobby
-   servo latch stops an honest person, not a screwdriver.
+   stepper latch stops an honest person, not a screwdriver.
 
 ## 3. How the neural net works
 
