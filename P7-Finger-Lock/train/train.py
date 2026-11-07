@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import plots  # noqa: E402
 import synth  # noqa: E402
-from dataset import Fingers, load_gray, scan, split_by_session, stats  # noqa: E402
+from dataset import split_within_session, Fingers, load_gray, scan, split_by_session, stats  # noqa: E402
 from export import save_checkpoint, to_spec  # noqa: E402
 from model import FingerNet  # noqa: E402
 
@@ -48,10 +48,10 @@ def evaluate(model, loader, loss_fn):
     return loss_sum / max(total, 1), correct / max(total, 1), np.asarray(trues), np.asarray(preds)
 
 
-def fit(xs_tr, y_tr, xs_va, y_va, size, epochs, augmented, seed, lr=1e-3, batch=64, log=print):
+def fit(xs_tr, y_tr, xs_va, y_va, size, epochs, augmented, seed, lr=1e-3, batch=64, log=print, strength=1.0):
     torch.manual_seed(seed)
     mean, std = stats(xs_tr)
-    tr = DataLoader(Fingers(xs_tr, y_tr, mean, std, augmented, seed), batch_size=batch, shuffle=True)
+    tr = DataLoader(Fingers(xs_tr, y_tr, mean, std, augmented, seed, strength), batch_size=batch, shuffle=True)
     va = DataLoader(Fingers(xs_va, y_va, mean, std), batch_size=256) if len(xs_va) else None
     model = FingerNet(size=size)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
@@ -114,7 +114,10 @@ def main(argv=None):
     ap.add_argument("--no-aug", action="store_true")
     ap.add_argument("--ablate", action="store_true", help="train with and without augmentation; deploy the augmented one")
     ap.add_argument("--val-session", nargs="*", default=None)
+    ap.add_argument("--split", choices=("session", "within"), default="session",
+                    help="session: hold out whole capture sessions (honest); within: the last quarter of every burst")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--aug-strength", type=float, default=1.0, help="scale of the augmentation amounts (0.5 = milder)")
     ap.add_argument("--size", type=int, default=64)
     ap.add_argument("--out-dir", default=None, help="write models/figures/results somewhere else (tests)")
     a = ap.parse_args(argv)
@@ -135,9 +138,15 @@ def main(argv=None):
         xs = load_gray(items, a.size)
         labels = np.asarray([l for _, l, _ in items])
     idx = np.arange(len(items))
-    tr_items, va_items, val_sessions = split_by_session(items, a.val_session)
-    tr_idx = [i for i in idx if items[i][2] not in set(val_sessions)]
-    va_idx = [i for i in idx if items[i][2] in set(val_sessions)]
+    if a.split == "within":
+        tr_items, va_items, val_sessions = split_within_session(items)
+        va_ids = {id(it) for it in va_items}
+        tr_idx = [i for i in idx if id(items[i]) not in va_ids]
+        va_idx = [i for i in idx if id(items[i]) in va_ids]
+    else:
+        tr_items, va_items, val_sessions = split_by_session(items, a.val_session)
+        tr_idx = [i for i in idx if items[i][2] not in set(val_sessions)]
+        va_idx = [i for i in idx if items[i][2] in set(val_sessions)]
     xs_tr, y_tr, xs_va, y_va = xs[tr_idx], labels[tr_idx], xs[va_idx], labels[va_idx]
     print(f"{len(tr_idx)} training / {len(va_idx)} validation pictures; validation sessions: {val_sessions}")
     counts = {int(c): int(n) for c, n in zip(*np.unique(labels, return_counts=True))}
@@ -147,7 +156,7 @@ def main(argv=None):
     variants = [("augmented", True), ("no augmentation", False)] if a.ablate else [("no augmentation", False)] if a.no_aug else [("augmented", True)]
     for name, aug in variants:
         print(f"--- {name} ---")
-        model, mean, std, history, cm = fit(xs_tr, y_tr, xs_va, y_va, a.size, a.epochs, aug, a.seed)
+        model, mean, std, history, cm = fit(xs_tr, y_tr, xs_va, y_va, a.size, a.epochs, aug, a.seed, strength=a.aug_strength)
         runs[name] = history
         if deployed is None or aug:
             deployed = (name, model, mean, std, history, cm)

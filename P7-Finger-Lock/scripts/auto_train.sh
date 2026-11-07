@@ -13,7 +13,8 @@ cd "$(dirname "$0")/.."
 PY=.venv/bin/python
 ADB="${ADB:-$HOME/Library/Arduino15/packages/arduino/tools/adb/32.0.0/adb}"
 MIN_PER_CLASS="${MIN_PER_CLASS:-40}"
-EPOCHS="${EPOCHS:-40}"
+EPOCHS="${EPOCHS:-60}"
+AUG="${AUG_STRENGTH:-0.5}"   # augmentation strength; 1.0 was too wild for the real pictures (train acc below val acc)
 LOG=data/auto_train.log
 WATCH=0; MOVIE=0
 for arg in "$@"; do case "$arg" in --watch) WATCH=1;; --movie) MOVIE=1;; esac; done
@@ -24,7 +25,7 @@ enough() {  # prints the per-label counts; returns 0 when there is enough to tra
     "$PY" - "$MIN_PER_CLASS" <<'EOF'
 import re, sys
 from pathlib import Path
-need = int(sys.argv[1]); raw = Path("data/raw"); ok = True; sessions = set()
+need = int(sys.argv[1]); raw = Path("data/raw"); ok = True; covered = True; sessions = set()
 for label in range(6):
     files = list((raw / str(label)).glob("*.png")) if (raw / str(label)).exists() else []
     mine = {re.sub(r"-\d+\.png$", "", f.name) for f in files}
@@ -33,18 +34,23 @@ for label in range(6):
     if len(mine) < 2:
         flag += "   <- in only %d session; shoot it again in another run" % len(mine)
     print(f"  {label} fingers: {len(files):4d} pictures in {len(mine)} session(s){flag}")
-    ok &= len(files) >= need and len(mine) >= 2
-print(f"  sessions: {len(sessions)} {'(need at least 2: quit and run the capture again for a second session)' if len(sessions) < 2 else ''}")
-print("  (the newest session is held out to measure accuracy, so every label must appear in at least two sessions)")
-sys.exit(0 if ok and len(sessions) >= 2 else 1)
+    ok &= len(files) >= need
+    covered = covered and len(mine) >= 2
+print(f"  sessions: {len(sessions)}")
+if ok and not (covered and len(sessions) >= 2):
+    print("  some label is in one session only, so the honest whole-session hold-out is impossible: validating on the")
+    print("  last quarter of every burst instead (optimistic; shoot every label in a second session for the real number)")
+sys.exit(0 if ok and covered and len(sessions) >= 2 else 3 if ok else 1)
 EOF
 }
 
 train_once() {
     say "pictures in data/raw:"
-    if ! enough; then say "not enough yet; keep taking pictures"; return 2; fi
-    say "training (${EPOCHS} epochs, with and without augmentation)..."
-    if ! "$PY" train/train.py --ablate --epochs "$EPOCHS" 2>&1 | tee -a "$LOG" | grep -E "training /|per class|^--- |epoch +(1|5|10|20|30|40)\b|deployed run|Error|error"; then
+    enough; rc=$?
+    SPLIT=session; [ "$rc" = 3 ] && SPLIT=within
+    if [ "$rc" = 1 ]; then say "not enough yet; keep taking pictures"; return 2; fi
+    say "training (${EPOCHS} epochs, augmentation strength ${AUG} and none, validation split: ${SPLIT})..."
+    if ! "$PY" train/train.py --ablate --epochs "$EPOCHS" --split "$SPLIT" --aug-strength "$AUG" 2>&1 | tee -a "$LOG" | grep -E "training /|per class|^--- |epoch +(1|5|10|20|30|40)\b|deployed run|Error|error"; then
         say "training failed; see $LOG"; return 1
     fi
     say "results (docs/results.md):"

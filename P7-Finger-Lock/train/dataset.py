@@ -53,10 +53,30 @@ def split_by_session(items, val_sessions=None, val_fraction=0.25, seed=0):
     return train, val, sorted(val_sessions)
 
 
+def split_within_session(items, val_fraction=0.25):
+    """Hold out the last quarter (by frame number) of every label's every burst. For when a label exists in one
+    session only, so whole sessions cannot be held out; frames neighbour their training frames, so the accuracy
+    this gives is optimistic."""
+    groups = {}
+    for it in items:
+        groups.setdefault((it[1], it[2]), []).append(it)
+    train, val = [], []
+    for g in groups.values():
+        g.sort(key=lambda it: int(NAME.match(Path(it[0]).name).group("n")) if it[0] is not None else 0)
+        k = max(1, int(round(len(g) * val_fraction))) if len(g) > 3 else 0
+        train += g[:len(g) - k] if k else g
+        val += g[len(g) - k:] if k else []
+    return train, val, ["last 25 % of every burst (same sessions as training)"]
+
+
 def augment(x, rng, max_rot=15, max_shift=0.08, scale=(0.85, 1.15), flip=True, brightness=0.25, contrast=(0.8, 1.25),
-            noise=0.02):
-    """x (size, size) float 0..1 -> a randomly rotated, shifted, scaled, flipped, re-lit copy."""
+            noise=0.02, strength=1.0):
+    """x (size, size) float 0..1 -> a randomly rotated, shifted, scaled, flipped, re-lit copy. strength scales every
+    amount (1 = the defaults, 0.5 = half as wild); the flip stays."""
     size = x.shape[0]
+    max_rot, max_shift, brightness, noise = max_rot * strength, max_shift * strength, brightness * strength, noise * strength
+    scale = (1 - (1 - scale[0]) * strength, 1 + (scale[1] - 1) * strength)
+    contrast = (1 - (1 - contrast[0]) * strength, 1 + (contrast[1] - 1) * strength)
     ang = rng.uniform(-max_rot, max_rot)
     sc = rng.uniform(*scale)
     tx, ty = rng.uniform(-max_shift, max_shift, 2) * size
@@ -72,9 +92,9 @@ def augment(x, rng, max_rot=15, max_shift=0.08, scale=(0.85, 1.15), flip=True, b
 
 
 class Fingers(Dataset):
-    def __init__(self, xs, labels, mean, std, augmented=False, seed=0):
+    def __init__(self, xs, labels, mean, std, augmented=False, seed=0, strength=1.0):
         self.xs, self.labels, self.mean, self.std, self.augmented = xs, np.asarray(labels), mean, std, augmented
-        self.rng = np.random.default_rng(seed)
+        self.rng, self.strength = np.random.default_rng(seed), strength
 
     def __len__(self):
         return len(self.xs)
@@ -82,7 +102,7 @@ class Fingers(Dataset):
     def __getitem__(self, i):
         x = self.xs[i]
         if self.augmented:
-            x = augment(x, self.rng)
+            x = augment(x, self.rng, strength=self.strength)
         x = (x - self.mean) / self.std
         return torch.from_numpy(np.ascontiguousarray(x))[None], int(self.labels[i])
 
