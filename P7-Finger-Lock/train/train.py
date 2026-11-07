@@ -54,7 +54,7 @@ def fit(xs_tr, y_tr, xs_va, y_va, size, epochs, augmented, seed, lr=1e-3, batch=
     tr = DataLoader(Fingers(xs_tr, y_tr, mean, std, augmented, seed, strength), batch_size=batch, shuffle=True)
     va = DataLoader(Fingers(xs_va, y_va, mean, std), batch_size=256) if len(xs_va) else None
     model = FingerNet(size=size)
-    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)  # a little decay against memorising one burst
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
     loss_fn = nn.CrossEntropyLoss()
     history = []

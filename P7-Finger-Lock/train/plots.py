@@ -53,7 +53,7 @@ def samples(xs, labels, path, per_class=6, seed=0):
                 ax.imshow(xs[pick[j]], cmap="gray", vmin=0, vmax=1)
             if j == 0:
                 ax.set_title(f"{label} fingers", fontsize=9, loc="left")
-    fig.suptitle("What the net sees (64x64 grayscale crops)")
+    fig.suptitle(f"What the net sees ({xs[0].shape[0]}x{xs[0].shape[0]} grayscale crops)")
     fig.tight_layout()
     fig.savefig(path, dpi=120)
     plt.close(fig)
