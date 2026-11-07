@@ -39,12 +39,12 @@ pipeline, from pixels to "open", is mine: no vision library does the counting.
 
 ## How it works
 
-Every tenth of a second: the webcam frame is cropped to the square, turned to grey and shrunk to 64x64; FingerNet
-turns those 4,096 numbers into six probabilities (0 to 5 fingers); the lock policy turns the stream of probabilities
+Every tenth of a second: the webcam frame is cropped to the square, turned to grey, shrunk to 128x128 and normalised; FingerNet
+turns those 16,384 numbers into six probabilities (0 to 5 fingers); the lock policy turns the stream of probabilities
 into digits and digits into a decision; the MCU shows the state on the matrix and the LEDs and drives the servo.
 
 ```
-webcam → crop the square → 64x64 grey → FingerNet (conv 16 → conv 32 → conv 64 → linear 64 → 6) → softmax
+webcam → crop the square → 128x128 grey → FingerNet (conv 16 → conv 32 → conv 64 → linear 64 → 6) → softmax
        → lock policy (hold 8 frames, release, 3 digits, compare) → matrix / LEDs / servo
 ```
 
@@ -85,9 +85,9 @@ code on the Mac, in the tests and on the board.
 
 *(the stop-action movie with my voice-over goes here: `docs/movie/movie_silent.mp4` plus the recording)*
 
-In short: a 64x64 grey picture goes through three rounds of convolution (a 3x3 window of learned weights sliding
+In short: a 128x128 grey picture goes through three rounds of convolution (a 3x3 window of learned weights sliding
 over the picture, 16 then 32 then 64 of them), ReLU (negatives to zero) and 2x2 max-pooling (keep the biggest,
-halve the size). The 64 little 8x8 maps are flattened into 4,096 numbers, a linear layer makes 64 hidden values
+halve the size). The 64 little 16x16 maps are flattened into 16,384 numbers, a linear layer makes 64 hidden values
 and another makes six scores; softmax turns the scores into probabilities. Training compares the probabilities with
 the label I typed (cross-entropy), back-propagation gives the slope of that loss for each of the 285,894 weights,
 and gradient descent (Adam) steps every weight a little downhill, 40 passes over the pictures, each picture

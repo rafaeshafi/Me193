@@ -9,7 +9,7 @@ ME 193 midterm, Tufts, November 2026.
 | | |
 |---|---|
 | Net | 3 x (conv 3x3 → ReLU → max-pool 2) with 16 / 32 / 64 filters, linear 4096 → 64 → 6, cross-entropy; 285,894 weights |
-| Input | the desk square, grayscale 64 x 64 |
+| Input | the desk square, grayscale 128 x 128 |
 | Decision | same class ≥ 0.85 confidence for 8 frames in a row = a digit; hand must leave before the next; 3 digits vs the code |
 | Board | UNO Q: webcam → numpy net → policy → 13x8 matrix + 2 LEDs + servo latch; page on port 8080 |
 | Results | `docs/results.md` (written by the training script), `docs/comparison.md` (UNO Q vs Mac) |
@@ -18,7 +18,7 @@ ME 193 midterm, Tufts, November 2026.
 
 | Path | What |
 |---|---|
-| `lock/` | Shared by Mac and board: `config.py`, `preprocess.py` (ROI crop → 64x64), `cnn_np.py` (numpy inference), `policy.py` (the lock state machine), `matrix.py` (13x8 pictures), `engine.py`, `timing.py` |
+| `lock/` | Shared by Mac and board: `config.py`, `preprocess.py` (ROI crop → 128x128, normalised per picture), `cnn_np.py` (numpy inference), `policy.py` (the lock state machine), `matrix.py` (13x8 pictures), `engine.py`, `timing.py` |
 | `train/` | `model.py` (FingerNet), `dataset.py` (session split + augmentation), `train.py`, `plots.py`, `export.py` (→ JSON), `synth.py` (generated hands for pipeline checks) |
 | `tools/` | `capture.py` (take the pictures), `lock_app.py` (the lock on the Mac, with saliency), `bench.py` (timings) |
 | `app/` | The UNO Q App Lab app: `python/main.py`, `python/web.py` + `page.html`, `sketch/sketch.ino` |

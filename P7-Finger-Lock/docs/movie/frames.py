@@ -27,6 +27,10 @@ from lock.cnn_np import NumpyNet, softmax  # noqa: E402
 from lock.preprocess import to_input  # noqa: E402
 
 FPS = 3
+try:  # the net's input side, so the words match the deployed model (64 at first, 128 since the 3-vs-4 live test)
+    SIZE = int(json.load(open(ROOT / "models" / "meta.json"))["input"]["size"])
+except Exception:
+    SIZE = 64
 W, H, DPI = 12.8, 7.2, 100
 INK, PAPER, RED, GREEN, BLUE, ORANGE, GREY = "#222222", "#fbf7ee", "#d1495b", "#3a9d5d", "#2f6fb0", "#e8871e", "#8a8a8a"
 warnings.filterwarnings("ignore", message=".*font.*")
@@ -155,16 +159,16 @@ def scene_title(m, sample):
 
 def scene_pixels(m, sample):
     m.scene("From a picture to numbers", "The webcam gives a colour picture. I only keep the square where the hand goes, "
-            "turn it to grey and shrink it to 64 by 64. To the network a picture is nothing but a grid of 4,096 numbers, "
+            f"turn it to grey and shrink it to {SIZE} by {SIZE}. To the network a picture is nothing but a grid of {SIZE * SIZE:,} numbers, "
             "one per pixel, 0 for black and 1 for white. Everything that follows is arithmetic on these numbers.")
     pr, pc = busy_patch(sample, 8)
     patch = sample[pr:pr + 8, pc:pc + 8]
     for step in range(5):
         fig, ax = fig_ax("A picture is just numbers")
         imshow_box(ax, sample, 6, 14, 40, 40)
-        say(ax, 26, 10, "64 x 64 grey pixels", 14, GREY, ha="center")
+        say(ax, 26, 10, f"{SIZE} x {SIZE} grey pixels", 14, GREY, ha="center")
         if step >= 1:
-            ax.add_patch(Rectangle((6 + pc * 40 / 64, 14 + (64 - pr - 8) * 40 / 64), 8 * 40 / 64, 8 * 40 / 64, fill=False, lw=3, ec=RED))
+            ax.add_patch(Rectangle((6 + pc * 40 / SIZE, 14 + (SIZE - pr - 8) * 40 / SIZE), 8 * 40 / SIZE, 8 * 40 / SIZE, fill=False, lw=3, ec=RED))
             arrow(ax, 46, 36, 58, 36, RED)
         if step >= 2:
             rows = min(8, 2 * (step - 1))
@@ -305,8 +309,8 @@ def scene_stack(m, sample, net, meta):
             "is sixty-four tiny 8 by 8 maps. That whole stack has twenty-three thousand weights; the picture went in as "
             "four thousand numbers and comes out as four thousand numbers that mean something.")
     acts = net.activations(sample)
-    stages = [("input\n1 x 64 x 64", acts[0][1][0], 22), ("conv 16 + ReLU + pool\n16 x 32 x 32", dict(acts)["maxpool1"][2], 17),
-              ("conv 32 + ReLU + pool\n32 x 16 x 16", dict(acts)["maxpool2"][5], 13), ("conv 64 + ReLU + pool\n64 x 8 x 8", dict(acts)["maxpool3"][7], 9)]
+    stages = [(f"input\n1 x {SIZE} x {SIZE}", acts[0][1][0], 22), (f"conv 16 + ReLU + pool\n16 x {SIZE // 2} x {SIZE // 2}", dict(acts)["maxpool1"][2], 17),
+              (f"conv 32 + ReLU + pool\n32 x {SIZE // 4} x {SIZE // 4}", dict(acts)["maxpool2"][5], 13), (f"conv 64 + ReLU + pool\n64 x {SIZE // 8} x {SIZE // 8}", dict(acts)["maxpool3"][7], 9)]
     for k in range(1, 5):
         fig, ax = fig_ax("The whole stack: conv → ReLU → pool, three times")
         for i in range(k):

@@ -16,7 +16,8 @@ PY=.venv/bin/python
 ADB="${ADB:-$HOME/Library/Arduino15/packages/arduino/tools/adb/32.0.0/adb}"
 MIN_PER_CLASS="${MIN_PER_CLASS:-40}"
 EPOCHS="${EPOCHS:-100}"
-AUG="${AUG_STRENGTH:-1.0}"   # augmentation strength; full strength survives shift/scale/rotation live (per-image normalisation handles the light)
+AUG="${AUG_STRENGTH:-1.0}"
+SIZE=$("$PY" -c "import json; print(json.load(open('config.json'))['input_size'])")   # the net's input side, from config.json   # augmentation strength; full strength survives shift/scale/rotation live (per-image normalisation handles the light)
 LOG=data/auto_train.log
 WATCH=0; MOVIE=0
 for arg in "$@"; do case "$arg" in --watch) WATCH=1;; --movie) MOVIE=1;; esac; done
@@ -52,7 +53,7 @@ train_once() {
     SPLIT=session; [ "$rc" = 3 ] && SPLIT=within
     if [ "$rc" = 1 ]; then say "not enough yet; keep taking pictures"; return 2; fi
     say "training (${EPOCHS} epochs, augmentation strength ${AUG} and none, validation split: ${SPLIT})..."
-    if ! "$PY" train/train.py --ablate --deploy augmented --epochs "$EPOCHS" --split "$SPLIT" --aug-strength "$AUG" 2>&1 | tee -a "$LOG" | grep -E "training /|per class|^--- |epoch +(1|5|10|20|30|40)\b|deployed run|Error|error"; then
+    if ! "$PY" train/train.py --ablate --deploy augmented --epochs "$EPOCHS" --split "$SPLIT" --aug-strength "$AUG" --size "$SIZE" 2>&1 | tee -a "$LOG" | grep -E "training /|per class|^--- |epoch +(1|5|10|20|30|40)\b|deployed run|Error|error"; then
         say "training failed; see $LOG"; return 1
     fi
     say "results (docs/results.md):"
