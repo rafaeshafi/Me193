@@ -4,6 +4,7 @@ screen (two LEDs, the 13x8 matrix, the servo). Press b for the button.
     .venv/bin/python tools/lock_app.py [--camera 1] [--engine torch|numpy] [--saliency]
 
 Keys: b button   s saliency overlay on/off (torch engine)   r clear failed attempts   q quit
+      p save what the net sees right now (the crop + its 64x64 input + the prediction) to data/live/ for debugging
 Timings go to docs/bench_mac.json when you quit (the 'UNO Q vs computer' table).
 """
 import argparse
@@ -151,6 +152,13 @@ def main():
             show_sal = not show_sal
         elif key == ord("r"):
             lock.attempts = 0
+        elif key == ord("p"):
+            live = ROOT / "data" / "live"
+            live.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%H%M%S")
+            cv2.imwrite(str(live / f"{stamp}-pred{cls}-crop.png"), roi_img)
+            cv2.imwrite(str(live / f"{stamp}-pred{cls}-input.png"), (x * 255).astype(np.uint8))
+            print(f"saved data/live/{stamp}-pred{cls}-*.png  probs {[round(v, 2) for v in probs]}")
     cap.release()
     cv2.destroyAllWindows()
     out = ROOT / "docs" / f"bench_mac_{engine.name}.json"

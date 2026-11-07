@@ -7,14 +7,16 @@
 #   scripts/auto_train.sh --movie    also re-render docs/movie with the new weights (slow, a few minutes)
 #
 # Needs: every label 0..5 with at least MIN_PER_CLASS pictures and at least 2 capture sessions (validation holds out
-# whole sessions). Training is train/train.py --ablate --deploy best (with and without augmentation; the better one is deployed).
+# whole sessions). Training is train/train.py --ablate (with and without augmentation). The augmented net is deployed even when the
+# no-augmentation one scores a point higher: the held-out frames neighbour their training frames, so that score cannot
+# see how badly an un-augmented net falls over when the hand moves a little (it did, live).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 PY=.venv/bin/python
 ADB="${ADB:-$HOME/Library/Arduino15/packages/arduino/tools/adb/32.0.0/adb}"
 MIN_PER_CLASS="${MIN_PER_CLASS:-40}"
-EPOCHS="${EPOCHS:-60}"
-AUG="${AUG_STRENGTH:-0.5}"   # augmentation strength; 1.0 was too wild for the real pictures (train acc below val acc)
+EPOCHS="${EPOCHS:-100}"
+AUG="${AUG_STRENGTH:-1.0}"   # augmentation strength; full strength survives shift/scale/rotation live (per-image normalisation handles the light)
 LOG=data/auto_train.log
 WATCH=0; MOVIE=0
 for arg in "$@"; do case "$arg" in --watch) WATCH=1;; --movie) MOVIE=1;; esac; done
@@ -50,7 +52,7 @@ train_once() {
     SPLIT=session; [ "$rc" = 3 ] && SPLIT=within
     if [ "$rc" = 1 ]; then say "not enough yet; keep taking pictures"; return 2; fi
     say "training (${EPOCHS} epochs, augmentation strength ${AUG} and none, validation split: ${SPLIT})..."
-    if ! "$PY" train/train.py --ablate --deploy best --epochs "$EPOCHS" --split "$SPLIT" --aug-strength "$AUG" 2>&1 | tee -a "$LOG" | grep -E "training /|per class|^--- |epoch +(1|5|10|20|30|40)\b|deployed run|Error|error"; then
+    if ! "$PY" train/train.py --ablate --deploy augmented --epochs "$EPOCHS" --split "$SPLIT" --aug-strength "$AUG" 2>&1 | tee -a "$LOG" | grep -E "training /|per class|^--- |epoch +(1|5|10|20|30|40)\b|deployed run|Error|error"; then
         say "training failed; see $LOG"; return 1
     fi
     say "results (docs/results.md):"

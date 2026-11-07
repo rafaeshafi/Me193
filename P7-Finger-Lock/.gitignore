@@ -7,3 +7,4 @@ docs/movie/*.mp4
 docs/bench_*.json
 app/data/
 data/auto_train.log
+data/live/

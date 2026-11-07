@@ -46,9 +46,11 @@ def resize(img, size, use_cv2=True):
 
 
 def to_input(crop_img, size=64, use_cv2=True):
-    """(size, size) float32 in 0..1 from a crop (uint8 gray or BGR)."""
-    g = resize(to_gray(crop_img), size, use_cv2)
-    return g.astype(np.float32) / 255.0
+    """(size, size) float32 in 0..1 from a crop (uint8 gray or BGR), normalised per picture: zero mean and unit
+    spread are mapped to 0.5 and 0.2, so the webcam's exposure and the room light cannot move the net (the first
+    live test leaned to "4" because the room was darker than the capture session)."""
+    g = resize(to_gray(crop_img), size, use_cv2).astype(np.float32) / 255.0
+    return np.clip((g - g.mean()) / (g.std() + 1e-6) * 0.2 + 0.5, 0.0, 1.0).astype(np.float32)
 
 
 def standardise(x, mean, std):
