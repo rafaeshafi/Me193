@@ -13,8 +13,8 @@
 const int kButton = 2, kRed = 3, kGreen = 4;
 const int kIn[4] = {6, 7, 8, 9}, kSleep = 10;  // IN1..IN4, EEP
 const int kPixels = 104;
-const int kStepsOpen = 512;  // full steps from closed to open: 512 = a quarter turn of a 28BYJ-48 (2048/rev), 50 for a 200-step NEMA 17
-const uint32_t kDebounceMs = 30, kStepMs = 3;  // 3 ms a step ~ 330 steps/s; raise it if the motor stalls or skips
+const int kStepsOpen = 50;  // full steps from closed to open: 50 = a quarter turn of a 200-step (1.8 deg) 4-wire motor; 512 for a 28BYJ-48 (2048/rev)
+const uint32_t kDebounceMs = 30, kStepMs = 5;  // 5 ms a step = 200 steps/s, a quarter turn in 0.25 s; raise it if the motor buzzes without turning
 // Two-phase full-step sequence, IN1 IN2 IN3 IN4. Swap one coil's two wires if the bolt turns the wrong way.
 const uint8_t kPhase[4][4] = {{1, 0, 1, 0}, {0, 1, 1, 0}, {0, 1, 0, 1}, {1, 0, 0, 1}};
 
