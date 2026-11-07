@@ -98,7 +98,7 @@ rotated, shifted, scaled and re-lit differently each time.
 | | MacBook Pro (M1 Pro) | UNO Q |
 |---|---|---|
 | inference per frame, PyTorch | 0.53 ms | no PyTorch there |
-| inference per frame, numpy | 0.42 ms | *(fill from `scripts/board_stats.sh`)* |
+| inference per frame, numpy | 0.42 ms | 22 ms (median 18 ms) |
 | frames per second | webcam-bound (30) | 10 asked for; *(measured)* |
 | training | ~1 min for 40 epochs | not done on the board |
 | moving the model | `export.py` → JSON; numpy engine agrees with PyTorch to 1e-4 | `deploy.sh` copies weights + config + the shared `lock/` package |
