@@ -6,6 +6,8 @@
 //           EEP D10 (the chip sleeps until this is HIGH), VCC = motor supply 3-10 V, GND shared with the board.
 //           The bolt turns kStepsOpen full steps open, waits the given milliseconds, turns back, then the coils are
 //           released. One step every kStepMs in loop(); the MCU sequences the coils itself (no step/dir pin).
+//   boot    with kSelfTest the latch opens and closes once right after power-up or a flash, before the Bridge is up:
+//           if the bolt does not move then, the problem is the wiring or the motor supply, not the Python side.
 #include <Arduino_LED_Matrix.h>
 #include <Arduino_RouterBridge.h>
 #include <vector>
@@ -15,6 +17,7 @@ const int kIn[4] = {6, 7, 8, 9}, kSleep = 10;  // IN1..IN4, EEP
 const int kPixels = 104;
 const int kStepsOpen = 50;  // full steps from closed to open: 50 = a quarter turn of a 200-step (1.8 deg) 4-wire motor; 512 for a 28BYJ-48 (2048/rev)
 const uint32_t kDebounceMs = 30, kStepMs = 5;  // 5 ms a step = 200 steps/s, a quarter turn in 0.25 s; raise it if the motor buzzes without turning
+const bool kSelfTest = true;                   // one open-hold-close cycle at boot (1 s hold) to prove the motor and the driver
 // Two-phase full-step sequence, IN1 IN2 IN3 IN4. Swap one coil's two wires if the bolt turns the wrong way.
 const uint8_t kPhase[4][4] = {{1, 0, 1, 0}, {0, 1, 1, 0}, {0, 1, 0, 1}, {1, 0, 0, 1}};
 
@@ -98,6 +101,7 @@ void setup() {
   Bridge.provide("draw", draw);
   Bridge.provide("leds", leds);
   Bridge.provide("unlock", unlock);
+  if (kSelfTest) unlock(1000);
 }
 
 void loop() {
