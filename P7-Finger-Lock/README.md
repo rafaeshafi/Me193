@@ -78,19 +78,3 @@ Three failures in a row → LOCKOUT 30 s (button ignored, red blinks, the failin
 - **Intruder log + skull**: after the third wrong code the matrix shows a skull, the button is dead for 30 s, and the
   hand that failed is saved for the owner.
 - The explainer is a **stop-action movie** drawn from the real weights and the real activations of my hand.
-
-## The camera hood (SolidCraft)
-
-`enclosure/camera_box.py` writes a [SolidCraft](https://github.com/tangency-labs/solidcraft) script and runs it headless:
-`enclosure/out/camera_box.sc` (open it in SolidCraft, every number is a parameter), `.step`, `.stl` and three renders.
-A 328 x 328 mm hood, open at the front and the bottom, with a flat roof 333 mm up; the whole webcam (70 x 18.5 x
-25 mm) sits lens-down in a cavity sunk into the roof (a block under the roof gives it the depth), its back 2 mm
-below the surface, and looks through a 62 x 15.5 window in the cavity floor. The cavity is a press fit: its walls clear
-the camera by 1 mm a side and ten 1.5 mm crush ribs stand 1.2 mm proud of them (0.4 mm interference each way), so
-the ribs squash on the way in and hold the camera whatever the printer did to the walls: too tight, shave the ribs or
-lower `rib_p`; loose, raise it. A 1 mm chamfer leads the camera into the mouth and a full-depth notch at each end is
-the finger hold to pull it out and the way out for its cable; two strap slots beside the cavity are the backup. A 1/4-20 hole in front of the boss is the alternative for a camera with a tripod thread. The base plate
-carries the engraved 177 mm square (the net's region of interest at that height for a 70° lens) centred under the
-lens; `config.json`'s `roi` is centred to match. Cable notch at the top of the back wall. Change `P` in the script,
-or the parameters in SolidCraft, to resize it. To let Claude drive SolidCraft directly in later sessions:
-`claude mcp add solidcraft -- /Applications/SolidCraft.app/Contents/MacOS/solidcraft-cli mcp`.
