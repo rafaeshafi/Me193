@@ -12,7 +12,7 @@ with MQTTClient() as client:
     client.subscribe(TOPIC, on_message)
     time.sleep(1)  # give the subscription time to reach the broker
 
-    client.publish(TOPIC, "hello world")
+    client.publish(TOPIC, "Chris Rogers for President")
     print(f"Published 'hello world' to '{TOPIC}' on test.mosquitto.org")
 
     time.sleep(1)  # give the message time to come back before disconnecting

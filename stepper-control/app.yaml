@@ -1,0 +1,9 @@
+name: Stepper Control
+icon: ⚙️
+description: Manual control of a bipolar stepper on an HW-627 (DRV8833) driver, IN1-IN4 on D6-D9 and EEP on D10. Buttons on port 8080 step, run, stop and release the motor and set the speed. Standalone, nothing to do with the finger lock.
+
+# A list of network ports that the application exposes.
+ports: [8080]
+
+# A list of bricks used by this application.
+bricks: []

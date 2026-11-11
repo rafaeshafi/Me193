@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stepper Control</title>
+<style>
+ body{font-family:-apple-system,Helvetica,Arial,sans-serif;background:#111;color:#eee;margin:0;padding:16px;max-width:560px}
+ h1{font-size:20px;margin:0 0 12px} small{color:#999}
+ #pos{font-size:44px;font-weight:700;font-family:Menlo,monospace} #q{color:#ffd500;font-size:16px}
+ .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;align-items:center}
+ button{font-size:18px;padding:10px 14px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;min-width:64px;touch-action:none;user-select:none}
+ button:active{background:#555} .hold{background:#264} .stop{background:#733} .rel{background:#444} input[type=number]{font-size:18px;width:90px;padding:8px}
+ input[type=range]{width:220px}
+</style></head><body>
+<h1>⚙️ Stepper Control <small id="meta">connecting…</small></h1>
+<div><span id="pos">0</span> <small>steps from start</small> <span id="q"></span></div>
+
+<p><small>step (200 = one turn of a 1.8° motor)</small></p>
+<div class="row">
+ <button onclick="post('/move?n=-200')">−200</button><button onclick="post('/move?n=-50')">−50</button>
+ <button onclick="post('/move?n=-10')">−10</button><button onclick="post('/move?n=-1')">−1</button>
+ <button onclick="post('/move?n=1')">+1</button><button onclick="post('/move?n=10')">+10</button>
+ <button onclick="post('/move?n=50')">+50</button><button onclick="post('/move?n=200')">+200</button>
+</div>
+<div class="row">
+ <input id="n" type="number" value="100"> <button onclick="post('/move?n='+$('n').value)">move</button>
+</div>
+
+<p><small>hold to run</small></p>
+<div class="row">
+ <button class="hold" id="back">◀ run</button><button class="hold" id="fwd">run ▶</button>
+ <button class="stop" onclick="post('/stop')">stop</button><button class="rel" onclick="post('/release')">release coils</button>
+</div>
+
+<p><small>speed</small></p>
+<div class="row">
+ <input id="ms" type="range" min="2" max="200" value="20" oninput="$('msl').textContent=label(this.value)" onchange="post('/speed?ms='+this.value)">
+ <span id="msl">20 ms a step · 50 steps/s</span>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const label=ms=>ms+' ms a step · '+Math.round(1000/ms)+' steps/s';
+async function post(p){try{show(await (await fetch(p,{method:'POST'})).json());}catch(e){$('meta').textContent='no connection';}}
+function show(s){$('pos').textContent=s.pos??'?'; $('q').textContent=s.queued?('moving, '+(s.queued===1?'running':s.queued+' to go')):'idle';
+ $('meta').textContent=s.pos==null?'MCU not answering yet':'connected';}
+function hold(id,dir){const b=$(id);
+ const start=e=>{e.preventDefault();post('/run?dir='+dir);}, end=e=>{e.preventDefault();post('/stop');};
+ b.addEventListener('pointerdown',start); b.addEventListener('pointerup',end); b.addEventListener('pointerleave',end); b.addEventListener('pointercancel',end);}
+hold('back',-1); hold('fwd',1);
+async function tick(){try{show(await (await fetch('/state')).json());}catch(e){$('meta').textContent='no connection';}}
+setInterval(tick,400); tick();
+</script></body></html>
