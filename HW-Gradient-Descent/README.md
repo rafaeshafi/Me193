@@ -5,7 +5,7 @@ ME 193 homework, and the warm-up section of the Finger Lock midterm page.
 | File | What it is |
 |---|---|
 | `README.md` | this write-up |
-| `Book2.xlsx` | the class spreadsheet, finished: sheet `Gradient descent` has 5 iterations on m and b, all formulas |
+| `Book2.xlsx` | the class spreadsheet, finished: sheet `V data` has 5 iterations on m and b for a ReLU neuron on the V data (all formulas); sheet `Class line y=2x` does the same for the class example |
 | `gd_neuron.py` | numpy gradient descent on the V data (`data/annacode-v.tsv`), prints the spreadsheet check, saves the plots |
 | `figures/v_fit.png`, `figures/v_loss.png` | data and fits, loss against epoch |
 
@@ -47,18 +47,18 @@ $$\frac{\partial L}{\partial v_j} = \frac{1}{N}\sum_i e_i\,a_{ij}, \qquad \frac{
 
 ### Five iterations in Excel
 
-This is the spreadsheet I started in class, finished. The data is the simple line from class, x = 1 to 5 and y = 2x, with learning rate 0.1 and both weights starting at 0. The sheet called Gradient descent has one block of columns per iteration. Each block works out the prediction, the error and error times x for every point, then the loss, the two gradients and the new m and b. The next block picks those up. Every number is a formula, so changing the learning rate or the starting guess reruns all five.
+This is the spreadsheet I started in class, finished. The sheet called V data has all 120 points from Anna's code and fits one ReLU neuron to them, with m starting at 1, b at 0 and a learning rate of 0.1. I scale x and y first, taking off the mean and dividing by the spread, so that one learning rate works for both weights. Each iteration is a block of columns: z, the prediction, the on/off switch, the error, and the two products that get added up into the gradients. Above each block are the loss, the two gradients and the new m and b, which the next block picks up. Every number is a formula, so changing the learning rate or the starting guess reruns all five.
 
 | iteration | m | b | loss |
 |---|---|---|---|
-| 0 | 0.0000 | 0.0000 | 22.0000 |
-| 1 | 2.2000 | 0.6000 | 0.7600 |
-| 2 | 1.8000 | 0.4800 | 0.0472 |
-| 3 | 1.8760 | 0.4920 | 0.0226 |
-| 4 | 1.8648 | 0.4800 | 0.0210 |
-| 5 | 1.8695 | 0.4726 | 0.0203 |
+| 0 | 1.0000 | 0.0000 | 0.4928 |
+| 1 | 0.9780 | −0.0389 | 0.4739 |
+| 2 | 0.9587 | −0.0736 | 0.4592 |
+| 3 | 0.9419 | −0.1043 | 0.4475 |
+| 4 | 0.9272 | −0.1328 | 0.4377 |
+| 5 | 0.9144 | −0.1591 | 0.4299 |
 
-The first step does most of the work. It overshoots m to 2.2, the second step pulls it back, and after that both creep toward the true answer of m = 2, b = 0. My Python prints the same numbers, which is how I checked the sheet.
+Five steps is not much on real data. The loss comes down a little every time, from 0.49 to 0.43, and both weights are still on the move. My Python runs the same neuron for 2000 epochs and its first five rows are these same numbers, which is how I checked the sheet. There is a second sheet with the simple line from class, x = 1 to 5 and y = 2x, where five steps almost gets the whole answer.
 
 ### Python on the V data
 

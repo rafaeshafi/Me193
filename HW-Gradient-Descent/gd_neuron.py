@@ -5,7 +5,7 @@ Three models, all trained with the same loss L = 1/(2N) * sum (y_hat - y)^2 and 
   2. one ReLU neuron              y_hat = ReLU(m*x + b)           (fits one arm of the V, flat on the other)
   3. a ReLU layer of two neurons  y_hat = v1*ReLU(w1*x + b1) + v2*ReLU(w2*x + b2) + c   (fits the whole V)
 x and y are standardised first (subtract the mean, divide by the spread), as in the class code; plots are in the
-original units. Also prints the 5 iterations of the Excel sheet (x = 1..5, y = 2x, lr = 0.1) as a cross-check.
+original units. Also prints the first 5 iterations of both Excel sheets (the class line and the V data) as a cross-check.
 
 Run:  .venv/bin/python gd_neuron.py      -> figures/v_fit.png, figures/v_loss.png
 """
@@ -102,6 +102,9 @@ def main():
     m1, b1, h1 = train_neuron(x, y, 0.0, 0.0, LR, EPOCHS, use_relu=False)
     m2, b2, h2 = train_neuron(x, y, 1.0, 0.0, LR, EPOCHS, use_relu=True)
     p3, l3 = train_layer(x, y, LR, EPOCHS)
+    print("\nSpreadsheet check, sheet 'V data' (ReLU neuron, start m = 1, b = 0, lr = 0.1)")
+    for k, m, b, loss, dm, db in h2[:6]:
+        print(f"{k:>4} {m:>9.6f} {b:>9.6f} {loss:>9.6f} {dm:>9.6f} {db:>9.6f}")
     print(f"\nV data: {len(x)} points, x {x_raw.min():.1f}..{x_raw.max():.1f}, y {y_raw.min():.1f}..{y_raw.max():.1f}")
     print(f"1 linear neuron : m={m1:.3f} b={b1:.3f}  loss={h1[-1][3]:.4f}  RMSE={rmse(m1 * x + b1):.2f}")
     print(f"1 ReLU neuron   : m={m2:.3f} b={b2:.3f}  loss={h2[-1][3]:.4f}  RMSE={rmse(relu(m2 * x + b2)):.2f}")
