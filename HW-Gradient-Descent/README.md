@@ -1,206 +1,89 @@
-# Gradient descent for a single neuron (and a ReLU layer)
+# Gradient descent for a single neuron and a ReLU layer
 
-ME 193 homework. Three parts: the math, a spreadsheet that does five gradient-descent iterations on
-$m$ and $b$ by hand, and Python that runs the same thing to convergence and plots the fit and the loss.
+ME 193 homework, and the warm-up section of the Finger Lock midterm page.
 
 | File | What it is |
 |---|---|
-| `README.md` | this write-up (the math, results, how to run) |
-| `gradient_descent_5_iterations.xlsx` | 5 iterations on $m, b$, every number a formula; sheet 1 linear neuron, sheet 2 ReLU neuron |
-| `gd_neuron.py` | numpy-only gradient descent for both neurons, prints the first 5 iterations, saves the plots |
-| `make_spreadsheet.py` | builds the workbook from the same data and starting values as `gd_neuron.py` |
-| `figures/linear_fit.png`, `figures/linear_loss.png` | data + fit, loss vs epoch (linear neuron) |
-| `figures/relu_fit.png`, `figures/relu_loss.png` | data + fit, loss vs epoch (ReLU neuron) |
+| `README.md` | this write-up |
+| `Book2.xlsx` | the class spreadsheet, finished: sheet `Gradient descent` has 5 iterations on m and b, all formulas |
+| `gd_neuron.py` | numpy gradient descent on the V data (`data/annacode-v.tsv`), prints the spreadsheet check, saves the plots |
+| `figures/v_fit.png`, `figures/v_loss.png` | data and fits, loss against epoch |
 
-## 1. The math
+Run: `.venv/bin/python gd_neuron.py` (first time: `python3 -m venv .venv && .venv/bin/pip install numpy matplotlib`).
 
-### 1.1 One neuron
+Before building the box I went back to what we started in class with Anna's code. Her data makes a V: the output falls as x goes up, hits zero near x = 60, then climbs again. The question is how a neuron finds its weights for a shape like that. I did it three ways: by hand, in Excel, and in Python.
 
-A neuron with one input $x$, weight $m$ and bias $b$ computes a pre-activation and pushes it through an
-activation function $\varphi$:
+### The math
 
-$$
-z = m\,x + b, \qquad \hat{y} = \varphi(z).
-$$
+One neuron takes an input $x$, multiplies it by a weight $m$, adds a bias $b$, and passes the result through an activation function $\varphi$:
 
-With $\varphi(z) = z$ it is a straight line $\hat y = mx + b$ (linear regression). With
-$\varphi(z) = \mathrm{ReLU}(z) = \max(0, z)$ it is a hinge: zero until $z$ becomes positive, then a line.
+$$z = m\,x + b, \qquad \hat y = \varphi(z)$$
 
-### 1.2 Loss
+To say how wrong it is over $N$ data points I use the mean squared error, with a half in front so the 2 cancels when I differentiate:
 
-For $N$ data points $(x_i, y_i)$ we measure how wrong the neuron is with the mean squared error
+$$L(m, b) = \frac{1}{2N}\sum_{i=1}^{N}\left(\hat y_i - y_i\right)^2$$
 
-$$
-L(m, b) = \frac{1}{N}\sum_{i=1}^{N}\left(\hat y_i - y_i\right)^2,
-\qquad \hat y_i = \varphi(m x_i + b).
-$$
+Gradient descent needs the slope of $L$ with respect to each weight. With the error $e_i = \hat y_i - y_i$, the chain rule gives
 
-$L$ is a bowl-shaped surface over the $(m, b)$ plane. Gradient descent walks downhill on it.
+$$\frac{\partial L}{\partial m} = \frac{1}{N}\sum_i e_i\,\varphi'(z_i)\,x_i, \qquad \frac{\partial L}{\partial b} = \frac{1}{N}\sum_i e_i\,\varphi'(z_i)$$
 
-### 1.3 Gradient by the chain rule
+and every step moves the weights a little bit downhill, by the learning rate $\eta$:
 
-Define the error $e_i = \hat y_i - y_i$. Three links in the chain:
+$$m \leftarrow m - \eta\,\frac{\partial L}{\partial m}, \qquad b \leftarrow b - \eta\,\frac{\partial L}{\partial b}$$
 
-$$
-\frac{\partial L}{\partial \hat y_i} = \frac{2}{N}\,e_i, \qquad
-\frac{\partial \hat y_i}{\partial z_i} = \varphi'(z_i), \qquad
-\frac{\partial z_i}{\partial m} = x_i, \quad \frac{\partial z_i}{\partial b} = 1 .
-$$
+For a plain linear neuron $\varphi(z) = z$, so $\varphi'(z) = 1$ and it drops out. For a ReLU neuron $\varphi(z) = \max(0, z)$, and its derivative is a switch:
 
-Multiplying them and summing over the data points:
+$$\varphi'(z) = \begin{cases} 1 & z > 0 \\ 0 & z \le 0 \end{cases}$$
 
-$$
-\frac{\partial L}{\partial m} = \frac{2}{N}\sum_{i=1}^{N} e_i\,\varphi'(z_i)\,x_i,
-\qquad
-\frac{\partial L}{\partial b} = \frac{2}{N}\sum_{i=1}^{N} e_i\,\varphi'(z_i).
-$$
+So a point only pushes on the weights when the neuron is switched on for that point. If the neuron is off for every point, nothing pushes at all and it is stuck, which is the dead ReLU problem.
 
-**Linear neuron.** $\varphi'(z) = 1$, so
+One ReLU neuron is a single hinge, and a V needs two. A ReLU layer with two neurons feeding one output does it:
 
-$$
-\frac{\partial L}{\partial m} = \frac{2}{N}\sum_i e_i\,x_i, \qquad
-\frac{\partial L}{\partial b} = \frac{2}{N}\sum_i e_i .
-$$
+$$\hat y = v_1\,\mathrm{ReLU}(w_1 x + b_1) + v_2\,\mathrm{ReLU}(w_2 x + b_2) + c$$
 
-**ReLU neuron.** The derivative of $\max(0, z)$ is a gate:
+The gradients come from the same chain rule, run backwards one layer at a time, which is all backpropagation is. With $a_j = \mathrm{ReLU}(z_j)$ and $g_j$ the on/off switch of neuron $j$:
 
-$$
-\varphi'(z) = g(z) =
-\begin{cases} 1 & z > 0 \\ 0 & z \le 0 \end{cases}
-\qquad\Longrightarrow\qquad
-\frac{\partial L}{\partial m} = \frac{2}{N}\sum_i e_i\,g_i\,x_i, \quad
-\frac{\partial L}{\partial b} = \frac{2}{N}\sum_i e_i\,g_i .
-$$
+$$\frac{\partial L}{\partial v_j} = \frac{1}{N}\sum_i e_i\,a_{ij}, \qquad \frac{\partial L}{\partial c} = \frac{1}{N}\sum_i e_i, \qquad \frac{\partial L}{\partial w_j} = \frac{1}{N}\sum_i e_i\,v_j\,g_{ij}\,x_i, \qquad \frac{\partial L}{\partial b_j} = \frac{1}{N}\sum_i e_i\,v_j\,g_{ij}$$
 
-Points sitting in the flat part of the ReLU ($z_i \le 0$) contribute nothing to the gradient, however
-wrong they are. That is both the feature (the neuron ignores the dead band) and the danger: if every
-$z_i \le 0$ the gradient is zero and the neuron is *dead*, so the starting $m, b$ must put at least some
-points on the active side.
+### Five iterations in Excel
 
-### 1.4 The update
+This is the spreadsheet I started in class, finished. The data is the simple line from class, x = 1 to 5 and y = 2x, with learning rate 0.1 and both weights starting at 0. The sheet called Gradient descent has one block of columns per iteration. Each block works out the prediction, the error and error times x for every point, then the loss, the two gradients and the new m and b. The next block picks those up. Every number is a formula, so changing the learning rate or the starting guess reruns all five.
 
-With learning rate $\eta$, one iteration (one epoch, since we use all $N$ points) is
+| iteration | m | b | loss |
+|---|---|---|---|
+| 0 | 0.0000 | 0.0000 | 22.0000 |
+| 1 | 2.2000 | 0.6000 | 0.7600 |
+| 2 | 1.8000 | 0.4800 | 0.0472 |
+| 3 | 1.8760 | 0.4920 | 0.0226 |
+| 4 | 1.8648 | 0.4800 | 0.0210 |
+| 5 | 1.8695 | 0.4726 | 0.0203 |
 
-$$
-m \leftarrow m - \eta\,\frac{\partial L}{\partial m}, \qquad
-b \leftarrow b - \eta\,\frac{\partial L}{\partial b}.
-$$
+The first step does most of the work. It overshoots m to 2.2, the second step pulls it back, and after that both creep toward the true answer of m = 2, b = 0. My Python prints the same numbers, which is how I checked the sheet.
 
-Repeat until $L$ stops decreasing.
+### Python on the V data
 
-### 1.5 How big can $\eta$ be?
+`gd_neuron.py` is plain numpy, no PyTorch, so every gradient above is written out by hand. It trains three models on the 120 points of V data for 2000 epochs at a learning rate of 0.1.
 
-For the linear neuron $L$ is exactly quadratic, with Hessian
-
-$$
-H = \frac{2}{N}\sum_i \begin{pmatrix} x_i^2 & x_i \\ x_i & 1 \end{pmatrix}
-  = 2\begin{pmatrix} \overline{x^2} & \bar x \\ \bar x & 1 \end{pmatrix}.
-$$
-
-Gradient descent converges when $\eta < 2/\lambda_{\max}(H)$. For the spring data ($x = 1\ldots 8$:
-$\overline{x^2} = 25.5$, $\bar x = 4.5$) $H = \begin{pmatrix} 51 & 9 \\ 9 & 2\end{pmatrix}$, with
-eigenvalues $\lambda_{\max} \approx 52.6$ and $\lambda_{\min} \approx 0.40$. So $\eta$ must be below
-about $0.038$; we use $\eta = 0.02$. The ratio $\lambda_{\max}/\lambda_{\min} \approx 130$ is why $m$
-locks in within two iterations while $b$ creeps toward its answer over hundreds of epochs (see the
-loss plot): the bowl is a long narrow valley along the $b$ direction.
-
-### 1.6 Iteration 1 by hand (linear neuron, spring data)
-
-Start at $m = 0, b = 0$, so $\hat y_i = 0$ and $e_i = -y_i$:
-
-$$
-\frac{\partial L}{\partial m} = \frac{2}{8}\sum_i (-y_i)\,x_i = \frac{2}{8}(-445.1) = -111.275, \qquad
-\frac{\partial L}{\partial b} = \frac{2}{8}\sum_i (-y_i) = \frac{2}{8}(-80.2) = -20.05 .
-$$
-
-$$
-m_1 = 0 - 0.02\,(-111.275) = 2.2255, \qquad b_1 = 0 - 0.02\,(-20.05) = 0.401 .
-$$
-
-$L$ drops from $121.62$ to $0.428$ in that one step. Iteration 1 in the spreadsheet shows the same numbers.
-
-### 1.7 From one neuron to a ReLU layer
-
-A hidden *layer* of $H$ ReLU neurons feeding one linear output neuron is
-
-$$
-z_j = w_j\,x + b_j, \qquad a_j = \mathrm{ReLU}(z_j), \qquad
-\hat y = \sum_{j=1}^{H} v_j\,a_j + c .
-$$
-
-The same chain rule, now run backwards through two layers (this is backpropagation). With
-$\delta_i = \frac{2}{N} e_i$ and gates $g_{ij} = [z_{ij} > 0]$:
-
-$$
-\frac{\partial L}{\partial v_j} = \sum_i \delta_i\,a_{ij}, \qquad
-\frac{\partial L}{\partial c} = \sum_i \delta_i, \qquad
-\frac{\partial L}{\partial w_j} = \sum_i \delta_i\,v_j\,g_{ij}\,x_i, \qquad
-\frac{\partial L}{\partial b_j} = \sum_i \delta_i\,v_j\,g_{ij}.
-$$
-
-Each ReLU neuron contributes one hinge; the output sums $H$ hinges, which is a piecewise-linear curve
-with up to $H$ kinks. That is how a stack of these fits curves that one line cannot. The single ReLU
-neuron in part 2 is the $H = 1,\ v_1 = 1,\ c = 0$ case.
-
-## 2. The spreadsheet
-
-`gradient_descent_5_iterations.xlsx`, two sheets. Blue cells on yellow are inputs (data, $\eta$,
-starting $m, b$); everything else is a formula, so change an input and all five iterations recompute.
-
-Each iteration is one block of columns. The block reads $m, b$ from the block before it, then computes
-per data point $\hat y_i$, $e_i = \hat y_i - y_i$ and $e_i x_i$ (plus $z_i$, the gate $g_i$ and
-$e_i g_i$ on the ReLU sheet), and at the bottom $L$, $\partial L/\partial m$, $\partial L/\partial b$
-and the new $m, b$. A summary table underneath lists $m, b, L$ for iterations 0 to 5.
-
-| iteration | linear: $m$ | $b$ | $L$ | ReLU: $m$ | $b$ | $L$ |
-|---|---|---|---|---|---|---|
-| 0 | 0.0000 | 0.0000 | 121.6200 | 1.0000 | 0.0000 | 2.6100 |
-| 1 | 2.2255 | 0.4010 | 0.4277 | 0.9889 | −0.0253 | 2.5774 |
-| 2 | 2.1088 | 0.3854 | 0.0986 | 0.9919 | −0.0480 | 2.5514 |
-| 3 | 2.1140 | 0.3914 | 0.0965 | 0.9958 | −0.0703 | 2.5258 |
-| 4 | 2.1128 | 0.3962 | 0.0952 | 0.9997 | −0.0925 | 2.5005 |
-| 5 | 2.1119 | 0.4011 | 0.0940 | 1.0037 | −0.1145 | 2.4756 |
-
-The Python script prints the same table; the workbook was recalculated in Excel and the two agree to
-every printed digit.
-
-## 3. The Python
-
-`gd_neuron.py` is numpy only: `forward`, `loss_and_grads` (the formulas of section 1.3) and `train`
-(the update of section 1.4). It runs 2000 epochs at $\eta = 0.02$ for each neuron.
-
-```bash
-.venv/bin/python gd_neuron.py
+```python
+def neuron_step(x, y, m, b, lr, use_relu):
+    z = m * x + b
+    y_hat = relu(z) if use_relu else z
+    e = y_hat - y                                   # error
+    g = (z > 0).astype(float) if use_relu else 1.0  # 1 where the neuron is on
+    loss = np.mean(e ** 2) / 2
+    dm = np.mean(e * g * x)                         # dL/dm
+    db = np.mean(e * g)                             # dL/db
+    return m - lr * dm, b - lr * db, loss
 ```
 
-(First time: `python3 -m venv .venv && .venv/bin/pip install numpy matplotlib openpyxl`.)
+![fit](figures/v_fit.png)
 
-**Part 1, linear neuron, spring data** ($x$ = extension in cm, $y$ = force in N, about $2x + 1$ plus noise).
-Gradient descent ends at $m = 2.0048$, $b = 1.0036$, $L = 0.0193$. The closed-form least-squares line
-(`numpy.polyfit`) is $m = 2.0048$, $b = 1.0036$: identical, which is the check that the gradients are right.
+![loss](figures/v_loss.png)
 
-![linear fit](figures/linear_fit.png)
-![linear loss](figures/linear_loss.png)
+| model | what it learns | error (RMSE, in output units) |
+|---|---|---|
+| one linear neuron | a flat line through the average | 21.0 |
+| one ReLU neuron | the right arm only, flat everywhere else | 18.2 |
+| ReLU layer, two neurons | the whole V | 1.9 |
 
-**Part 2, ReLU neuron, motor data** ($x$ = voltage in V, $y$ = speed in rad/s). A real DC motor does not
-move until the voltage beats friction, then speed grows linearly; the data is about
-$\mathrm{ReLU}(2x - 6)$ plus noise. Starting from $m = 1, b = 0$ (so most points are on the active side and
-the neuron is not dead) gradient descent ends at $m = 1.983$, $b = -5.850$, $L = 0.0084$. The fitted
-dead band ends at $x = -b/m = 2.95$ V; the data's first non-zero speed is between 3 and 4 V.
-
-![relu fit](figures/relu_fit.png)
-![relu loss](figures/relu_loss.png)
-
-## 4. What the plots say
-
-- **Loss drops in two regimes.** The steep direction ($m$) is fixed in the first two or three epochs; the
-  shallow direction ($b$) takes hundreds more. On the log axis the second regime is a straight line, the
-  geometric decay you expect from a quadratic bowl with a small eigenvalue.
-- **The grey lines in the fit plots are iterations 0 to 5**, the ones in the spreadsheet. For the linear
-  neuron the slope is already right by iteration 2; the line then slides upward as $b$ catches up.
-- **The ReLU neuron learns the dead band without being told where it is.** Points in the flat part only
-  push on the fit when the hinge is wrongly placed over them (then $g_i = 1$ and they count); once the
-  hinge moves past them they go silent. The ReLU loss curve has a long slow stretch while the kink walks
-  from $x = 0$ out to $x \approx 3$ V.
-- **Why $\eta = 0.02$:** section 1.5 bounds it at 0.038 for this data. At $\eta = 0.04$ the linear run
-  diverges; at $\eta = 0.005$ it needs four times the epochs.
+A straight line has nothing to grab onto in a V, so the best it can do is sit at the average and its loss never moves. One ReLU neuron bends once, so it follows one arm and gives up on the other. Two ReLU neurons facing opposite ways put a hinge on each side of the bottom, at x = 57.8 and x = 61.4, and what is left over is about the size of the scatter in the data. That is the whole idea the finger counter is built on. It just has a million weights instead of seven.
