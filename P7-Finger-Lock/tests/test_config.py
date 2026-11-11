@@ -7,7 +7,7 @@ from lock import config
 
 def test_load_repo_config():
     cfg = config.load()
-    assert cfg["code"] == [2, 5, 3]
+    assert cfg["code"] == [1, 4, 3]
     assert len(cfg["roi"]) == 3
 
 

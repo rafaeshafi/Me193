@@ -102,7 +102,8 @@ def main():
             dx = {KEY_LEFT: -0.01, KEY_RIGHT: 0.01}.get(key, 0)
             dy = {KEY_UP: -0.01, KEY_DOWN: 0.01}.get(key, 0)
             ds = {ord("-"): -0.02, ord("="): 0.02}.get(key, 0)
-            roi = [min(max(roi[0] + dx, 0), 1 - roi[2]), min(max(roi[1] + dy, 0), 1 - roi[2]), min(max(roi[2] + ds, 0.1), 1)]
+            size = min(max(roi[2] + ds, 0.1), 1)
+            roi = [min(max(roi[0] + dx, 0), 1 - size), min(max(roi[1] + dy, 0), 1 - size), size]
         elif key == ord("w"):
             import json
             path = ROOT / "config.json"

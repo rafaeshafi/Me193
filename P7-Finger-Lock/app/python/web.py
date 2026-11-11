@@ -3,13 +3,16 @@
 GET /            the page              GET /state  one snapshot (JSON)     GET /roi.jpg  the latest crop
 GET /stats       the timing summary    POST /button  the button (for testing without wiring it)
 POST /reset      clear failed attempts (and a lockout)
+POST /motor/move?n=50  /motor/run?dir=1  /motor/stop  /motor/release  /motor/speed?ms=20  /motor/zero   the stepper by hand
 """
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
+MOTOR = {"move": ("n", -100000, 100000), "run": ("dir", -1, 1), "speed": ("ms", 2, 500), "stop": None, "release": None, "zero": None}
 PAGE = (HERE / "page.html").read_bytes()
 
 
@@ -56,6 +59,17 @@ class Handler(BaseHTTPRequestHandler):
             if self.safe.lock.state == "LOCKOUT":
                 self.safe.lock._go("IDLE")
             self._json({"state": self.safe.lock.state})
+        elif path.startswith("/motor/") and path[7:] in MOTOR:
+            cmd, spec = path[7:], MOTOR[path[7:]]
+            args = ()
+            if spec:
+                key, lo, hi = spec
+                try:
+                    args = (max(lo, min(hi, int(parse_qs(urlparse(self.path).query).get(key, ["x"])[0]))),)
+                except ValueError:
+                    self._send(400, "text/plain", f"{key} must be an integer".encode())
+                    return
+            self._json(self.safe.motor(cmd, *args))
         else:
             self._send(404, "text/plain", b"not found")
 

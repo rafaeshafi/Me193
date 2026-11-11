@@ -19,3 +19,12 @@ lego-docs/
 
 # Cloned instructor repo (re-pull: git clone https://github.com/chrisbuerginrogers/ME193-Robotics.git me193-robotics)
 me193-robotics/
+
+# Browser automation scratch
+.playwright-mcp/
+
+# Old nested clone of this repo
+/Me193/
+
+# Secrets
+**/.env

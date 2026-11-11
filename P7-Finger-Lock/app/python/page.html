@@ -9,10 +9,13 @@
  .bar{height:14px;background:#555;margin:3px 0;position:relative} .bar i{display:block;height:100%;background:#888} .bar.win i{background:#ffd500}
  .bar b{position:absolute;left:4px;top:-2px;font-size:12px} button{font-size:18px;padding:8px 18px;margin-right:8px}
  small{color:#999} #led{display:inline-block;width:18px;height:18px;border-radius:50%;margin-right:6px;vertical-align:middle}
+ #nocam{display:none;width:256px;height:256px;border:2px solid #444;box-sizing:border-box;padding:12px;color:#f44;font-weight:700}
+ h2{font-size:16px;margin:22px 0 4px} .motor button{min-width:58px;margin:0;touch-action:none;user-select:none} .motor .row{gap:8px}
+ .hold{background:#264;color:#eee;border:1px solid #466} .stop{background:#733;color:#eee;border:1px solid #966} #pos{font-family:Menlo,monospace;color:#ffd500}
 </style></head><body>
 <h1>🔐 Finger Lock <small id="meta"></small></h1>
 <div class="row">
- <div><img id="roi" alt="what the net sees"><br><small>the desk square, as the net sees it</small></div>
+ <div><img id="roi" alt="what the net sees" style="display:none"><div id="nocam">NO CAMERA<br><small>plug the USB webcam into the board; the app picks it up by itself</small></div><br><small>the desk square, as the net sees it</small></div>
  <div style="min-width:260px">
   <div id="state" class="IDLE">IDLE</div>
   <div id="digits">_ _ _</div>
@@ -23,8 +26,25 @@
   <p><small id="timing"></small></p>
  </div>
 </div>
+<div class="motor">
+<h2>Motor <small>by hand, while the lock is idle · <span id="pos">?</span> steps from closed</small></h2>
+<div class="row">
+ <button onclick="post('/motor/move?n=-50')">−50</button><button onclick="post('/motor/move?n=-10')">−10</button><button onclick="post('/motor/move?n=-1')">−1</button>
+ <button onclick="post('/motor/move?n=1')">+1</button><button onclick="post('/motor/move?n=10')">+10</button><button onclick="post('/motor/move?n=50')">+50</button>
+</div>
+<div class="row">
+ <button class="hold" id="back">◀ hold</button><button class="hold" id="fwd">hold ▶</button>
+ <button class="stop" onclick="post('/motor/stop')">stop</button><button onclick="post('/motor/release')">release coils</button><button onclick="post('/motor/zero')">here = closed</button>
+</div>
+<div class="row">
+ <input id="ms" type="range" min="2" max="200" value="20" oninput="$('msl').textContent=this.value+' ms a step'" onchange="post('/motor/speed?ms='+this.value)"> <small id="msl">20 ms a step</small>
+</div>
+</div>
 <script>
 const $=id=>document.getElementById(id);
+function hold(id,dir){const b=$(id),start=e=>{e.preventDefault();post('/motor/run?dir='+dir);},end=e=>{e.preventDefault();post('/motor/stop');};
+ b.addEventListener('pointerdown',start);for(const ev of ['pointerup','pointerleave','pointercancel'])b.addEventListener(ev,end);}
+hold('back',-1); hold('fwd',1);
 function post(p){fetch(p,{method:'POST'});}
 function led(id,on,c){const e=$(id);e.style.display='inline-block';e.style.width='18px';e.style.height='18px';e.style.borderRadius='50%';e.style.marginRight='6px';e.style.verticalAlign='middle';e.style.background=on?c:'#333';}
 async function tick(){
@@ -35,7 +55,9 @@ async function tick(){
   $('bars').innerHTML=(s.probs||[]).map((p,i)=>'<div class="bar'+(i===s.cls?' win':'')+'"><i style="width:'+(100*p)+'%"></i><b>'+i+' fingers '+(100*p).toFixed(0)+'%</b></div>').join('');
   led('r',s.leds[0],'#f33'); led('g',s.leds[1],'#3f3'); $('leds').textContent='attempts '+s.attempts;
   $('meta').textContent=(s.camera?'camera on':'NO CAMERA')+' · '+s.engine; $('timing').textContent='inference '+(s.inference_ms??'-')+' ms · '+(s.fps??'-')+' fps · frame '+s.frames;
-  $('roi').src='/roi.jpg?'+Date.now();
+  $('pos').textContent=s.pos??'?';
+  $('roi').style.display=s.camera?'':'none'; $('nocam').style.display=s.camera?'none':'block';
+  if(s.camera) $('roi').src='/roi.jpg?'+Date.now();
  }catch(e){ $('meta').textContent='no connection'; }
 }
 setInterval(tick,250); tick();

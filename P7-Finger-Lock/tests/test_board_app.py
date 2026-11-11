@@ -45,11 +45,13 @@ def test_frame_drives_policy_and_mcu(main):
     assert FakeBridge.provided["button"](1) is True and safe.lock.state == "LISTENING"
     safe.tick()
     assert ("leds", (3,)) in FakeBridge.calls  # both LEDs on while listening
+    assert ("screen", (1, b"")) in FakeBridge.calls  # the TFT shows LISTENING with no digits yet
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
     frame[:128, :128] = synth.hand(2, np.random.default_rng(0))
     safe.on_frame(frame)
     s = safe.snapshot()
-    assert len(s["probs"]) == 6 and s["frames"] == 1 and s["engine"] == "numpy"
+    assert len(s["probs"]) == 6 and s["frames"] == 1 and s["engine"] == "numpy" and "pos" in s
+    assert safe.motor("move", 50) == {"pos": None} and ("move", (50,)) in FakeBridge.calls  # the page's motor panel
     assert safe.stats()["frames"] == 1
 
 

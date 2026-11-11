@@ -8,5 +8,9 @@ profiles:
       - DebugLog (0.8.4)
       - ArxContainer (0.7.0)
       - ArxTypeTraits (0.3.1)
+      - Adafruit GFX Library (1.12.1)
+      - Adafruit BusIO (1.17.2)
+      - Adafruit ILI9341 (1.6.1)
+      - Adafruit ST7735 and ST7789 Library (1.11.0)
 
 default_profile: default

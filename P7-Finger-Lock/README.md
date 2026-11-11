@@ -10,7 +10,7 @@ ME 193 midterm, Tufts, November 2026.
 |---|---|
 | Net | 3 x (conv 3x3 → ReLU → max-pool 2) with 16 / 32 / 64 filters, linear 4096 → 64 → 6, cross-entropy; 285,894 weights |
 | Input | the desk square, grayscale 128 x 128 |
-| Decision | same class ≥ 0.85 confidence for 8 frames in a row = a digit; hand must leave before the next; 3 digits vs the code |
+| Decision | same class ≥ 0.85 confidence for 30 frames in a row (3 s) = a digit; hand must leave before the next; 3 digits vs the code |
 | Board | UNO Q: webcam → numpy net → policy → 13x8 matrix + 2 LEDs + stepper latch; page on port 8080 |
 | Results | `docs/results.md` (written by the training script), `docs/comparison.md` (UNO Q vs Mac) |
 
@@ -65,9 +65,9 @@ probabilities, a button for testing without wiring one). Logs: `adb shell tail -
 ## The lock policy
 
 `lock/policy.py`, fed one probability vector per frame. IDLE → button → LISTENING (LEDs on, 20 s to enter). A digit
-is accepted when the same class 1..5 is the arg-max with confidence ≥ 0.85 for 8 consecutive frames (0.8 s at 10 fps);
+is accepted when the same class 1..5 is the arg-max with confidence ≥ 0.85 for 30 consecutive frames (3 s at 10 fps);
 then the hand must release (3 frames of no hand or another class) before the next digit can start, so a held hand is
-one digit. Three digits are compared with the code in order: UNLOCKED (latch open 5 s, green) or DENIED (red, 2 s).
+one digit. Three digits are compared with the code in order: UNLOCKED (latch open 10 s, green) or DENIED (red, 2 s).
 Three failures in a row → LOCKOUT 30 s (button ignored, red blinks, the failing hand's picture is saved to
 `data/intruders/`). The code must be three different digits in 1..5; `config.json` is refused otherwise.
 

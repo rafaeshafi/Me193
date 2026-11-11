@@ -1,7 +1,7 @@
 {
   "code": [
-    2,
-    5,
+    1,
+    4,
     3
   ],
   "camera": 0,
@@ -11,19 +11,19 @@
   ],
   "fps": 10,
   "roi": [
-    0.294,
-    0.225,
-    0.55
+    0.13,
+    0.13,
+    0.87
   ],
   "input_size": 128,
   "min_confidence": 0.85,
-  "hold_frames": 8,
+  "hold_frames": 30,
   "gap_frames": 3,
   "entry_timeout_s": 20,
-  "unlock_s": 5,
+  "unlock_s": 10,
   "deny_s": 2,
   "max_attempts": 3,
   "lockout_s": 30,
-  "servo_open_ms": 5000,
+  "servo_open_ms": 10000,
   "web_port": 8080
 }

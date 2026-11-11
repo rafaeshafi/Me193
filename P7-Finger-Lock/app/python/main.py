@@ -40,8 +40,10 @@ stats = Stats()
 class Outputs:
     """What the MCU shows; only changes are sent over the Bridge (a call costs a few ms)."""
 
+    STATES = {"IDLE": 0, "LISTENING": 1, "UNLOCKED": 2, "DENIED": 3, "LOCKOUT": 4}  # as the sketch's kStateName
+
     def __init__(self):
-        self.leds_sent, self.frame_sent, self.failures = None, None, 0
+        self.leds_sent, self.frame_sent, self.screen_sent, self.failures = None, None, None, 0
 
     def _call(self, name, *args):
         try:
@@ -63,8 +65,22 @@ class Outputs:
         if b != self.frame_sent and self._call("draw", b):
             self.frame_sent = b
 
+    def screen(self, state, entered):
+        """The TFT: the state and the digits entered so far, sent when either changes."""
+        key = (state, tuple(entered))
+        if key != self.screen_sent and self._call("screen", self.STATES.get(state, 0), bytes(entered)):
+            self.screen_sent = key
+
     def unlock(self, ms):
         self._call("unlock", int(ms))
+
+    def motor(self, name, *args):
+        """Manual motor control from the page (move/run/stop/release/speed/zero/pos); the MCU's answer, None if it failed."""
+        try:
+            return Bridge.call(name, *args, timeout=2)
+        except Exception as exc:
+            log.warning("bridge %s%s failed (%s)", name, args, exc)
+            return None
 
 
 class Safe:
@@ -108,14 +124,22 @@ class Safe:
             self.lock.tick()
             snap = self.lock.snapshot()
         self.out.leds(*snap["leds"])
+        self.out.screen(snap["state"], snap["entered"])
         self.out.draw(matrix.picture(dict(snap, timeout_total=cfg["entry_timeout_s"]), time.monotonic() - self.t0))
+
+    def motor(self, cmd, *args):
+        """POST /motor/<cmd> on the page -> the sketch; the motor only moves while the latch is closed."""
+        self.out.motor(cmd, *args)
+        log.info("motor %s %s", cmd, args)
+        return {"pos": self.out.motor("pos")}
 
     def snapshot(self):
         with self._lock:
             snap = self.lock.snapshot()
         s = stats.summary()
         snap.update({"cls": self.cls, "fps": s.get("fps"), "inference_ms": s.get("inference", {}).get("mean_ms"),
-                     "camera": self.camera_ok, "frames": self.frames, "engine": engine.name, "code_len": len(cfg["code"])})
+                     "camera": self.camera_ok, "frames": self.frames, "engine": engine.name, "code_len": len(cfg["code"]),
+                     "pos": self.out.motor("pos")})
         return snap
 
     def stats(self):

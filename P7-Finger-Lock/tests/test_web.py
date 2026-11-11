@@ -23,6 +23,12 @@ class FakeSafe:
     def button(self):
         return self.lock.press_button()
 
+    motor_calls = []
+
+    def motor(self, cmd, *args):
+        self.motor_calls.append((cmd, args))
+        return {"pos": 7}
+
 
 @pytest.fixture
 def server():
@@ -59,6 +65,18 @@ def test_roi_404_then_jpeg(server):
         get(base + "/roi.jpg")
     safe.roi_jpg = b"\xff\xd8fake"
     assert get(base + "/roi.jpg?1")[1] == "image/jpeg"
+
+
+def test_motor_routes_clamp_and_reject(server):
+    safe, base = server
+    assert post(base + "/motor/move?n=50") == {"pos": 7}
+    post(base + "/motor/run?dir=5")  # clamped to 1
+    post(base + "/motor/speed?ms=1")  # clamped to 2
+    post(base + "/motor/stop")
+    assert safe.motor_calls == [("move", (50,)), ("run", (1,)), ("speed", (2,)), ("stop", ())]
+    for bad in ("/motor/bogus", "/motor/move?n=abc"):
+        with pytest.raises(urllib.error.HTTPError):
+            post(base + bad)
 
 
 def test_reset_clears_lockout(server):
