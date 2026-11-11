@@ -306,8 +306,8 @@ def scene_stack(m, sample, net, meta):
     m.scene("Three layers deep", "My network does this three times. Convolution, ReLU, pooling, with sixteen filters, "
             "then thirty-two, then sixty-four. Each stage sees a bigger piece of the hand: the first finds edges, the "
             "second joins edges into strokes, the third tells a finger-shaped stroke from a palm. By the end the picture "
-            "is sixty-four tiny 8 by 8 maps. That whole stack has twenty-three thousand weights; the picture went in as "
-            "four thousand numbers and comes out as four thousand numbers that mean something.")
+            "is sixty-four small 16 by 16 maps. That whole stack has twenty-three thousand weights; the picture went in as "
+            "sixteen thousand numbers and comes out as sixteen thousand numbers that mean something.")
     acts = net.activations(sample)
     stages = [(f"input\n1 x {SIZE} x {SIZE}", acts[0][1][0], 22), (f"conv 16 + ReLU + pool\n16 x {SIZE // 2} x {SIZE // 2}", dict(acts)["maxpool1"][2], 17),
               (f"conv 32 + ReLU + pool\n32 x {SIZE // 4} x {SIZE // 4}", dict(acts)["maxpool2"][5], 13), (f"conv 64 + ReLU + pool\n64 x {SIZE // 8} x {SIZE // 8}", dict(acts)["maxpool3"][7], 9)]
@@ -322,7 +322,7 @@ def scene_stack(m, sample, net, meta):
             if i:
                 arrow(ax, x - 8, 26, x - 1, 26)
         if k == 4:
-            say(ax, 64, 8, f"{meta_params(meta, 'conv'):,} weights in the three convolutions; the input 4,096 numbers → 4,096 numbers that mean something", 11, GREY, ha="center")
+            say(ax, 64, 8, f"{meta_params(meta, 'conv'):,} weights in the three convolutions; the input {SIZE * SIZE:,} numbers → {64 * (SIZE // 8) ** 2:,} numbers that mean something", 11, GREY, ha="center")
         m.frame(fig, m.seconds(4))
 
 
@@ -332,7 +332,7 @@ def meta_params(meta, which):
 
 def scene_linear(m, sample, net):
     m.scene("Flatten, linear layer, softmax", "Now the decision. The 64 little maps are unrolled into one long line of "
-            "4,096 numbers. A linear layer takes a weighted sum of all of them for each of 64 hidden units, then one "
+            "16,384 numbers. A linear layer takes a weighted sum of all of them for each of 64 hidden units, then one "
             "more linear layer turns those into six scores, one per answer: zero to five fingers. Softmax squashes the "
             "six scores into probabilities that add up to one. The biggest probability is the network's answer. For "
             "this hand it says three fingers, and you can read how sure it is.")
@@ -344,12 +344,12 @@ def scene_linear(m, sample, net):
         for i in range(8):
             r, c = divmod(i, 4)
             imshow_box(ax, acts["maxpool3"][i], 4 + c * 6, 36 - r * 6, 5, 5, cmap="viridis", edge=GREY, lw=0.8)
-        say(ax, 14, 24, "64 maps of 8x8", 11, GREY, ha="center")
+        say(ax, 14, 24, f"64 maps of {SIZE // 8}x{SIZE // 8}", 11, GREY, ha="center")
         if step >= 1:
             arrow(ax, 30, 36, 36, 36)
             ax.imshow(flat[None, :256], extent=(38, 62, 34, 38), cmap="viridis", aspect="auto")
             ax.add_patch(Rectangle((38, 34), 24, 4, fill=False, ec=GREY))
-            say(ax, 50, 42, "flatten: 4,096 numbers in a row", 11, GREY, ha="center")
+            say(ax, 50, 42, f"flatten: {64 * (SIZE // 8) ** 2:,} numbers in a row", 11, GREY, ha="center")
         if step >= 2:
             arrow(ax, 64, 36, 70, 36)
             ax.imshow(hidden[None, :], extent=(72, 84, 34, 38), cmap="viridis", aspect="auto")
@@ -395,7 +395,7 @@ def scene_gradient(m, meta):
     m.scene("Gradient descent", "Every weight gets nudged to make that loss smaller. Picture the loss as a bowl and the "
             "weights as a ball somewhere on its wall. The gradient is the slope under the ball. Gradient descent takes "
             "a small step downhill: new weight equals old weight minus the learning rate times the slope. Do that for "
-            "all 286 thousand weights, on every batch of pictures, for forty passes over the data, and the loss curve "
+            "all one million weights, on every batch of pictures, for a hundred passes over the data, and the loss curve "
             "falls like this. The real curve from my training run is drawn here, one epoch per step.")
     xs = np.linspace(-3, 3, 100)
     pos = [2.6]
@@ -466,7 +466,7 @@ def scene_backprop(m):
 
 
 def scene_augment(m, sample):
-    m.scene("More pictures for free", "I took around a thousand pictures, but the network wants more. So every time "
+    m.scene("More pictures for free", "I took about nine hundred pictures, but the network wants more. So every time "
             "a picture is used, it is rotated a little, shifted, scaled, flipped and re-lit, differently each time. The "
             "label stays the same: a rotated three is still a three. This is augmentation, and it is what makes the lock "
             "forgive a hand that is not exactly where the training hand was.")
@@ -487,9 +487,9 @@ def scene_augment(m, sample):
 
 def scene_policy(m):
     m.scene("The lock policy", "Finally the lock. Press the button and it listens. Ten times a second the network "
-            "says what it sees. A digit counts only when the same answer comes back for eight frames in a row with "
+            "says what it sees. A digit counts only when the same answer comes back for thirty frames in a row, three seconds, with "
             "high confidence, so a flicker is ignored; then the hand has to leave before the next digit starts. "
-            "Three digits make a code. If they match, the servo opens the latch for five seconds. If not, red light, "
+            "Three digits make a code. If they match, the stepper turns the bolt open for ten seconds. If not, red light, "
             "and after three wrong tries the safe ignores the button for half a minute.")
     seq = [("2", 0.3), ("2", 0.7), ("2", 1.0), ("5", 0.5), ("5", 1.0), ("3", 0.6), ("3", 1.0)]
     for step, (d, prog) in enumerate(seq + [("ok", 1.0)]):
@@ -504,7 +504,7 @@ def scene_policy(m):
             say(ax, 90, 34, "hold …", 13, GREY, ha="center")
         else:
             say(ax, 90, 44, "2 5 3 = code → UNLOCKED", 18, GREEN, ha="center")
-            say(ax, 90, 34, "servo opens 5 s, green LED", 13, GREY, ha="center")
+            say(ax, 90, 34, "bolt opens 10 s, green LED", 13, GREY, ha="center")
         say(ax, 64, 14, "wrong code → red, 3 wrong → 30 s lockout", 13, RED, ha="center")
         m.frame(fig, m.seconds(2.5))
 

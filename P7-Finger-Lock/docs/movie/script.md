@@ -24,11 +24,11 @@ Then max pooling. The feature map is cut into 2 by 2 blocks and only the biggest
 
 ## 6. Three layers deep  (1:13 to 1:29)
 
-My network does this three times. Convolution, ReLU, pooling, with sixteen filters, then thirty-two, then sixty-four. Each stage sees a bigger piece of the hand: the first finds edges, the second joins edges into strokes, the third tells a finger-shaped stroke from a palm. By the end the picture is sixty-four tiny 8 by 8 maps. That whole stack has twenty-three thousand weights; the picture went in as four thousand numbers and comes out as four thousand numbers that mean something.
+My network does this three times. Convolution, ReLU, pooling, with sixteen filters, then thirty-two, then sixty-four. Each stage sees a bigger piece of the hand: the first finds edges, the second joins edges into strokes, the third tells a finger-shaped stroke from a palm. By the end the picture is sixty-four small 16 by 16 maps. That whole stack has twenty-three thousand weights; the picture went in as sixteen thousand numbers and comes out as sixteen thousand numbers that mean something.
 
 ## 7. Flatten, linear layer, softmax  (1:29 to 1:46)
 
-Now the decision. The 64 little maps are unrolled into one long line of 4,096 numbers. A linear layer takes a weighted sum of all of them for each of 64 hidden units, then one more linear layer turns those into six scores, one per answer: zero to five fingers. Softmax squashes the six scores into probabilities that add up to one. The biggest probability is the network's answer. For this hand it says three fingers, and you can read how sure it is.
+Now the decision. The 64 little maps are unrolled into one long line of 16,384 numbers. A linear layer takes a weighted sum of all of them for each of 64 hidden units, then one more linear layer turns those into six scores, one per answer: zero to five fingers. Softmax squashes the six scores into probabilities that add up to one. The biggest probability is the network's answer. For this hand it says three fingers, and you can read how sure it is.
 
 ## 8. Cross-entropy loss  (1:46 to 1:59)
 
@@ -36,7 +36,7 @@ How does it learn? During training the right answer is known, because I typed it
 
 ## 9. Gradient descent  (1:59 to 2:52)
 
-Every weight gets nudged to make that loss smaller. Picture the loss as a bowl and the weights as a ball somewhere on its wall. The gradient is the slope under the ball. Gradient descent takes a small step downhill: new weight equals old weight minus the learning rate times the slope. Do that for all 286 thousand weights, on every batch of pictures, for forty passes over the data, and the loss curve falls like this. The real curve from my training run is drawn here, one epoch per step.
+Every weight gets nudged to make that loss smaller. Picture the loss as a bowl and the weights as a ball somewhere on its wall. The gradient is the slope under the ball. Gradient descent takes a small step downhill: new weight equals old weight minus the learning rate times the slope. Do that for all one million weights, on every batch of pictures, for a hundred passes over the data, and the loss curve falls like this. The real curve from my training run is drawn here, one epoch per step.
 
 ## 10. Back-propagation  (2:52 to 3:13)
 
@@ -44,11 +44,11 @@ Where do the slopes come from? Back-propagation. The loss is computed at the end
 
 ## 11. More pictures for free  (3:13 to 3:28)
 
-I took around a thousand pictures, but the network wants more. So every time a picture is used, it is rotated a little, shifted, scaled, flipped and re-lit, differently each time. The label stays the same: a rotated three is still a three. This is augmentation, and it is what makes the lock forgive a hand that is not exactly where the training hand was.
+I took about nine hundred pictures, but the network wants more. So every time a picture is used, it is rotated a little, shifted, scaled, flipped and re-lit, differently each time. The label stays the same: a rotated three is still a three. This is augmentation, and it is what makes the lock forgive a hand that is not exactly where the training hand was.
 
 ## 12. The lock policy  (3:28 to 3:49)
 
-Finally the lock. Press the button and it listens. Ten times a second the network says what it sees. A digit counts only when the same answer comes back for eight frames in a row with high confidence, so a flicker is ignored; then the hand has to leave before the next digit starts. Three digits make a code. If they match, the servo opens the latch for five seconds. If not, red light, and after three wrong tries the safe ignores the button for half a minute.
+Finally the lock. Press the button and it listens. Ten times a second the network says what it sees. A digit counts only when the same answer comes back for thirty frames in a row, three seconds, with high confidence, so a flicker is ignored; then the hand has to leave before the next digit starts. Three digits make a code. If they match, the stepper turns the bolt open for ten seconds. If not, red light, and after three wrong tries the safe ignores the button for half a minute.
 
 ## 13. The end  (3:49 to 3:54)
 
