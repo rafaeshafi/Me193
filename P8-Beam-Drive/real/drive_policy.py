@@ -4,6 +4,7 @@
     python real/drive_policy.py                  # drive with the policy for 10 s
     python real/drive_policy.py --seconds 20
     python real/drive_policy.py --open-loop 50   # no policy: both beams at 50 %, to compare against
+    python real/drive_policy.py --flip           # once, if the robot walks the wrong way: reverse it and save that
 
 Before every drive: put the beams in the Onshape pose (both flat, left bar pointing forward, right bar
 pointing back), set the robot down pointing where it should go, and keep it still until it starts.
@@ -114,10 +115,14 @@ def drive(robot, params, seconds, open_loop):
     step = 1 / params["loop_hz"]
     percent_per_unit = params["max_speed_rad_s"] / real["rad_s_per_percent"]   # a command of 1.0, in percent
 
+    # The hub's own "forward" may be the robot's backward. Then its left motor is also the robot's right one,
+    # so the two sides swap as well as changing sign.
+    swap = real["forward_sign"] < 0
+
     def read():
         left, right, yaw = robot.raw()
-        return (math.radians(left) * real["left_count_sign"], math.radians(right) * real["right_count_sign"],
-                math.radians(yaw) * real["yaw_sign"])
+        left, right = math.radians(left) * real["left_count_sign"], math.radians(right) * real["right_count_sign"]
+        return (right, left, math.radians(yaw) * real["yaw_sign"]) if swap else (left, right, math.radians(yaw) * real["yaw_sign"])
 
     input("Beams in the Onshape pose, robot on the table pointing straight. Press Enter to start...")
     robot.zero()
@@ -139,7 +144,7 @@ def drive(robot, params, seconds, open_loop):
             else:
                 action = np.full(2, open_loop / 100 * real["rad_s_per_percent"] * 100 / params["max_speed_rad_s"])
             percent = np.clip(action * percent_per_unit, -100, 100) * real["forward_sign"]
-            robot.drive(percent[0], percent[1])
+            robot.drive(*(percent[::-1] if swap else percent))
             log.writerow([f"{now:.3f}", f"{math.degrees(now_read[2]):.1f}", f"{now_read[0]:.3f}", f"{now_read[1]:.3f}",
                           f"{action[0]:.3f}", f"{action[1]:.3f}"])
             if tick % params["loop_hz"] == 0:
@@ -153,6 +158,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the trained policy on the real Double Motor.")
     parser.add_argument("--check", action="store_true", help="find the motor directions and speed, once")
     parser.add_argument("--seconds", type=float, default=10.0, help="how long to drive, 1 to 60 (default 10)")
+    parser.add_argument("--flip", action="store_true", help="reverse the driving direction and save it, then exit")
     parser.add_argument("--open-loop", type=float, metavar="PERCENT", help="no policy: both beams at this percent, 1 to 100")
     args = parser.parse_args()
     if not 1 <= args.seconds <= 60:
@@ -161,6 +167,13 @@ if __name__ == "__main__":
         parser.error("--open-loop must be between 1 and 100")
     params = json.loads(PARAMS.read_text())
     params.setdefault("real", {})
+    if args.flip:
+        for key in ("forward_sign", "left_count_sign", "right_count_sign"):
+            if key not in params["real"]:
+                sys.exit("Run  python real/drive_policy.py --check  first")
+            params["real"][key] *= -1
+        PARAMS.write_text(json.dumps(params, indent=2) + "\n")
+        sys.exit(f"Reversed. forward_sign is now {params['real']['forward_sign']}.")
     robot = Robot(params["real"])
     try:
         check(robot, params) if args.check else drive(robot, params, args.seconds, args.open_loop)

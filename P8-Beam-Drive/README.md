@@ -11,10 +11,12 @@ the robot zig-zags and drifts. The policy times the two beams against each other
 | | Simulation | Real robot |
 |---|---|---|
 | No policy, both motors at 50 % | ends about 8 degrees off line after 5 s | drifted up to 52 degrees off line in 10 s |
-| With the policy | 0.87 m in 10 s, within 1 cm of the line, heading within 6 degrees | heading within 12 to 18 degrees over four 10 s runs |
+| With the policy | 0.87 m in 10 s, within 1 cm of the line, heading within 6 degrees | heading within 13 to 19 degrees over three 10 s runs |
 
-The real runs used an early checkpoint of the same training run (round 50 of 300). The robot's weight in the
-simulation is an estimate (150 g, 4 g per beam frame), and the real robot's distance travelled was not measured.
+The three real runs in the table used the final policy (13:52 to 13:55 in `data/real/`); four earlier runs with
+a round-50 checkpoint gave 12 to 18 degrees. The robot's weight in the simulation is an estimate (150 g, 4 g per
+beam frame), and the real robot's distance travelled was not measured. After those runs the driving direction
+was reversed with `--flip` (the robot was walking short end first); that setting has not been run on the robot yet.
 
 Videos: `data/sim/open_loop_onshape.mp4` (no policy), `data/sim/policy_onshape.mp4` (trained policy).
 Real-robot logs: `data/real/run_*.csv`.
@@ -67,7 +69,7 @@ x0.8 to 1.2, command delay up to 0.1 s, sensor noise, start heading up to 17 deg
 
 ```
 python -m venv .venv && .venv/bin/pip install mujoco==3.11.0 mjlab==1.6.0 legoeducation pytest imageio imageio-ffmpeg
-.venv/bin/python -m pytest tests -q                      # 14 tests
+.venv/bin/python -m pytest tests -q                      # 15 tests
 .venv/bin/python robot/from_onshape.py                   # after a new Onshape export
 .venv/bin/python sim/open_loop.py 50 5                   # no policy, 50 % for 5 s
 cd runs && ../.venv/bin/python ../sim/train.py Beam-Straight --env.scene.num-envs 1024 --agent.max-iterations 300 --gpu-ids None
@@ -80,6 +82,7 @@ On the real robot (set the Connection Card under `"real"` in `robot/params.json`
 .venv/bin/python real/drive_policy.py --check            # once, robot held in the air
 .venv/bin/python real/drive_policy.py                    # drive with the policy for 10 s
 .venv/bin/python real/drive_policy.py --open-loop 50     # no policy, to compare
+.venv/bin/python real/drive_policy.py --flip             # once, if it walks the wrong way
 ```
 
 Before each drive, put the beams in the Onshape pose: both flat, left bar forward, right bar back.

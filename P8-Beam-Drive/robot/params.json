@@ -21,9 +21,9 @@
   "real": {
     "card_color": "orange",
     "card_serial": "1133",
-    "forward_sign": 1,
-    "left_count_sign": -1,
-    "right_count_sign": 1,
+    "forward_sign": -1,
+    "left_count_sign": 1,
+    "right_count_sign": -1,
     "yaw_sign": 1,
     "rad_s_per_percent": 0.1658
   }
