@@ -1,0 +1,72 @@
+<?xml version="1.0" ?>
+<!-- Generated using onshape-to-robot -->
+<!-- Onshape https://cad.onshape.com/documents/5aa97472cb22ea47a4496ded/w/7f6aeccc2265158f946f0297/e/8c4e8fec9c72af6112143784 -->
+<mujoco model="onshape">
+  <compiler angle="radian" meshdir="assets" autolimits="true"/>
+  <default>
+    <default class="onshape">
+      <joint frictionloss="0.1" armature="0.005"/>
+      <position kp="50" dampratio="1"/>
+      <default class="visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="2"/>
+      </default>
+      <default class="collision">
+        <geom group="3"/>
+      </default>
+    </default>
+  </default>
+  <worldbody>
+    <!-- Link part_1 -->
+    <body name="part_1" pos="0 0 0" quat="1 0 0 0" childclass="onshape">
+      <inertial pos="0 0 0" mass="1e-09" fullinertia="1e-09 1e-09 1e-09 0 0 0"/>
+      <!-- Part part_1 -->
+      <geom type="mesh" class="visual" pos="0.0573057 0.00809275 0.0206912" quat="0 -0.707107 0.707107 0" mesh="part_1" material="part_1_material"/>
+      <geom type="mesh" class="collision" pos="0.0573057 0.00809275 0.0206912" quat="0 -0.707107 0.707107 0" mesh="part_1" material="part_1_material"/>
+      <!-- Link part_1_2 -->
+      <body name="part_1_2" pos="0.0334557 -0.0179073 0.00474123" quat="0.00103283 -0.00103283 0.707106 0.707106">
+        <!-- Joint from part_1 to part_1_2 -->
+        <joint axis="0 0 1" name="left_wheel"/>
+        <inertial pos="0 0 0" mass="1e-09" fullinertia="1e-09 1e-09 1e-09 0 0 0"/>
+        <!-- Part part_1_2 -->
+        <geom type="mesh" class="visual" pos="-7.50249e-05 0.0054 -0.0260185" quat="0.5 0.5 -0.5 0.5" mesh="part_1__2" material="part_1__2_material"/>
+        <geom type="mesh" class="collision" pos="-7.50249e-05 0.0054 -0.0260185" quat="0.5 0.5 -0.5 0.5" mesh="part_1__2" material="part_1__2_material"/>
+        <!-- Part part_1_3 -->
+        <geom type="mesh" class="visual" pos="0 0 0" quat="0.707107 0.707107 -0 0" mesh="part_1__3" material="part_1__3_material"/>
+        <geom type="mesh" class="collision" pos="0 0 0" quat="0.707107 0.707107 -0 0" mesh="part_1__3" material="part_1__3_material"/>
+      </body>
+      <!-- Link part_1_3 -->
+      <body name="part_1_3" pos="0.0334557 0.0340927 0.00474123" quat="0.707107 0.707107 0.000165439 -0.000165439">
+        <!-- Joint from part_1 to part_1_3 -->
+        <joint axis="0 0 1" name="right_wheel"/>
+        <inertial pos="0 0 0" mass="1e-09" fullinertia="1e-09 1e-09 1e-09 0 0 0"/>
+        <!-- Part part_1_4 -->
+        <geom type="mesh" class="visual" pos="0 0 -0" quat="0.707107 0.707107 0 0" mesh="part_1__3" material="part_1__3_material"/>
+        <geom type="mesh" class="collision" pos="0 0 -0" quat="0.707107 0.707107 0 0" mesh="part_1__3" material="part_1__3_material"/>
+        <!-- Part part_1_5 -->
+        <geom type="mesh" class="visual" pos="-7.50249e-05 0.0054 -0.0260185" quat="0.5 0.5 -0.5 0.5" mesh="part_1__2" material="part_1__2_material"/>
+        <geom type="mesh" class="collision" pos="-7.50249e-05 0.0054 -0.0260185" quat="0.5 0.5 -0.5 0.5" mesh="part_1__2" material="part_1__2_material"/>
+      </body>
+    </body>
+    <!-- Link part_1_4 -->
+    <body name="part_1_4" pos="0 0 0" quat="1 0 0 0" childclass="onshape">
+      <freejoint name="part_1_4_freejoint"/>
+      <inertial pos="0 0 0" mass="1e-09" fullinertia="1e-09 1e-09 1e-09 0 0 0"/>
+      <!-- Part part_1_6 -->
+      <geom type="mesh" class="visual" pos="0.0334557 0.00769252 0.00474123" quat="1 0 0 0" mesh="part_1__3" material="part_1__3_material"/>
+      <geom type="mesh" class="collision" pos="0.0334557 0.00769252 0.00474123" quat="1 0 0 0" mesh="part_1__3" material="part_1__3_material"/>
+    </body>
+  </worldbody>
+  <asset>
+    <mesh file="part_1__2.stl"/>
+    <mesh file="part_1__3.stl"/>
+    <mesh file="part_1.stl"/>
+    <material name="part_1_material" rgba="0.615686 0.811765 0.929412 1"/>
+    <material name="part_1__2_material" rgba="0.615686 0.811765 0.929412 1"/>
+    <material name="part_1__3_material" rgba="0.615686 0.811765 0.929412 1"/>
+  </asset>
+  <actuator>
+    <position class="onshape" name="left_wheel" joint="left_wheel"/>
+    <position class="onshape" name="right_wheel" joint="right_wheel"/>
+  </actuator>
+  <equality/>
+</mujoco>

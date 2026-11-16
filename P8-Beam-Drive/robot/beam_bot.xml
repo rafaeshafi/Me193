@@ -1,0 +1,51 @@
+<mujoco model="onshape">
+  <compiler angle="radian" meshdir="../onshape/assets/"/>
+
+  <default>
+    <default class="onshape">
+      <joint armature="0.005" frictionloss="0.1"/>
+      <general biastype="affine" gainprm="50" biasprm="0 -50 1"/>
+      <default class="visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="2"/>
+      </default>
+      <default class="collision">
+        <geom group="3"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <material name="part_1_material" rgba="0.615686 0.811765 0.929412 1"/>
+    <material name="part_1__2_material" rgba="0.615686 0.811765 0.929412 1"/>
+    <material name="part_1__3_material" rgba="0.615686 0.811765 0.929412 1"/>
+    <mesh name="part_1__2" file="part_1__2.stl"/>
+    <mesh name="part_1__3" file="part_1__3.stl"/>
+    <mesh name="part_1" file="part_1.stl"/>
+  </asset>
+
+  <worldbody>
+    <body name="chassis" childclass="onshape" pos="0 0 0.0352923">
+      <geom class="visual" pos="-6.88903e-10 -3.72695e-12 -0.015225" quat="0.707107 0 0 0.707107" density="0" material="part_1_material" mesh="part_1"/>
+      <geom class="collision" pos="-6.88903e-10 -3.72695e-12 -0.015225" quat="0.707107 0 0 0.707107" type="mesh" priority="1" friction="0.3" mass="0.142" material="part_1_material" mesh="part_1"/>
+      <body name="part_1_2" pos="-0.02385 0.026 0.00072497" quat="0.00103283 0.00103283 -0.707106 0.707106">
+        <joint name="left_wheel" pos="0 0 0" axis="0 0 -1" armature="0.0002" damping="0.0005" frictionloss="0"/>
+        <geom class="visual" pos="-7.50249e-05 0.0054 -0.0260185" quat="0.5 0.5 -0.5 0.5" density="0" material="part_1__2_material" mesh="part_1__2"/>
+        <geom class="collision" pos="-7.50249e-05 0.0054 -0.0260185" quat="0.5 0.5 -0.5 0.5" type="mesh" priority="1" friction="0.6" mass="0.002" material="part_1__2_material" mesh="part_1__2"/>
+        <geom class="visual" quat="0.707107 0.707107 0 0" density="0" material="part_1__3_material" mesh="part_1__3"/>
+        <geom class="collision" quat="0.707107 0.707107 0 0" type="mesh" priority="1" friction="0.6" mass="0.002" material="part_1__3_material" mesh="part_1__3"/>
+      </body>
+      <body name="part_1_3" pos="-0.02385 -0.026 0.00072497" quat="-0.707107 0.707107 0.000165439 0.000165439">
+        <joint name="right_wheel" pos="0 0 0" axis="0 0 1" armature="0.0002" damping="0.0005" frictionloss="0"/>
+        <geom class="visual" quat="0.707107 0.707107 0 0" density="0" material="part_1__3_material" mesh="part_1__3"/>
+        <geom class="collision" quat="0.707107 0.707107 0 0" type="mesh" priority="1" friction="0.6" mass="0.002" material="part_1__3_material" mesh="part_1__3"/>
+        <geom class="visual" pos="-7.50249e-05 0.0054 -0.0260185" quat="0.5 0.5 -0.5 0.5" density="0" material="part_1__2_material" mesh="part_1__2"/>
+        <geom class="collision" pos="-7.50249e-05 0.0054 -0.0260185" quat="0.5 0.5 -0.5 0.5" type="mesh" priority="1" friction="0.6" mass="0.002" material="part_1__2_material" mesh="part_1__2"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <general name="left_wheel" joint="left_wheel" forcelimited="true" forcerange="-0.08 0.08" biastype="affine" gainprm="0.02" biasprm="0 0 -0.02"/>
+    <general name="right_wheel" joint="right_wheel" forcelimited="true" forcerange="-0.08 0.08" biastype="affine" gainprm="0.02" biasprm="0 0 -0.02"/>
+  </actuator>
+</mujoco>
